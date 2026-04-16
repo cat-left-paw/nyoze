@@ -1,13 +1,267 @@
-# Nyoze
+# Nyoze Beta
 
-Nyoze is a vertical-writing Markdown editor with WYSIWYG editing for literary writing and articles.
+Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 
-Public source code and beta releases will be published here.
-Beta release preparation is in progress.
+- 小説やエッセイを縦書きでそのまま書けます
+- Markdown 形式で保存されますが、普通のテキストとして扱えます
+- ルビや縦中横など、日本語の表現にも対応しています
 
+Nyoze は、縦書き日本語執筆を主目的とした Markdown エディタです。
+beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter / 画像の最低限の互換があること、原稿を壊さず保存往復できることを優先しています。
+
+詳細な操作は [MANUAL.md](./MANUAL.md) を参照してください。
+
+## こんな人に向いています
+
+- 小説や文章を縦書きで書きたい
+- Markdown を使ってみたいが、難しい操作はできるだけ避けたい
+- テキストファイルで原稿を管理したい
+- ルビや縦中横を使いながら、日本語の文章を気持ちよく書きたい
+
+## この README で使う言葉
+
+- **Markdown**: 見出しや強調などを、簡単な記号で書けるテキスト形式です
+- **frontmatter**: 文書のタイトルや著者名などを入れる、文書冒頭の `---` で囲まれた領域です
+- **WYSIWYG**: 記号を直接見ながらではなく、見た目に近い形で編集できる表示です
+
+## 主な特徴
+
+- 縦書きでそのまま編集できます
+- 見た目のまま書ける編集画面があります
+- ルビや縦中横に対応しています
+- `.md` だけでなく `.txt` もそのまま開いて保存できます
+- 原稿を壊さず保存往復することを重視しています
+
+## この beta 版の位置づけ
+
+- 単体デスクトップアプリとして Markdown を編集し、縦書き・横書きで執筆できます
+- 文芸用途を主対象としつつ、ブログ記事や技術文書などの `Article` 文書も扱えます
+- `Document Type` を `Novel` / `Article` で切り替えることで、文書に合った改行解釈で執筆できます
+- beta では「執筆・保存・再読込・最低限の文書管理」までを提供範囲にします
+- 現時点では、執筆体験と原稿保全を優先しています
+
+## できること
+
+- 縦書き / 横書きの切り替え
+- WYSIWYG 編集
+- 複数タブでの文書の表示と編集
+- File Explorer からのファイル作成 / 名前変更 / 複製 / 移動 / ゴミ箱への削除
+- WYSIWYG での 自動 TCY （縦中横）表示（表示のみ、初期 OFF、数字だけ対象のオプションあり、保存内容は不変）
+- 独自記法を使った明示 TCY（縦中横）
+- 青空文庫形式のルビ、傍点への対応
+- ルビ表示 / 非表示の切り替え
+- WYSIWYG コードブロックの表示専用シンタックスハイライト、言語ラベル、本文コピー
+- `Paragraph Plain` による段落単位の Markdown ソース編集（その段落だけをテキストとして直接編集できます）
+- `Source Mode` による全文 Markdown ソース編集（文書全体をテキストとして編集できます）
+- 検索 / 置換
+- ローカル画像参照付き Markdown の表示
+- frontmatter（文書のタイトルや著者名などを入れる領域）の読み取り表示
+- `Document Settings` からの限定編集（`Document Type` / `title` / `author` / `translator`）
+- `Document Type` の `Novel` / `Article` 切り替え
+- `Document Type` の切り替えによる改行ポリシー変更
+- 文芸用途と、ブログ記事 / 技術文書系の両方に合わせた文書運用
+- 通常編集上のリンクを `Cmd/Ctrl + Click` で外部ブラウザに開く導線（`https://` の絶対 URL のみ）
+- 見出しの折りたたみ / 展開
+- 折りたたまれた見出しの簡易プレビュー
+- アウトラインパネルからの見出しジャンプ
+- アウトラインパネル上での見出しプレビュー
+- リスト（箇条書きリスト、番号付きリスト、チェックリスト）のアウトライナー的な操作
+- 豊富なテーマ切り替え
+- GUI での簡単なテーマ編集と表示設定の調整
+- ファイル保存、再読込、外部編集競合の最小保護
+
+## 今後対応予定のもの
+
+- `.md` の OS 全体関連付け
+- `Open With` からの起動引き渡し
+- OS からの drag and drop による文書読み込み
+- frontmatter の一般編集 UI
+- epub / pdf / 印刷 などへの出力
+- テーブルや数式への対応
+- ページレイアウト編集
+- 書籍モード
+- ショートカット再割り当て
+- 高度な競合解決 UI
+
+## 正式な読み込み導線
+
+beta 版で正式にサポートする読み込み導線は **アプリ内の `Load`** です。
+
+- `Load`: ファイルまたはフォルダを開く
+- `Shift + Load`: 新規タブで空の文書を作る
+
+未対応導線:
+
+- drag and drop
+- `Open With`
+
+これらは beta 版の正式機能として扱いません。
+
+## `.txt` と `.md` について
+
+Nyoze は `.md` だけでなく、`.txt` の文書もそのまま開いて編集できます。
+
+- `Load` では `.md` / `.markdown` / `.txt` を開けます
+- すでに `.txt` で書いている原稿も、そのまま読み込んで使えます
+- `.txt` で開いた文書は、`.txt` のまま保存できます
+- `.md` も `.txt` も中身はテキストです。違いは「この文書を Markdown として扱うことを、拡張子でわかりやすくしているかどうか」に近いです
+- frontmatter（文書冒頭の `---` で囲まれた値）を入れている場合も、その内容は普通のテキストとしてそのまま保存されます
+
+ただし、古いテキストエディタや文芸向けエディタで作られた `.txt` は、Shift-JIS / CP932 のことがあります。Nyoze beta で実用上対応している文字コードは UTF-8 のみです。Shift-JIS / CP932 の `.txt` はそのままでは開けないため、先に UTF-8 へ変換してから使ってください。
+
+Nyoze で見出し、太字、リスト、リンクなどの Markdown 記法を使った部分は、一般的なテキストエディタで開くとそのまま記号として見えます。
+
+たとえば、Nyoze では太字として見えていても、普通のテキストエディタでは `**このように**` と表示されます。
+
+frontmatter を付けている場合も、普通のテキストエディタでは次のようにそのまま表示されます。
+
+```text
 ---
+title: 作品名
+author: 著者名
+---
+```
 
-Nyoze は、文芸用途と記事執筆に対応した、WYSIWYG編集対応の縦書きMarkdownエディタです。
+そのため、
 
-公開ソースコードと beta リリースをこのリポジトリで公開します。
-現在、beta 版公開の準備中です。
+- まずは慣れた `.txt` の原稿をそのまま開いて試す
+- Markdown として扱うことをはっきりさせたい原稿は `.md` にする
+
+という使い分けができます。
+
+## frontmatter の扱い
+
+- frontmatter は文書先頭の raw prefix として保持します
+- 保存往復で勝手に壊さないことを優先しています
+- beta では一般的な YAML 編集 UI はありません
+- 右ペインの `Document Settings` から限定キーだけを明示操作で更新できます
+- 上記以外の frontmatter を編集したい場合は `Source Mode` を使ってください
+
+## 対応環境
+
+beta 版で配布対象として扱うのは次の環境です。
+
+- macOS:
+  - Apple Silicon Mac 用 DMG（`arm64`）
+  - Intel Mac 用 DMG（`x64`）
+- Windows: NSIS installer
+- Linux: beta 初回では公式パッケージなし
+
+macOS 版は 2 種類あります。
+
+- `arm64`: Apple Silicon Mac 用です。M1 / M2 / M3 / M4 などの Mac はこちらです
+- `x64`: Intel Mac 用です。古い Intel 搭載 Mac はこちらです
+
+間違った方を入れると、起動できない、または著しく遅くなることがあります。自分の Mac の種類に合ったものを使ってください。
+
+Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run build` を試せます。ただし実機検証は未実施で、公式サポート対象は macOS / Windows の配布物を優先します。Electron / Linux に慣れている場合は、必要に応じて `electron-builder` で Linux 向けパッケージを作成できますが、beta 初回では公式配布物としては提供しません。
+
+## ダウンロード
+
+beta 版は **GitHub Releases の配布物をダウンロードして使う** 想定です。  
+通常の利用では、ソースコードからのビルドは不要です。
+
+想定している導線:
+
+- macOS:
+  - Apple Silicon Mac: `arm64` の DMG をダウンロードして起動
+  - Intel Mac: `x64` の DMG をダウンロードして起動
+- Windows: Installer をダウンロードしてインストール
+
+## ソースコードから試す場合
+
+Linuxユーザーや、開発版を手元で試したい人向けの手順です。
+
+前提:
+
+- Node.js 20 以上推奨
+- npm 10 以上推奨
+
+初期化:
+
+```bash
+npm install
+```
+
+開発起動:
+
+```bash
+npm run dev
+```
+
+ビルド:
+
+```bash
+npm run build
+```
+
+配布物を作る場合:
+
+```bash
+npm run package
+```
+
+macOS で現在の実行環境に対応する arch の配布物を作る場合は、上の `npm run package` で十分です。
+
+macOS の `arm64` / `x64` の両方を明示的に作る場合:
+
+```bash
+npm run package:mac:arm64
+npm run package:mac:x64
+```
+
+配布物は `release/<version>/` に出力されます。beta 初回の公式配布物は macOS DMG / Windows installer を対象とし、Linux 向け公式パッケージはまだ提供していません。`npm run package` は通常、その実行環境に対応する 1 つの macOS DMG を作ります。macOS DMG は arch を含む名前で出力されます。
+
+- `Nyoze-Mac-<version>-arm64-Installer.dmg`
+- `Nyoze-Mac-<version>-x64-Installer.dmg`
+
+## 既知の制限
+
+- 正式な読み込み導線は `Load` のみです
+- drag and drop は未対応です
+- `Open With` は未対応です
+- `.md` の関連付けは未対応です
+- Linux 向け公式パッケージは beta 初回では提供していません
+- frontmatter の一般編集 UI はありません
+- 複雑な YAML の編集は `Source Mode` での編集が前提です
+- 高度な競合解決やマージ UI はありません
+- コードブロックのシンタックスハイライトは WYSIWYG 表示のみです。言語未指定・未対応言語では自動判定せず、プレーン表示になります
+- 文書内リンクは `Cmd/Ctrl + Click` で外部ページへ移動できます。通常クリックでは開きません
+- `Cmd/Ctrl + Click` で開ける文書内リンクは、`https://` の認証情報なし絶対 URL のみです。`http://`、`mailto:`、`tel:`、相対リンク、文書内アンカーは通常編集上の外部オープン対象ではありません
+- 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
+- 重く感じたときは、まずルビ表示をオフにする、`Paragraph Plain` を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
+- beta 版では、開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります
+- beta で完全保持しない代表例は、GFM table、reference-style link / link definition、footnote、definition list、複雑な list / blockquote、code fence の文字種・長さ・空行、softbreak / hardbreak の表記差分です
+- `Source Mode` も beta では raw save 専用導線ではありません。Apply / Save 時に Nyoze の parser / serializer を通るため、上記の未対応構文や表記差分は正規化される場合があります
+- beta で実用上対応している文字コードは UTF-8 のみです。UTF-8 として読み込めないファイルは通常編集対象として開きません。Shift-JIS / CP932 などの原稿は、先に UTF-8 へ変換してから使ってください。改行コードは可能な範囲で LF / CRLF を維持しますが、混在 EOL や BOM / 複数 encoding の完全な保存往復は post-beta 対象です
+- beta では安定性と原稿保全を優先しているため、導線や表現がまだ粗い箇所があります
+
+## ドキュメント
+
+- 操作マニュアル: [MANUAL.md](./MANUAL.md)
+- beta リリースノート: [RELEASE_NOTES.md](./RELEASE_NOTES.md)
+
+beta テスター向けの既知制限、配布上の注意、報告時の注意は `RELEASE_NOTES.md` を正本としてまとめています。
+
+## ライセンス
+
+Nyoze は GNU Affero General Public License v3.0 or later の下で公開されています。詳細は [LICENSE](./LICENSE) を参照してください。
+
+Copyright (C) 2026 猫乃 左手 (cat-left-paw) and Nyoze Project.
+
+公式リリースは `cat-left-paw/nyoze` から配布します。改変版を配布する場合は、著作権表示・ライセンス表示を保持し、公式版と誤認されないようにしてください。詳しくは [NOTICE](./NOTICE) を参照してください。
+
+## フィードバック
+
+beta 版のフィードバック導線はアプリ内にあります。
+
+- Help → `フィードバックを送る`
+- `View Settings` → `サポート` → `フィードバックを送る`
+
+バグ報告では、少なくとも次があると助かります。
+
+- OS
+- 使用していた版
+- 再現手順
+
+報告前の注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md) を参照してください。

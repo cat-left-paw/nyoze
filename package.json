@@ -1,0 +1,65 @@
+{
+  "name": "nyoze",
+  "productName": "Nyoze",
+  "private": true,
+  "version": "0.1.0-beta.1",
+  "description": "Vertical writing Markdown editor for Japanese writing",
+  "author": "Nyoze Project",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/cat-left-paw/nyoze",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cat-left-paw/nyoze.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cat-left-paw/nyoze/issues"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/run-with-clean-electron-env.mjs vite",
+    "build": "tsc && vite build",
+    "package": "npm run build && node scripts/run-with-clean-electron-env.mjs electron-builder",
+    "package:mac:arm64": "npm run build && node scripts/package-mac-arch.mjs arm64",
+    "package:mac:x64": "npm run build && node scripts/package-mac-arch.mjs x64"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.0",
+    "@tabler/icons-react": "^3.36.1",
+    "@tiptap/core": "^2.27.2",
+    "@tiptap/extension-bold": "^2.27.2",
+    "@tiptap/extension-code-block-lowlight": "^2.27.2",
+    "@tiptap/extension-italic": "^2.27.2",
+    "@tiptap/extension-link": "^2.15.4",
+    "@tiptap/extension-strike": "^2.27.2",
+    "@tiptap/react": "^2.15.4",
+    "@tiptap/starter-kit": "^2.15.4",
+    "lowlight": "^2.9.0",
+    "markdown-it": "^14.1.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/react": "^18.2.64",
+    "@types/react-dom": "^18.2.21",
+    "@typescript-eslint/eslint-plugin": "^7.1.1",
+    "@typescript-eslint/parser": "^7.1.1",
+    "@vitejs/plugin-react": "^4.2.1",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.8.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "playwright": "^1.59.1",
+    "tsx": "^4.20.3",
+    "typescript": "^5.2.2",
+    "vite": "^6.4.1",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.5"
+  },
+  "main": "dist-electron/main.js"
+}

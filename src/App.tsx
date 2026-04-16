@@ -1,0 +1,2675 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import type {
+  CommandAvailability,
+  EditorCoreHandle,
+  LineBreakPolicy,
+  LogEntry,
+} from "./editor-core/types";
+import {
+  type FrontmatterFields,
+  parseFrontmatterFields,
+  splitLeadingFrontmatter,
+} from "./editor-core/io/frontmatter";
+import {
+  canSafelyPatchFrontmatter,
+  patchFrontmatterKnownScalars,
+  resolveDocumentType,
+  resolveTypeDerivedLineBreakPolicy,
+} from "./editor-core/io/frontmatterDocumentSettings";
+import type { DocumentType } from "./editor-core/io/frontmatterDocumentSettings";
+import {
+  DEFAULT_APP_TITLE_CUSTOM,
+  DEFAULT_APP_TITLE_FONT,
+  DEFAULT_APP_TITLE_PRESET,
+  DEFAULT_APP_TITLE_VISIBLE,
+  DEFAULT_DISPLAY_SETTINGS,
+  DEFAULT_DOC_FONT_PRESET,
+  DEFAULT_DOC_HEADING_FONT,
+  DEFAULT_FRONTMATTER_SHOW_AUTHORS,
+  DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
+  DEFAULT_FRONTMATTER_SHOW_TRANSLATORS,
+  DEFAULT_FRONTMATTER_VISIBLE,
+  DEFAULT_TOOLBAR_ICON_STROKE,
+  DEFAULT_TOOLBAR_SCALE,
+  DEFAULT_UI_FONT_SCALE,
+  DOCUMENT_THEME_COLOR_PRESETS,
+  UI_THEME_DOC_COLOR_PRESETS,
+} from "./settings/defaults";
+import type {
+  DocumentColorSettings,
+  DocumentTheme,
+  Theme,
+} from "./settings/types";
+import { usePaneLayout } from "./ui/hooks/usePaneLayout";
+import { useFileExplorer } from "./ui/hooks/useFileExplorer";
+import { useEditorCoreBridge } from "./ui/hooks/useEditorCoreBridge";
+import { useRubyBoutenPrompt } from "./ui/hooks/useRubyBoutenPrompt";
+import { useEditorContextMenu } from "./ui/hooks/useEditorContextMenu";
+import { useSearchUiState } from "./ui/hooks/useSearchUiState";
+import { useLargeDocumentGuard } from "./ui/hooks/useLargeDocumentGuard";
+import { useGlobalShortcuts } from "./ui/hooks/useGlobalShortcuts";
+import { useUndoRedoRouting } from "./ui/hooks/useUndoRedoRouting";
+import { useE2eBridge } from "./ui/hooks/useE2eBridge";
+import { useImeProfiler } from "./ui/hooks/useImeProfiler";
+import type { ImeProfilerSessionSummary } from "./ui/hooks/useImeProfiler";
+import { useImePhaseAUpdateGate } from "./ui/hooks/useImePhaseAUpdateGate";
+import { useImePhaseBRubySuspend } from "./ui/hooks/useImePhaseBRubySuspend";
+import {
+  appendImeProfilerJsonLogEntry,
+  readImeProfilerJsonLogs,
+  writeImeProfilerJsonLogs,
+} from "./ui/hooks/imeProfilerJsonLog";
+import { useTabManager, MAX_OPEN_TABS } from "./ui/hooks/useTabManager";
+import {
+  guardSourceModeDraft as guardSourceModeDraftImpl,
+} from "./ui/hooks/sourceModeDraftGuard";
+import {
+  saveAllDirtyTabsBeforeCloseDetailed,
+  saveTabWithSaveAsDetailed,
+} from "./ui/hooks/saveBeforeClose";
+import type { ActiveTabSaveOutcome } from "./ui/hooks/saveBeforeClose";
+import {
+  EMPTY_COMMAND_AVAILABILITY,
+  type EditorTab,
+  useAppUiState,
+} from "./ui/hooks/useAppUiState";
+import { useSourceModeController } from "./ui/hooks/useSourceModeController";
+import {
+  copySelection,
+  cutSelection,
+  pasteFromClipboard,
+} from "./ui/utils/nativeEditCommands";
+import { getPathBaseName } from "./ui/utils/path";
+import { formatDocumentTypeNoticeMessage } from "./ui/utils/documentTypePresentation";
+import { UnifiedHeader } from "./ui/components/UnifiedHeader";
+import { Workspace } from "./ui/components/Workspace";
+import { DocumentSettingsPanel } from "./ui/components/DocumentSettingsPanel";
+import { EditorContextMenu } from "./ui/components/EditorContextMenu";
+import { DisplaySettingsModal } from "./ui/components/DisplaySettingsModal";
+import { ThemeStudioPanel } from "./ui/components/ThemeStudioModal";
+import { LargeDocumentGuardModal } from "./ui/components/LargeDocumentGuardModal";
+import { LineBreakPolicyConfirmModal } from "./ui/components/LineBreakPolicyConfirmModal";
+import { FileExplorerNamePromptModal } from "./ui/components/FileExplorerNamePromptModal";
+import { FileTransferConflictModal } from "./ui/components/FileTransferConflictModal";
+import { UnsavedChangesModal } from "./ui/components/UnsavedChangesModal";
+import {
+  ExternalEditConflictModal,
+  type ExternalEditConflictAction,
+} from "./ui/components/ExternalEditConflictModal";
+import {
+  SaveFailureModal,
+  type SaveFailureAction,
+  type SaveFailureInfo,
+} from "./ui/components/SaveFailureModal";
+import { BackupWarningNotice } from "./ui/components/BackupWarningNotice";
+import {
+  buildConflictAwareWriteFileOptions,
+  detectExternalEditConflict,
+} from "./ui/utils/externalEditConflict";
+import type {
+  ConflictAwareWriteFileResult,
+  SavedFileStat,
+  SaveErrorKind,
+  ConflictKind,
+} from "./ui/utils/externalEditConflict";
+import { resolvePlainModeKind } from "./ui/utils/plainModeCommandGate";
+// BETA-SP10: 配列生成なし��文字数カウント共有ユーティリティ
+import { countBodyCharacters as countDocumentBodyCharacters } from "./ui/utils/countBodyCharacters";
+// BETA-SP11: EOL fidelity — 保存時に元の改行種別へ戻す
+import { applyEol } from "./editor-core/io/eolHelper";
+import { shouldEnableAutoTcyDisplay } from "./editor-core/features/autoTcy";
+import { resolveCaretColor } from "./theme/caretColor";
+import { PromptModal } from "./ui/components/PromptModal";
+import { SearchBar } from "./ui/components/SearchBar";
+import { ImeProfilerHud } from "./ui/components/ImeProfilerHud";
+
+const BUG_REPORT_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLScBnYx3xCLDvjyApXNyWuzJmIk9N74r4s-zOz0xTmE3IGX2Ww/viewform?usp=publish-editor";
+const FEEDBACK_URL =
+  "https://docs.google.com/forms/d/e/1FAIpQLScKH53jmuErA91Z19iO67AU5iet448XbqpRdaKb7Dj2mQW3jg/viewform?usp=dialog";
+const REPOSITORY_URL = "https://github.com/cat-left-paw/nyoze";
+
+type UnsavedContinueAction = "cancel" | "save" | "discard";
+type FileStatInfo = {
+  ctimeMs: number;
+  mtimeMs: number;
+  size: number;
+};
+type ActiveDocumentInfo = {
+  characterCount: number;
+  createdAtText: string;
+  updatedAtText: string;
+  pathText: string;
+  pathTitle: string;
+};
+type PendingDocumentSettingsChange = {
+  nextFrontmatterPrefix: string;
+  nextFrontmatterFields: FrontmatterFields;
+  nextDocumentType: DocumentType;
+  nextEffectiveLineBreakPolicy: LineBreakPolicy;
+};
+type SaveDocumentTarget = Pick<EditorTab, "id" | "title" | "filePath" | "savedStat">;
+
+// R3.5-2 P2: saveDocument の最終結果を ref 経由で close-before-save ラッパーに渡す。
+type SaveDocumentDetail = {
+  backupWarning?: string;
+  canceled?: boolean;
+  errorKind?: SaveErrorKind;
+  errorMessage?: string;
+};
+
+const DOC_INFO_DATE_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function formatDocumentInfoDate(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  return DOC_INFO_DATE_FORMATTER.format(new Date(ms));
+}
+
+
+function resolveEffectiveLineBreakPolicyForDocumentSettings(
+  frontmatterFields: FrontmatterFields,
+  tabLineBreakPolicy: LineBreakPolicy,
+): LineBreakPolicy {
+  const explicitPolicy = frontmatterFields.nyozeLineBreakPolicy;
+  if (
+    explicitPolicy === "obsidian-paragraph" ||
+    explicitPolicy === "commonmark-strict"
+  ) {
+    return explicitPolicy;
+  }
+  const typeDerivedPolicy = resolveTypeDerivedLineBreakPolicy(
+    resolveDocumentType(frontmatterFields),
+  );
+  return typeDerivedPolicy ?? tabLineBreakPolicy;
+}
+
+function resolveProfilerDocumentId(
+  override: string | null,
+  filePath: string | null,
+  fallbackTitle: string,
+): string {
+  if (override && override.trim().length > 0) return override.trim();
+  if (filePath && filePath.trim().length > 0) return filePath;
+  return fallbackTitle;
+}
+
+function resolveDocThemeColors(
+  docTheme: DocumentTheme,
+  uiTheme: Theme,
+  options?: {
+    activeUiThemePresetId?: string | null;
+    uiThemePresets?: Array<{
+      id: string;
+      colors: {
+        surfaceBg: string;
+        textPrimary: string;
+      };
+    }>;
+  },
+): DocumentColorSettings {
+  if (docTheme === "ui-linked") {
+    const activePresetId = options?.activeUiThemePresetId ?? null;
+    const activePreset = activePresetId
+      ? options?.uiThemePresets?.find((preset) => preset.id === activePresetId)
+      : null;
+    if (activePreset) {
+      return {
+        pageColor: activePreset.colors.surfaceBg,
+        textColor: activePreset.colors.textPrimary,
+        headingColor: activePreset.colors.textPrimary,
+      };
+    }
+    return { ...UI_THEME_DOC_COLOR_PRESETS[uiTheme] };
+  }
+  return { ...DOCUMENT_THEME_COLOR_PRESETS[docTheme] };
+}
+
+function isSystemDocPreset(preset: {
+  id: string;
+  kind?: "system" | "custom";
+}): boolean {
+  if (preset.kind) return preset.kind === "system";
+  return preset.id.startsWith("preset-doc-");
+}
+
+function remapMovedPath(
+  currentPath: string,
+  fromPath: string,
+  toPath: string,
+): string | null {
+  const normalize = (value: string) => {
+    const normalized = value.replace(/\\/g, "/");
+    return normalized === "/" ? normalized : normalized.replace(/\/+$/g, "");
+  };
+  const normalizedCurrent = normalize(currentPath);
+  const normalizedFrom = normalize(fromPath);
+  const normalizedTo = normalize(toPath);
+  const windowsLike =
+    /^[A-Za-z]:/.test(normalizedCurrent) ||
+    /^[A-Za-z]:/.test(normalizedFrom) ||
+    /^[A-Za-z]:/.test(normalizedTo);
+  const toComparable = (value: string) =>
+    windowsLike ? value.toLowerCase() : value;
+  const currentCmp = toComparable(normalizedCurrent);
+  const fromCmp = toComparable(normalizedFrom);
+
+  if (currentCmp === fromCmp) return toPath;
+
+  const prefix = `${fromCmp}/`;
+  if (!currentCmp.startsWith(prefix)) return null;
+  const relative = normalizedCurrent.slice(normalizedFrom.length);
+  const remapped = `${normalizedTo}${relative}`;
+  return toPath.includes("\\") ? remapped.replace(/\//g, "\\") : remapped;
+}
+
+const COMMAND_AVAILABILITY_KEYS: Array<keyof CommandAvailability> = [
+  "hasSelection",
+  "canBold",
+  "canItalic",
+  "canStrike",
+  "canHighlight",
+  "canInlineCode",
+  "canClearFormat",
+  "canBlockTransforms",
+  "canUndo",
+  "canRedo",
+  "canInsertRuby",
+  "canParagraphPlain",
+  "canToggleTcy",
+  "canCopy",
+  "canCut",
+  "canPaste",
+  "canSelectAll",
+  "canMoveListUp",
+  "canMoveListDown",
+  "isHeading",
+  "isBold",
+  "isItalic",
+  "isStrike",
+  "isHighlight",
+  "isInlineCode",
+  "isBulletList",
+  "isOrderedList",
+  "isChecklist",
+  "isBlockquote",
+  "isCodeBlock",
+];
+
+function isSameCommandAvailability(
+  a: CommandAvailability,
+  b: CommandAvailability,
+): boolean {
+  return COMMAND_AVAILABILITY_KEYS.every((key) => a[key] === b[key]);
+}
+
+function App() {
+  const coreRef = useRef<EditorCoreHandle | null>(null);
+  const rubyVisibleRef = useRef(true);
+  const editorDivRef = useRef<HTMLDivElement | null>(null);
+  const sourceModeController = useSourceModeController();
+  const [commandAvailability, setCommandAvailability] =
+    useState<CommandAvailability>(EMPTY_COMMAND_AVAILABILITY);
+
+  const {
+    workspaceRef,
+    leftPaneOpen,
+    rightPaneOpen,
+    leftWidth,
+    rightWidth,
+    setLeftPaneOpen,
+    setRightPaneOpen,
+    handleDividerMouseDown,
+  } = usePaneLayout();
+
+  const ui = useAppUiState({ coreRef });
+  const imeProfilerBuildType: "dev" | "prod" = import.meta.env.DEV
+    ? "dev"
+    : "prod";
+  const handleImeProfilerSessionSummary = useCallback(
+    (summary: ImeProfilerSessionSummary) => {
+      if (!ui.imeProfilerSaveJson) return;
+      const documentId = resolveProfilerDocumentId(
+        ui.imeProfilerBenchmarkDocumentId,
+        ui.activeTab.filePath,
+        ui.activeTab.title || "untitled.md",
+      );
+      const current = readImeProfilerJsonLogs();
+      const next = appendImeProfilerJsonLogEntry(current, summary, {
+        documentId,
+        buildType: imeProfilerBuildType,
+        hudEnabled: ui.imeProfilerShowHud,
+        phaseAEnabled: ui.imePhaseAEnabled,
+        phaseAMinSyncIntervalMs: ui.imePhaseAMinSyncIntervalMs,
+        rubyVisible: ui.rubyVisible,
+        // Phase B is kept only as a compatibility/debug flag and is currently a no-op.
+        rubySuspendDuringComposition: false,
+        inputChars: ui.imeProfilerBenchmarkInputChars,
+      });
+      writeImeProfilerJsonLogs(next);
+      const latest = next[next.length - 1];
+      if (latest) {
+        console.info("[Nyoze][IMEProfiler] benchmark-json", latest);
+      }
+    },
+    [
+      imeProfilerBuildType,
+      ui.activeTab.filePath,
+      ui.activeTab.title,
+      ui.imeProfilerBenchmarkDocumentId,
+      ui.imeProfilerBenchmarkInputChars,
+      ui.imePhaseAEnabled,
+      ui.imePhaseAMinSyncIntervalMs,
+      ui.imeProfilerSaveJson,
+      ui.imeProfilerShowHud,
+      ui.rubyVisible,
+    ],
+  );
+  const {
+    handleCoreLog: handleImeProfilerLog,
+    handleCoreUpdate: handleImeProfilerUpdate,
+    hudSnapshot: imeProfilerHudSnapshot,
+  } = useImeProfiler({
+    enabled: ui.imeProfilerEnabled,
+    showHud: ui.imeProfilerShowHud,
+    logSummary: ui.imeProfilerLogSummary,
+    onSessionSummary: handleImeProfilerSessionSummary,
+  });
+
+  const {
+    promptInputRef,
+    promptModal,
+    promptValue,
+    rubyBoutenTab,
+    boutenValue,
+    customBoutenInput,
+    customBoutenChars,
+    boutenOptions,
+    setPromptValue,
+    setRubyBoutenTab,
+    setBoutenValue,
+    setCustomBoutenInput,
+    imageSrc,
+    imageAlt,
+    imageTitle,
+    setImageSrc,
+    setImageAlt,
+    setImageTitle,
+    openLinkPrompt,
+    openRubyBoutenPrompt,
+    openImagePrompt,
+    handlePromptSubmit,
+    handlePromptCancel,
+    addCustomBoutenChar,
+    removeSelectedCustomBoutenChar,
+  } = useRubyBoutenPrompt({ coreRef });
+
+  const getPlainModeKind = useCallback(
+    () =>
+      resolvePlainModeKind({
+        paragraphPlainModeActive: ui.paragraphPlainModeActive,
+        fullPlainEditActive: ui.fullPlainEditActive,
+      }),
+    [ui.fullPlainEditActive, ui.paragraphPlainModeActive],
+  );
+  const {
+    menu: ctxMenu,
+    menuRef: ctxMenuRef,
+    close: closeCtxMenu,
+  } = useEditorContextMenu(
+    coreRef,
+    editorDivRef,
+    getPlainModeKind,
+    ui.showEditorInlineHint,
+  );
+
+  const search = useSearchUiState({ coreRef });
+  const largeDocGuard = useLargeDocumentGuard();
+  const [unsavedModalOpen, setUnsavedModalOpen] = useState(false);
+  const [activeDocumentCharacterCount, setActiveDocumentCharacterCount] =
+    useState(0);
+  const [activeDocumentStat, setActiveDocumentStat] =
+    useState<FileStatInfo | null>(null);
+  const activeDocumentStatRequestSeqRef = useRef(0);
+  const unsavedActionResolverRef = useRef<
+    ((action: UnsavedContinueAction) => void) | null
+  >(null);
+  // BETA-IO1: External edit conflict modal state
+  const [conflictModalKind, setConflictModalKind] =
+    useState<ConflictKind | null>(null);
+  const conflictActionResolverRef = useRef<
+    ((action: ExternalEditConflictAction) => void) | null
+  >(null);
+  // R3.5-2: Save failure modal state
+  const [saveFailureInfo, setSaveFailureInfo] = useState<SaveFailureInfo | null>(
+    null,
+  );
+  const saveFailureActionResolverRef = useRef<
+    ((action: SaveFailureAction) => void) | null
+  >(null);
+  // R3.5-2: backup warning banner state
+  const [backupWarningMessage, setBackupWarningMessage] = useState<string | null>(
+    null,
+  );
+  // R3.5-2: close-before-save の場合、警告を確認してから window を閉じる必要がある。
+  // resolver が設定されている間は dismiss が close 許可の trigger になる。
+  const backupWarningAckResolverRef = useRef<(() => void) | null>(null);
+
+  // R3.5-2 P2: saveDocument が通常保存でも close-before-save でも使えるよう、
+  // 最新の保存結果を ref に記録する。saveActiveTabForClose がこの ref を読み、
+  // ActiveTabSaveOutcome を構成する。
+  const saveDocumentDetailRef = useRef<SaveDocumentDetail | null>(null);
+
+  const toggleParagraphPlainMode = useCallback(() => {
+    if (ui.fullPlainEditActive) return;
+    const core = coreRef.current;
+    if (!core) return;
+    const next = core.toggleParagraphPlainMode();
+    ui.setParagraphPlainModeActive(next);
+  }, [ui]);
+
+  // Global keyboard shortcuts (marks, headings, list move, outline, search)
+  useGlobalShortcuts({
+    coreRef,
+    sourceModeController,
+    writingMode: ui.writingMode,
+    getPlainModeKind,
+    onOpenSearch: search.openSearch,
+    onOpenSearchReplace: search.openSearchReplace,
+    onOpenLinkPrompt: openLinkPrompt,
+    onShowEditorInlineHint: ui.showEditorInlineHint,
+    onToggleParagraphPlainMode: toggleParagraphPlainMode,
+  });
+
+  const handleCtxHeading = useCallback(
+    (level: number) => coreRef.current?.toggleHeading(level),
+    [],
+  );
+  const handleCtxSelectAll = useCallback(() => {
+    coreRef.current?.selectAll();
+  }, []);
+  const handleCtxMoveUp = useCallback(
+    () => coreRef.current?.moveListItemUp(),
+    [],
+  );
+  const handleCtxMoveDown = useCallback(
+    () => coreRef.current?.moveListItemDown(),
+    [],
+  );
+
+  const handleToggleHeadingFold = useCallback(
+    (pos: number) => {
+      const core = coreRef.current;
+      if (!core) return;
+      core.toggleHeadingFold(pos);
+      ui.setFoldedHeadingPositions(core.getFoldedHeadingPositions());
+    },
+    [ui],
+  );
+
+  const handleRequestHeadingPreview = useCallback((pos: number): string => {
+    return coreRef.current?.getHeadingPreview(pos) ?? "";
+  }, []);
+
+  const refreshActiveDocumentCharacterCount = useCallback(() => {
+    const core = coreRef.current;
+    if (!core) {
+      setActiveDocumentCharacterCount(0);
+      return;
+    }
+    const markdown = core.peekMarkdown();
+    setActiveDocumentCharacterCount(countDocumentBodyCharacters(markdown));
+  }, []);
+
+  const refreshActiveDocumentStat = useCallback(
+    async (pathOverride?: string | null) => {
+      const requestId = ++activeDocumentStatRequestSeqRef.current;
+      const targetPath =
+        pathOverride === undefined ? ui.activeTab.filePath : pathOverride;
+      if (!targetPath) {
+        setActiveDocumentStat(null);
+        return;
+      }
+      const getFileStat = window.nyozeBridge?.fs?.getFileStat;
+      if (typeof getFileStat !== "function") {
+        setActiveDocumentStat(null);
+        return;
+      }
+      const stat = await getFileStat(targetPath).catch(() => null);
+      if (requestId !== activeDocumentStatRequestSeqRef.current) return;
+      setActiveDocumentStat(stat);
+    },
+    [ui.activeTab.filePath],
+  );
+
+  const onCoreLog = ui.onCoreLog;
+  const onCoreSelectionUpdate = ui.onCoreSelectionUpdate;
+  const onCoreUpdateLight = ui.onCoreUpdateLight;
+  const onCoreUpdate = ui.onCoreUpdate;
+  const onCoreReady = ui.onCoreReady;
+
+  const syncCommandAvailability = useCallback(() => {
+    const next =
+      coreRef.current?.getCommandAvailability() ?? EMPTY_COMMAND_AVAILABILITY;
+    setCommandAvailability((prev) =>
+      isSameCommandAvailability(prev, next) ? prev : next,
+    );
+  }, []);
+
+  const performFullCoreUiSync = useCallback(() => {
+    const currentMarkdown = coreRef.current?.peekMarkdown();
+    onCoreUpdate(currentMarkdown);
+    syncCommandAvailability();
+    if (currentMarkdown === undefined) {
+      setActiveDocumentCharacterCount(0);
+      return;
+    }
+    setActiveDocumentCharacterCount(countDocumentBodyCharacters(currentMarkdown));
+  }, [
+    coreRef,
+    onCoreUpdate,
+    syncCommandAvailability,
+  ]);
+
+  const performLightCoreUiSync = useCallback(() => {
+    onCoreUpdateLight();
+    // syncCommandAvailability intentionally omitted during light sync (IME composition).
+    // Toolbar state is not needed while composing; it is flushed on compositionend via full sync.
+  }, [onCoreUpdateLight]);
+
+  const {
+    handleCoreLog: handleImePhaseALog,
+    handleCoreUpdate: handleImePhaseAUpdate,
+    flushDeferredSync: flushImeDeferredUiSync,
+    isComposingRef: imeComposingRef,
+  } = useImePhaseAUpdateGate({
+    enabled: ui.imePhaseAEnabled,
+    minSyncIntervalMs: ui.imePhaseAMinSyncIntervalMs,
+    onFullSync: performFullCoreUiSync,
+    onLightSync: performLightCoreUiSync,
+  });
+
+  const {
+    handleCoreLog: handleImePhaseBLog,
+    forceResumeRuby: forceResumeImeRuby,
+  } = useImePhaseBRubySuspend({
+    enabled: ui.imePhaseBRubySuspendEnabled,
+    rubyVisible: ui.rubyVisible,
+  });
+
+  const flushImeCompositionSideEffects = useCallback(
+    (reason: string) => {
+      flushImeDeferredUiSync(reason);
+      forceResumeImeRuby(reason);
+    },
+    [flushImeDeferredUiSync, forceResumeImeRuby],
+  );
+
+  const handleCoreLog = useCallback(
+    (entry: LogEntry) => {
+      handleImePhaseALog(entry);
+      handleImePhaseBLog(entry);
+      handleImeProfilerLog(entry);
+      onCoreLog(entry);
+      // Post-composition availability safety net: schedule an additional sync
+      // via requestAnimationFrame.  The gate's setTimeout-based flush may fire
+      // while ProseMirror is still in a temporary recomposition state (e.g.,
+      // macOS live conversion with direct Enter), leaving view.composing = true.
+      // rAF fires after all microtasks, MutationObserver callbacks, and
+      // ProseMirror DOM reconciliation, guaranteeing composing is fully cleared.
+      if (entry.event === "compositionend") {
+        requestAnimationFrame(() => {
+          syncCommandAvailability();
+        });
+      }
+    },
+    [handleImePhaseALog, handleImePhaseBLog, handleImeProfilerLog, onCoreLog, syncCommandAvailability],
+  );
+
+  const handleCoreSelectionUpdate = useCallback(() => {
+    // Skip all selection-derived UI sync during IME composition.
+    // onCoreSelectionUpdate() walks the full doc to find the active heading —
+    // expensive in long documents and unnecessary mid-composition.
+    // Full sync fires on compositionend via performFullCoreUiSync.
+    if (imeComposingRef.current) return;
+    onCoreSelectionUpdate();
+    syncCommandAvailability();
+  }, [imeComposingRef, onCoreSelectionUpdate, syncCommandAvailability]);
+
+  const handleCoreUpdate = useCallback(() => {
+    handleImeProfilerUpdate();
+    handleImePhaseAUpdate();
+  }, [handleImePhaseAUpdate, handleImeProfilerUpdate]);
+
+  const handleCoreReady = useCallback(
+    (core: EditorCoreHandle) => {
+      core.setEnableRuby(rubyVisibleRef.current);
+      core.setAutoTcyOptions({
+        enabled: shouldEnableAutoTcyDisplay({
+          autoTcyEnabled: ui.displaySettings.autoTcyEnabled,
+          writingMode: ui.writingMode,
+          fullPlainEditActive: ui.fullPlainEditActive,
+          paragraphPlainModeActive: ui.paragraphPlainModeActive,
+        }),
+        numbersOnly: ui.displaySettings.autoTcyNumbersOnly,
+        minDigits: ui.displaySettings.autoTcyMinDigits,
+        maxDigits: ui.displaySettings.autoTcyMaxDigits,
+      });
+      onCoreReady(core);
+      syncCommandAvailability();
+      refreshActiveDocumentCharacterCount();
+    },
+    [
+      onCoreReady,
+      refreshActiveDocumentCharacterCount,
+      syncCommandAvailability,
+      ui.displaySettings.autoTcyEnabled,
+      ui.displaySettings.autoTcyNumbersOnly,
+      ui.displaySettings.autoTcyMinDigits,
+      ui.displaySettings.autoTcyMaxDigits,
+      ui.fullPlainEditActive,
+      ui.paragraphPlainModeActive,
+      ui.writingMode,
+    ],
+  );
+
+  const {
+    fileExplorerDir,
+    rootDirLoaded: fileExplorerRootLoaded,
+    visibleEntries: fileExplorerEntries,
+    setFileExplorerDir,
+    clipboardMode: fileExplorerClipboardMode,
+    clipboardSourcePath: fileExplorerClipboardSourcePath,
+    operationError: fileExplorerOperationError,
+    transferConflict,
+    namePrompt: fileExplorerNamePrompt,
+    canPaste: canFileExplorerPaste,
+    handleEntryActivate: handleFileSelect,
+    handleEntrySelect: handleFileSelectOnly,
+    handleOpenInNewTab: handleFileOpenInNewTab,
+    handleCreateNote,
+    handleCreateFolder,
+    handleRenameEntry,
+    handleDeleteEntry,
+    handleRevealInFileManager,
+    handleCutSelectedFile,
+    handleCopySelectedFile,
+    handlePasteIntoSelection,
+    resolveTransferConflictByOverwrite,
+    resolveTransferConflictByRename,
+    cancelTransferConflict,
+    cancelNamePrompt: cancelFileExplorerNamePrompt,
+    submitNamePrompt: submitFileExplorerNamePrompt,
+    clearOperationError: clearFileExplorerOperationError,
+    notifyFileSaved: notifyFileExplorerFileSaved,
+  } = useFileExplorer({
+    onFileContentLoaded: async (filePath, content) => {
+      flushImeCompositionSideEffects("file-load-active-tab");
+      const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
+      const saved: SavedFileStat = stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
+      void tabManager.loadIntoActiveTab(
+        filePath,
+        getPathBaseName(filePath),
+        content,
+        saved,
+      );
+    },
+    onOpenFileInNewTab: async (filePath, content) => {
+      flushImeCompositionSideEffects("file-load-new-tab");
+      const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
+      const saved: SavedFileStat = stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
+      const opened = await tabManager.openFileInTab(filePath, getPathBaseName(filePath), content, saved);
+      if (opened === "tab-limit") showTabLimitNotice();
+    },
+    onFileMoved: (fromPath, toPath) => {
+      for (const tab of ui.tabs) {
+        if (!tab.filePath) continue;
+        const remappedPath = remapMovedPath(tab.filePath, fromPath, toPath);
+        if (!remappedPath) continue;
+        ui.patchTab(tab.id, {
+          filePath: remappedPath,
+          title: getPathBaseName(remappedPath),
+        });
+      }
+    },
+  });
+
+  const openExternalEditorLink = useCallback(async (url: string): Promise<boolean> => {
+    const openExternal = window.nyozeBridge?.shell?.openExternal;
+    if (!openExternal) return false;
+    return openExternal(url).catch(() => false);
+  }, []);
+
+  useEditorCoreBridge({
+    coreRef,
+    editorDivRef,
+    initialLineBreakPolicy: ui.initialLineBreakPolicy,
+    onLog: handleCoreLog,
+    onSelectionUpdate: handleCoreSelectionUpdate,
+    onParagraphPlainModeChange: ui.onCoreParagraphPlainModeChange,
+    onLineBreakPolicyChange: ui.onCoreLineBreakPolicyChange,
+    onUpdate: handleCoreUpdate,
+    onFoldChange: ui.onCoreFoldChange,
+    openExternalUrl: openExternalEditorLink,
+    onReady: handleCoreReady,
+  });
+
+  useEffect(() => {
+    if (!ui.imePhaseAEnabled && !ui.imePhaseBRubySuspendEnabled) return;
+
+    const onWindowBlur = () => {
+      flushImeCompositionSideEffects("window-blur");
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "hidden") return;
+      flushImeCompositionSideEffects("visibility-hidden");
+    };
+    const onBeforeUnload = () => {
+      flushImeCompositionSideEffects("beforeunload");
+    };
+
+    window.addEventListener("blur", onWindowBlur);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [
+    flushImeCompositionSideEffects,
+    ui.imePhaseAEnabled,
+    ui.imePhaseBRubySuspendEnabled,
+  ]);
+
+  useEffect(() => {
+    if (!ui.fullPlainEditActive) return;
+    const timer = window.setTimeout(() => {
+      sourceModeController.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sourceModeController, ui.fullPlainEditActive]);
+
+  useEffect(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    core.setAutoTcyOptions({
+      enabled: shouldEnableAutoTcyDisplay({
+        autoTcyEnabled: ui.displaySettings.autoTcyEnabled,
+        writingMode: ui.writingMode,
+        fullPlainEditActive: ui.fullPlainEditActive,
+        paragraphPlainModeActive: ui.paragraphPlainModeActive,
+      }),
+      numbersOnly: ui.displaySettings.autoTcyNumbersOnly,
+      minDigits: ui.displaySettings.autoTcyMinDigits,
+      maxDigits: ui.displaySettings.autoTcyMaxDigits,
+    });
+  }, [
+    ui.displaySettings.autoTcyEnabled,
+    ui.displaySettings.autoTcyNumbersOnly,
+    ui.displaySettings.autoTcyMinDigits,
+    ui.displaySettings.autoTcyMaxDigits,
+    ui.fullPlainEditActive,
+    ui.paragraphPlainModeActive,
+    ui.writingMode,
+  ]);
+
+  // Hard ruby OFF: sync rubyVisible → core.setEnableRuby with save→reload cycle
+  const rubyToggleInProgressRef = useRef(false);
+  const { rubyVisible, fullPlainEditActive, setSuppressNextDirty } = ui;
+  rubyVisibleRef.current = rubyVisible;
+  useEffect(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    if (core.isRubyEnabled() === rubyVisible) return;
+    if (fullPlainEditActive) {
+      // Defer reload until fullPlain exits; do NOT set the flag here so the
+      // mismatch persists and triggers a reload when fullPlainEditActive becomes false.
+      return;
+    }
+    flushImeCompositionSideEffects("ruby-toggle");
+    const md = core.saveMarkdown();
+    core.setEnableRuby(rubyVisible);
+    setSuppressNextDirty(true);
+    rubyToggleInProgressRef.current = true;
+    core.loadMarkdown(md);
+    rubyToggleInProgressRef.current = false;
+    syncCommandAvailability();
+  }, [
+    flushImeCompositionSideEffects,
+    fullPlainEditActive,
+    rubyVisible,
+    setSuppressNextDirty,
+    syncCommandAvailability,
+  ]);
+
+  // BETA-IO1: External edit conflict modal handlers
+  const requestConflictAction = useCallback(
+    (kind: ConflictKind): Promise<ExternalEditConflictAction> =>
+      new Promise((resolve) => {
+        if (conflictActionResolverRef.current) {
+          conflictActionResolverRef.current("cancel");
+        }
+        conflictActionResolverRef.current = resolve;
+        setConflictModalKind(kind);
+      }),
+    [],
+  );
+
+  const resolveConflictAction = useCallback(
+    (action: ExternalEditConflictAction) => {
+      setConflictModalKind(null);
+      const resolver = conflictActionResolverRef.current;
+      conflictActionResolverRef.current = null;
+      if (resolver) resolver(action);
+    },
+    [],
+  );
+
+  // R3.5-2: Save failure modal handlers
+  const requestSaveFailureAction = useCallback(
+    (info: SaveFailureInfo): Promise<SaveFailureAction> =>
+      new Promise((resolve) => {
+        if (saveFailureActionResolverRef.current) {
+          saveFailureActionResolverRef.current("cancel");
+        }
+        saveFailureActionResolverRef.current = resolve;
+        setSaveFailureInfo(info);
+      }),
+    [],
+  );
+
+  const resolveSaveFailureAction = useCallback(
+    (action: SaveFailureAction) => {
+      setSaveFailureInfo(null);
+      const resolver = saveFailureActionResolverRef.current;
+      saveFailureActionResolverRef.current = null;
+      if (resolver) resolver(action);
+    },
+    [],
+  );
+
+  const dismissBackupWarning = useCallback(() => {
+    setBackupWarningMessage(null);
+    const resolver = backupWarningAckResolverRef.current;
+    backupWarningAckResolverRef.current = null;
+    if (resolver) resolver();
+  }, []);
+
+  const showBackupWarningIfPresent = useCallback(
+    (warning: string | undefined | null) => {
+      if (!warning) return;
+      setBackupWarningMessage(warning);
+    },
+    [],
+  );
+
+  // R3.5-2: close-before-save で backupWarning をユーザーに読ませてから close に進む。
+  // 警告がなければ即 resolve。警告がある場合は dismiss されるまで待つ。
+  const acknowledgeBackupWarning = useCallback(
+    (warning: string | undefined | null): Promise<void> => {
+      if (!warning) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const previous = backupWarningAckResolverRef.current;
+        if (previous) previous();
+        backupWarningAckResolverRef.current = resolve;
+        setBackupWarningMessage(warning);
+      });
+    },
+    [],
+  );
+
+  // BETA-IO1: Fetch file stat and update a specific tab's savedStat baseline.
+  // Uses patchTab(tabId, ...) to avoid race when the active tab changes during
+  // the async getFileStat call.
+  const fetchAndPatchSavedStat = useCallback(
+    async (tabId: string, filePath: string) => {
+      const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
+      const saved: SavedFileStat = stat
+        ? { mtimeMs: stat.mtimeMs, size: stat.size }
+        : null;
+      ui.patchTab(tabId, { savedStat: saved });
+    },
+    [ui],
+  );
+
+  const saveDocument = useCallback(
+    async (
+      forceSaveAs: boolean,
+      targetTabOverride?: SaveDocumentTarget,
+    ): Promise<boolean> => {
+      saveDocumentDetailRef.current = null;
+      flushImeCompositionSideEffects("save-document");
+      const core = coreRef.current;
+      if (!core) return false;
+
+      // Capture the target tab id upfront so all post-await metadata updates
+      // go to the tab that initiated the save, not whatever tab is active
+      // at the time async operations complete.
+      const targetTabId = targetTabOverride?.id ?? ui.activeTabId;
+      const currentFilePath =
+        targetTabOverride?.filePath ?? ui.activeTab.filePath;
+      const currentTabTitle = targetTabOverride?.title ?? ui.activeTab.title;
+      const currentSavedStat =
+        targetTabOverride?.savedStat ?? ui.activeTab.savedStat;
+
+      // BETA-Q1: If Full Plain edit is active, apply the draft to core first.
+      // core.saveMarkdown() would return stale content otherwise.
+      if (ui.fullPlainEditActive) {
+        const draftMarkdown =
+          sourceModeController.getValue() ?? ui.fullPlainEditValue;
+        try {
+          core.loadMarkdown(draftMarkdown);
+          const normalizedMarkdown = core.saveMarkdown();
+          const { frontmatterPrefix } =
+            splitLeadingFrontmatter(normalizedMarkdown);
+          // BETA-SP10: 同じ引数で 2 回呼ばないよう 1 回に集約する
+          const normalizedCharCount = countDocumentBodyCharacters(normalizedMarkdown);
+          ui.patchTab(targetTabId, {
+            frontmatterFields: parseFrontmatterFields(frontmatterPrefix),
+            markdownSnapshot: normalizedMarkdown,
+            characterCount: normalizedCharCount,
+          });
+          setActiveDocumentCharacterCount(normalizedCharCount);
+          ui.setFullPlainEditValue(normalizedMarkdown);
+          sourceModeController.setValue(normalizedMarkdown, {
+            resetHistory: true,
+          });
+          ui.setFullPlainEditError("");
+        } catch {
+          ui.setFullPlainEditError(
+            "Markdown適用に失敗しました。保存を中断します。",
+          );
+          saveDocumentDetailRef.current = { canceled: true };
+          return false;
+        }
+      }
+
+      if (!core.commitParagraphPlainIfActive()) {
+        saveDocumentDetailRef.current = { canceled: true };
+        return false;
+      }
+
+      const md = core.saveMarkdown();
+      // BETA-SP11: 元の EOL を復元して書き出す。内部比較用の md は LF のまま保持。
+      const tabEol = ui.activeTab.eol ?? "lf";
+      const mdToWrite = applyEol(md, tabEol);
+      const bridge = window.nyozeBridge?.fs;
+
+      if (bridge?.writeFile && bridge?.saveAs) {
+        const finalizeSuccessfulSave = (
+          savedFilePath: string,
+          backupWarning?: string,
+        ): true => {
+          ui.markDirtyFalseForTab(targetTabId, md);
+          void refreshActiveDocumentStat(savedFilePath);
+          void fetchAndPatchSavedStat(targetTabId, savedFilePath);
+          showBackupWarningIfPresent(backupWarning);
+          saveDocumentDetailRef.current = { backupWarning };
+          return true;
+        };
+
+        const saveCurrentDocumentAs = async (): Promise<boolean> => {
+          const defaultPath = currentFilePath ?? currentTabTitle ?? "document.md";
+          const saveAsResult = await bridge.saveAs(mdToWrite, defaultPath);
+          if (saveAsResult?.saved && saveAsResult.filePath) {
+            ui.patchTab(targetTabId, {
+              title: getPathBaseName(saveAsResult.filePath),
+              filePath: saveAsResult.filePath,
+            });
+            const result = finalizeSuccessfulSave(
+              saveAsResult.filePath,
+              saveAsResult.backupWarning,
+            );
+            void notifyFileExplorerFileSaved(saveAsResult.filePath);
+            return result;
+          }
+          // R3.5-2: saveAs canceled is NOT an error; any other kind (permission,
+          // disk-full, parent-missing, write-failed) must be surfaced so the user
+          // can retry / pick another location / cancel explicitly.
+          const errorKind = saveAsResult?.errorKind;
+          if (!errorKind || errorKind === "canceled") {
+            saveDocumentDetailRef.current = { canceled: true };
+            return false;
+          }
+          return await handleSaveAsFailure({
+            errorKind,
+            errorMessage: saveAsResult?.errorMessage,
+          });
+        };
+
+        // R3.5-2: When writeFile fails with a real error (not cancel, not conflict),
+        // ask the user how to proceed. Returns whether the save ultimately succeeded.
+        const handleWriteFileFailure = async (
+          result: ConflictAwareWriteFileResult | null,
+        ): Promise<boolean> => {
+          const errorKind = result?.errorKind ?? "write-failed";
+          const info: SaveFailureInfo = {
+            tabTitle: currentTabTitle,
+            filePath: currentFilePath,
+            errorKind,
+            errorMessage: result?.errorMessage,
+          };
+          const action = await requestSaveFailureAction(info);
+          if (action === "cancel") {
+            saveDocumentDetailRef.current = { canceled: true };
+            return false;
+          }
+          if (action === "saveAs") return await saveCurrentDocumentAs();
+          // retry: same path, conflict check still active (no allowConflictOverwrite).
+          return await saveCurrentDocumentWithRetry();
+        };
+
+        // R3.5-2: Save As で実エラーが発生したときもモーダルで対処を問う。
+        // saveAs では conflict は出ないので retry は単に saveAs を再実行する。
+        const handleSaveAsFailure = async (details: {
+          errorKind: NonNullable<ConflictAwareWriteFileResult["errorKind"]>;
+          errorMessage?: string;
+        }): Promise<boolean> => {
+          const info: SaveFailureInfo = {
+            tabTitle: currentTabTitle,
+            filePath: currentFilePath,
+            errorKind: details.errorKind,
+            errorMessage: details.errorMessage,
+          };
+          const action = await requestSaveFailureAction(info);
+          if (action === "cancel") {
+            saveDocumentDetailRef.current = { canceled: true };
+            return false;
+          }
+          // retry / saveAs both re-open the Save As dialog.
+          return await saveCurrentDocumentAs();
+        };
+
+        // 通常の再試行: conflict check は有効のまま再書き込みする。
+        const saveCurrentDocumentWithRetry = async (): Promise<boolean> => {
+          if (!currentFilePath) return await saveCurrentDocumentAs();
+          const baseline = currentSavedStat;
+          const retryResult: ConflictAwareWriteFileResult | null =
+            await bridge.writeFile(
+              currentFilePath,
+              mdToWrite,
+              buildConflictAwareWriteFileOptions(baseline),
+            );
+          if (retryResult?.saved) {
+            return finalizeSuccessfulSave(
+              currentFilePath,
+              retryResult.backupWarning,
+            );
+          }
+          if (retryResult?.conflictKind) {
+            const action = await requestConflictAction(retryResult.conflictKind);
+            if (action === "cancel") {
+              saveDocumentDetailRef.current = { canceled: true };
+              return false;
+            }
+            if (action === "saveAs") return await saveCurrentDocumentAs();
+            // overwrite: conflict 上書きを明示的に許可して再試行する。
+            return await saveCurrentDocumentWithOverwrite();
+          }
+          return await handleWriteFileFailure(retryResult);
+        };
+
+        // conflict モーダルで「上書き」を選んだ直後のみ使う。
+        // allowConflictOverwrite を立てて main 側の conflict 検知を bypass する。
+        const saveCurrentDocumentWithOverwrite = async (): Promise<boolean> => {
+          if (!currentFilePath) return await saveCurrentDocumentAs();
+          const baseline = currentSavedStat;
+          const overwriteResult: ConflictAwareWriteFileResult | null =
+            await bridge.writeFile(
+              currentFilePath,
+              mdToWrite,
+              buildConflictAwareWriteFileOptions(baseline, true),
+            );
+          if (overwriteResult?.saved) {
+            return finalizeSuccessfulSave(
+              currentFilePath,
+              overwriteResult.backupWarning,
+            );
+          }
+          // conflict bypass 中の 2 度目 conflict は想定外だが、通常フローへ戻す。
+          if (overwriteResult?.conflictKind) {
+            const action = await requestConflictAction(overwriteResult.conflictKind);
+            if (action === "cancel") {
+              saveDocumentDetailRef.current = { canceled: true };
+              return false;
+            }
+            if (action === "saveAs") return await saveCurrentDocumentAs();
+            return await saveCurrentDocumentWithOverwrite();
+          }
+          return await handleWriteFileFailure(overwriteResult);
+        };
+
+        if (!forceSaveAs && currentFilePath) {
+          // BETA-IO1: Check for external edit conflict before overwriting.
+          const baseline = currentSavedStat;
+          let allowConflictOverwrite = false;
+          if (baseline && bridge.getFileStat) {
+            const currentStat = await bridge.getFileStat(currentFilePath).catch(() => null);
+            const conflict = detectExternalEditConflict(
+              baseline,
+              currentStat ? { mtimeMs: currentStat.mtimeMs, size: currentStat.size } : null,
+            );
+            if (conflict) {
+              const action = await requestConflictAction(conflict);
+              if (action === "cancel") {
+                saveDocumentDetailRef.current = { canceled: true };
+                return false;
+              }
+              if (action === "saveAs") return await saveCurrentDocumentAs();
+              allowConflictOverwrite = true;
+            }
+          }
+
+          const result: ConflictAwareWriteFileResult | null =
+            await bridge.writeFile(
+              currentFilePath,
+              mdToWrite,
+              buildConflictAwareWriteFileOptions(
+                baseline,
+                allowConflictOverwrite,
+              ),
+            );
+          if (result?.saved) {
+            return finalizeSuccessfulSave(currentFilePath, result.backupWarning);
+          }
+          // Not saved — distinguish conflict (BETA-IO1) from other errors.
+          const writeConflict = result?.conflictKind ?? null;
+          if (writeConflict) {
+            const action = await requestConflictAction(writeConflict);
+            if (action === "cancel") {
+              saveDocumentDetailRef.current = { canceled: true };
+              return false;
+            }
+            if (action === "saveAs") return await saveCurrentDocumentAs();
+            // overwrite: 明示的に conflict を上書き許可して再試行する。
+            return await saveCurrentDocumentWithOverwrite();
+          }
+          // R3.5-2: No silent fallback to Save As — ask the user explicitly.
+          return await handleWriteFileFailure(result);
+        }
+
+        // forceSaveAs OR untitled tab — route through Save As.
+        // Save As cancellation surfaces as false but is not an error dialog.
+        return await saveCurrentDocumentAs();
+      }
+
+      const blob = new Blob([mdToWrite], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = currentTabTitle || "document.md";
+      a.click();
+      URL.revokeObjectURL(url);
+      ui.markDirtyFalseForTab(targetTabId, md);
+      return true;
+    },
+    [
+      fetchAndPatchSavedStat,
+      flushImeCompositionSideEffects,
+      notifyFileExplorerFileSaved,
+      refreshActiveDocumentStat,
+      requestConflictAction,
+      requestSaveFailureAction,
+      showBackupWarningIfPresent,
+      sourceModeController,
+      ui,
+    ],
+  );
+
+  // R3.5-2 P2: close-before-save 専用ラッパー。
+  // saveDocument(false) を呼び、ref に記録された詳細情報から ActiveTabSaveOutcome を構成する。
+  // backupWarning / cancel 理由 / errorKind が orchestrator に伝わるようになる。
+  const saveActiveTabForClose = useCallback(
+    async (): Promise<ActiveTabSaveOutcome> => {
+      saveDocumentDetailRef.current = null;
+      const ok = await saveDocument(false);
+      const detail = saveDocumentDetailRef.current as SaveDocumentDetail | null;
+      saveDocumentDetailRef.current = null;
+      if (ok) {
+        return { ok: true, backupWarning: detail?.backupWarning };
+      }
+      if (detail?.canceled) {
+        return { ok: false, reason: { kind: "canceled" } };
+      }
+      return {
+        ok: false,
+        reason: {
+          kind: "save-error",
+          errorKind: detail?.errorKind ?? "write-failed",
+          errorMessage: detail?.errorMessage,
+        },
+      };
+    },
+    [saveDocument],
+  );
+
+  const requestUnsavedContinueAction = useCallback(
+    (): Promise<UnsavedContinueAction> =>
+      new Promise((resolve) => {
+        if (unsavedActionResolverRef.current) {
+          unsavedActionResolverRef.current("cancel");
+        }
+        unsavedActionResolverRef.current = resolve;
+        setUnsavedModalOpen(true);
+      }),
+    [],
+  );
+
+  const resolveUnsavedContinueAction = useCallback(
+    (action: UnsavedContinueAction) => {
+      setUnsavedModalOpen(false);
+      const resolver = unsavedActionResolverRef.current;
+      unsavedActionResolverRef.current = null;
+      if (resolver) resolver(action);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      const resolver = unsavedActionResolverRef.current;
+      unsavedActionResolverRef.current = null;
+      if (resolver) resolver("cancel");
+    };
+  }, []);
+
+  const confirmContinueWithUnsavedChanges = useCallback(
+    async (options?: {
+      forcePrompt?: boolean;
+      saveTargetTab?: SaveDocumentTarget;
+    }): Promise<boolean> => {
+      if (!options?.forcePrompt && !ui.activeTab.dirty) return true;
+      const action = await requestUnsavedContinueAction();
+      if (action === "cancel") return false;
+      if (action === "discard") return true;
+      return saveDocument(false, options?.saveTargetTab);
+    },
+    [requestUnsavedContinueAction, saveDocument, ui.activeTab.dirty],
+  );
+
+  const syncActiveTabFrontmatter = useCallback(
+    (markdown: string) => {
+      const { frontmatterPrefix } = splitLeadingFrontmatter(markdown);
+      // BETA-SP10: 同じ引数で 2 回呼ばないよう 1 回に集約する
+      const charCount = countDocumentBodyCharacters(markdown);
+      ui.patchActiveTab({
+        frontmatterFields: parseFrontmatterFields(frontmatterPrefix),
+        markdownSnapshot: markdown,
+        characterCount: charCount,
+      });
+      setActiveDocumentCharacterCount(charCount);
+    },
+    [ui],
+  );
+
+  const handleTabContentLoaded = useCallback(
+    (_markdown: string, _fields: ReturnType<typeof parseFrontmatterFields>, charCount: number) => {
+      setActiveDocumentCharacterCount(charCount);
+    },
+    [],
+  );
+
+  const resetEditorScroll = useCallback(() => {
+    requestAnimationFrame(() => {
+      const surface = editorDivRef.current?.closest(".editor-surface");
+      if (surface instanceof HTMLElement) {
+        surface.scrollTop = 0;
+        surface.scrollLeft = 0;
+      }
+    });
+  }, []);
+
+  // BETA-SP1: Source Mode ドラフト消失防止ガード
+  // closeFullPlainEdit は後方で定義されるため、ref 経由で遅延参照する。
+  const guardSourceModeDraftDepsRef = useRef({
+    fullPlainEditActive: ui.fullPlainEditActive,
+    sourceModeController,
+    saveDocument,
+    closeFullPlainEdit: (() => {}) as () => void,
+    requestUnsavedContinueAction,
+  });
+  // 最新 deps を毎レンダーで同期（closeFullPlainEdit は後で上書き）
+  guardSourceModeDraftDepsRef.current.fullPlainEditActive =
+    ui.fullPlainEditActive;
+  guardSourceModeDraftDepsRef.current.sourceModeController =
+    sourceModeController;
+  guardSourceModeDraftDepsRef.current.saveDocument = saveDocument;
+  guardSourceModeDraftDepsRef.current.requestUnsavedContinueAction =
+    requestUnsavedContinueAction;
+
+  const guardSourceModeDraftFn = useCallback(
+    () => {
+      const r = guardSourceModeDraftDepsRef.current;
+      return guardSourceModeDraftImpl({
+        fullPlainEditActive: r.fullPlainEditActive,
+        getSourceModeDraft: () => r.sourceModeController.getValue(),
+        getCoreMarkdown: () => coreRef.current?.peekMarkdown() ?? null,
+        saveDocument: () => r.saveDocument(false),
+        closeFullPlainEdit: () => r.closeFullPlainEdit(),
+        requestUnsavedContinueAction: () =>
+          r.requestUnsavedContinueAction(),
+      });
+    },
+    [],
+  );
+
+  const tabManager = useTabManager({
+    coreRef,
+    tabs: ui.tabs,
+    activeTabId: ui.activeTabId,
+    activeTab: ui.activeTab,
+    setActiveTabId: ui.setActiveTabId,
+    patchActiveTab: ui.patchActiveTab,
+    patchTab: ui.patchTab,
+    addTab: ui.addTab,
+    removeTab: ui.removeTab,
+    setTabs: ui.setTabs,
+    setSuppressNextDirty: ui.setSuppressNextDirty,
+    ensureSafeLineBreakPolicyBeforeDocumentLoad:
+      ui.ensureSafeLineBreakPolicyBeforeDocumentLoad,
+    closePlainEditModes: ui.closePlainEditModes,
+    refreshHeadings: ui.refreshHeadings,
+    confirmContinueWithUnsavedChanges,
+    onTabContentLoaded: handleTabContentLoaded,
+    notifyActiveDocumentPath: (filePath) => {
+      window.nyozeBridge?.document?.setActiveFilePath(filePath);
+    },
+    resetEditorScroll,
+    defaultWritingMode: ui.defaultWritingMode,
+    defaultLineBreakPolicy: ui.defaultLineBreakPolicy,
+    guardSourceModeDraft: guardSourceModeDraftFn,
+  });
+
+  const sendBugReport = useCallback(async () => {
+    const ok = await window.nyozeBridge?.shell?.openExternal(BUG_REPORT_URL);
+    if (ok === false) {
+      window.alert("不具合報告ページを開けませんでした。\n" + BUG_REPORT_URL);
+    }
+  }, []);
+
+  const sendFeedback = useCallback(async () => {
+    const ok = await window.nyozeBridge?.shell?.openExternal(FEEDBACK_URL);
+    if (ok === false) {
+      window.alert("フィードバックページを開けませんでした。\n" + FEEDBACK_URL);
+    }
+  }, []);
+
+  const openRepository = useCallback(async () => {
+    if (!REPOSITORY_URL) {
+      window.alert("リポジトリURLはまだ設定されていません。");
+      return;
+    }
+    const ok = await window.nyozeBridge?.shell?.openExternal(REPOSITORY_URL);
+    if (ok === false) {
+      window.alert("リポジトリページを開けませんでした。\n" + REPOSITORY_URL);
+    }
+  }, []);
+
+  const tabLimitReached = ui.tabs.length >= MAX_OPEN_TABS;
+
+  const [tabLimitNotice, setTabLimitNotice] = useState<string | null>(null);
+  const tabLimitNoticeTimerRef = useRef<number | null>(null);
+  const showTabLimitNotice = useCallback(() => {
+    setTabLimitNotice(`タブ数の上限（${MAX_OPEN_TABS}）に達しています。不要なタブを閉じてください。`);
+    if (tabLimitNoticeTimerRef.current !== null) {
+      window.clearTimeout(tabLimitNoticeTimerRef.current);
+    }
+    tabLimitNoticeTimerRef.current = window.setTimeout(() => {
+      setTabLimitNotice(null);
+      tabLimitNoticeTimerRef.current = null;
+    }, 4000);
+  }, []);
+
+  useE2eBridge({
+    loadIntoActiveTab: tabManager.loadIntoActiveTab,
+    openFileInNewTab: tabManager.openFileInTab,
+    flushImeCompositionSideEffects,
+    showTabLimitNotice,
+  });
+
+  // --- Menu command listener (macOS menu bar / Win+Linux popup menu) ---
+  useEffect(() => {
+    const bridge = window.nyozeBridge?.menu;
+    if (!bridge?.onMenuCommand) return;
+    return bridge.onMenuCommand((command: string) => {
+      switch (command) {
+        case "menu:new-document": {
+          flushImeCompositionSideEffects("menu-new-document");
+          void tabManager.addNewTab().then((ok) => {
+            if (ok === "tab-limit") showTabLimitNotice();
+          });
+          break;
+        }
+        case "menu:open": {
+          const btn = document.querySelector<HTMLButtonElement>(
+            '[aria-label="Load"]',
+          );
+          btn?.click();
+          break;
+        }
+        case "menu:save": {
+          void saveDocument(false);
+          break;
+        }
+        case "menu:save-as": {
+          void saveDocument(true);
+          break;
+        }
+        case "menu:view-settings":
+          ui.setDisplaySettingsOpen(true);
+          break;
+        case "menu:bug-report":
+          void sendBugReport();
+          break;
+        case "menu:feedback":
+          void sendFeedback();
+          break;
+      }
+    });
+  }, [
+    confirmContinueWithUnsavedChanges,
+    flushImeCompositionSideEffects,
+    saveDocument,
+    sendBugReport,
+    sendFeedback,
+    tabManager,
+    ui,
+    showTabLimitNotice,
+  ]);
+
+  const anyTabDirty = ui.tabs.some((t) => t.dirty);
+  useEffect(() => {
+    const setDirty = window.nyozeBridge?.appState?.setDocumentDirty;
+    if (typeof setDirty !== "function") return;
+    setDirty(anyTabDirty).catch(() => {
+      // ignore
+    });
+  }, [anyTabDirty]);
+
+  useEffect(() => {
+    void refreshActiveDocumentStat(ui.activeTab.filePath ?? null);
+  }, [refreshActiveDocumentStat, ui.activeTab.filePath, ui.activeTabId]);
+
+  // SEC-5: Re-notify main of the active file path whenever it changes.
+  // This catches Save As (new filePath) and Explorer move/rename (remapped filePath).
+  // The pre-loadMarkdown notification in useTabManager handles the document-load case;
+  // this effect handles post-render filePath changes where no new loadMarkdown occurs.
+  useEffect(() => {
+    window.nyozeBridge?.document?.setActiveFilePath(
+      ui.activeTab.filePath ?? null,
+    );
+  }, [ui.activeTab.filePath, ui.activeTabId]);
+
+  // BETA-SP2: save-before-close で全 dirty tab を順次保存する。
+  // R3.5-2 P2: active tab は saveActiveTabForClose (ActiveTabSaveOutcome を返す)、
+  // non-active dirty tab は markdownSnapshot を直接保存。
+  // non-active tab Save As は setActiveTabId + saveDocument ではなく
+  // saveTabWithSaveAsDetailed を使い、markdownSnapshot + eol を正本とする。
+  useEffect(() => {
+    const appState = window.nyozeBridge?.appState;
+    const bridge = window.nyozeBridge?.fs;
+    if (
+      !appState?.onRequestSaveBeforeClose ||
+      !appState?.reportSaveBeforeClose ||
+      !bridge?.writeFile ||
+      !bridge?.saveAs ||
+      !bridge?.getFileStat
+    ) {
+      return;
+    }
+    return appState.onRequestSaveBeforeClose((requestId) => {
+      const closeBridge = {
+        writeFile: bridge.writeFile,
+        saveAs: bridge.saveAs,
+        getFileStat: bridge.getFileStat,
+      };
+      // P2 fix: local mutable tabs snapshot.
+      // React state updates (patchTab/markDirtyFalseForTab) are async,
+      // so re-runs of runOnce() must use a synchronously updated copy.
+      const closeTabs = ui.tabs.map((t) => ({ ...t }));
+
+      const localMarkTabClean = (tabId: string, md: string) => {
+        ui.markDirtyFalseForTab(tabId, md);
+        const idx = closeTabs.findIndex((t) => t.id === tabId);
+        if (idx !== -1) {
+          closeTabs[idx] = { ...closeTabs[idx], dirty: false, markdownSnapshot: md };
+        }
+      };
+
+      const localPatchTab = (
+        tabId: string,
+        patch: { title?: string; filePath?: string | null },
+      ) => {
+        ui.patchTab(tabId, patch);
+        const idx = closeTabs.findIndex((t) => t.id === tabId);
+        if (idx !== -1) {
+          closeTabs[idx] = { ...closeTabs[idx], ...patch };
+        }
+      };
+
+      const closeDeps = {
+        markTabClean: localMarkTabClean,
+        fetchAndPatchSavedStat,
+        patchTab: localPatchTab,
+      };
+
+      const runOnce = () =>
+        saveAllDirtyTabsBeforeCloseDetailed({
+          tabs: closeTabs,
+          activeTabId: ui.activeTabId,
+          saveActiveTab: async () => {
+            const outcome = await saveActiveTabForClose();
+            if (outcome.ok) {
+              const idx = closeTabs.findIndex((t) => t.id === ui.activeTabId);
+              if (idx !== -1) {
+                closeTabs[idx] = { ...closeTabs[idx], dirty: false };
+              }
+            }
+            return outcome;
+          },
+          ...closeDeps,
+          bridge: closeBridge,
+        });
+
+      const combineWarnings = (
+        warnings: Array<{ tabId: string; warning: string }>,
+      ): string | null =>
+        warnings.length > 0 ? warnings.map((w) => w.warning).join("\n") : null;
+
+      // P2 fix: out-of-band Save As (handleNonActiveTabSaveAs / active saveAs)
+      // で発生した backupWarning を蓄積し、最終 acknowledge で使う。
+      const extraWarnings: Array<{ tabId: string; warning: string }> = [];
+
+      // R3.5-2 P2: 非 active tab の Save As を markdownSnapshot で行う。
+      // Save As エラーが起きた場合は SaveFailureModal で retry/cancel を繰り返す。
+      const handleNonActiveTabSaveAs = async (
+        failedTabId: string,
+      ): Promise<boolean> => {
+        const tabInfo = closeTabs.find((t) => t.id === failedTabId);
+        if (!tabInfo || !tabInfo.dirty) return false;
+        const outcome = await saveTabWithSaveAsDetailed(tabInfo, {
+          ...closeDeps,
+          bridge: closeBridge,
+        });
+        if (outcome.ok) {
+          if (outcome.backupWarning) {
+            extraWarnings.push({ tabId: failedTabId, warning: outcome.backupWarning });
+          }
+          // localPatchTab が closeTabs を同期更新済みなので新しい filePath を読める
+          const savedPath = closeTabs.find((t) => t.id === failedTabId)?.filePath;
+          if (savedPath) void notifyFileExplorerFileSaved(savedPath);
+          return true;
+        }
+        if (outcome.reason.kind === "canceled") return false;
+        // save-error: Ask user
+        const info: SaveFailureInfo = {
+          tabTitle: tabInfo.title,
+          filePath: tabInfo.filePath,
+          errorKind:
+            outcome.reason.kind === "save-error"
+              ? outcome.reason.errorKind
+              : "write-failed",
+          errorMessage:
+            outcome.reason.kind === "save-error"
+              ? outcome.reason.errorMessage
+              : undefined,
+        };
+        const action = await requestSaveFailureAction(info);
+        if (action === "cancel") return false;
+        return await handleNonActiveTabSaveAs(failedTabId);
+      };
+
+      const attempt = async (): Promise<boolean> => {
+        const result = await runOnce();
+        const allWarnings = [...result.backupWarnings, ...extraWarnings];
+        const combined = combineWarnings(allWarnings);
+
+        if (result.ok) {
+          if (combined) await acknowledgeBackupWarning(combined);
+          return true;
+        }
+
+        // 失敗 attempt でも成功済みタブの warnings を蓄積する。
+        // retry 後は保存済みタブが clean になり同じ警告が返らないため、
+        // ここで extraWarnings に移さないと最終成功時の acknowledge から漏れる。
+        for (const w of result.backupWarnings) {
+          if (!extraWarnings.some((e) => e.tabId === w.tabId && e.warning === w.warning)) {
+            extraWarnings.push(w);
+          }
+        }
+
+        if (combined) showBackupWarningIfPresent(combined);
+
+        if (result.reason.kind === "save-error") {
+          const info: SaveFailureInfo = {
+            tabTitle: result.failedTab.title,
+            filePath: result.failedTab.filePath,
+            errorKind: result.reason.errorKind,
+            errorMessage: result.reason.errorMessage,
+          };
+          const action = await requestSaveFailureAction(info);
+          if (action === "cancel") return false;
+          if (action === "retry") {
+            return await attempt();
+          }
+          // saveAs: active tab と non-active tab で経路を分ける。
+          if (result.failedTab.id === ui.activeTabId) {
+            saveDocumentDetailRef.current = null;
+            const saved = await saveDocument(true);
+            if (!saved) return false;
+            const detail = saveDocumentDetailRef.current as SaveDocumentDetail | null;
+            saveDocumentDetailRef.current = null;
+            if (detail?.backupWarning) {
+              extraWarnings.push({
+                tabId: result.failedTab.id,
+                warning: detail.backupWarning,
+              });
+            }
+            const idx = closeTabs.findIndex((t) => t.id === result.failedTab.id);
+            if (idx !== -1) {
+              closeTabs[idx] = { ...closeTabs[idx], dirty: false };
+            }
+          } else {
+            const saved = await handleNonActiveTabSaveAs(result.failedTab.id);
+            if (!saved) return false;
+          }
+          return await attempt();
+        }
+        // conflict / canceled: close is aborted.
+        return false;
+      };
+
+      void attempt()
+        .then((ok) => appState.reportSaveBeforeClose(requestId, ok))
+        .catch(() => appState.reportSaveBeforeClose(requestId, false));
+    });
+  }, [
+    saveDocument,
+    saveActiveTabForClose,
+    ui.tabs,
+    ui.activeTabId,
+    ui,
+    fetchAndPatchSavedStat,
+    showBackupWarningIfPresent,
+    acknowledgeBackupWarning,
+    requestSaveFailureAction,
+    notifyFileExplorerFileSaved,
+  ]);
+
+  const runMarkCommand = useCallback(
+    (commandName: "bold" | "italic" | "strike" | "highlight") => {
+      coreRef.current?.execute(commandName);
+    },
+    [],
+  );
+
+  // BETA-C1: Centralized Undo/Redo routing — toolbar, shortcuts, and availability
+  // all derive from the same source via useUndoRedoRouting.
+  const { handleUndo, handleRedo, effectiveAvailability } = useUndoRedoRouting({
+    coreRef,
+    fullPlainEditActive: ui.fullPlainEditActive,
+    sourceModeController,
+    paragraphPlainModeActive: ui.paragraphPlainModeActive,
+    imeComposingRef,
+    commandAvailability,
+  });
+
+  const handleToggleInlineCode = useCallback(() => {
+    coreRef.current?.toggleInlineCode();
+  }, []);
+
+  const handleClearFormat = useCallback(() => {
+    coreRef.current?.clearFormat();
+  }, []);
+
+  const handleInsertHorizontalRule = useCallback(() => {
+    coreRef.current?.insertHorizontalRule();
+  }, []);
+
+  const handleToggleHeading = useCallback((level: number) => {
+    coreRef.current?.toggleHeading(level);
+  }, []);
+
+  const handleToggleBulletList = useCallback(() => {
+    coreRef.current?.toggleBulletList();
+  }, []);
+
+  const handleToggleOrderedList = useCallback(() => {
+    coreRef.current?.toggleOrderedList();
+  }, []);
+
+  const handleToggleChecklist = useCallback(() => {
+    coreRef.current?.toggleChecklist();
+  }, []);
+
+  const handleToggleBlockquote = useCallback(() => {
+    coreRef.current?.toggleBlockquote();
+  }, []);
+
+  const handleToggleCodeBlock = useCallback(() => {
+    coreRef.current?.toggleCodeBlock();
+  }, []);
+
+  const handleWindowMinimize = useCallback(() => {
+    const minimize = window.nyozeBridge?.windowControls?.minimize;
+    if (typeof minimize === "function") {
+      minimize().catch(() => {
+        // ignore
+      });
+    }
+  }, []);
+
+  const handleWindowClose = useCallback(() => {
+    const close = window.nyozeBridge?.windowControls?.close;
+    if (typeof close === "function") {
+      close().catch(() => {
+        // ignore
+      });
+      return;
+    }
+    window.close();
+  }, []);
+
+  const handleOpenAppMenu = useCallback(() => {
+    const openMenu = window.nyozeBridge?.menu?.openAppMenu;
+    if (typeof openMenu === "function") {
+      openMenu().catch(() => {
+        // ignore
+      });
+    }
+  }, []);
+
+  const handleLoad = useCallback(
+    async (event: ReactMouseEvent<HTMLButtonElement>) => {
+      if (event.shiftKey) {
+        flushImeCompositionSideEffects("load-shift-new-tab");
+        void tabManager.addNewTab().then((ok) => {
+          if (ok === "tab-limit") showTabLimitNotice();
+        });
+        return;
+      }
+
+      const bridge = window.nyozeBridge?.fs;
+      if (bridge?.openPath && bridge?.openFile) {
+        const opened = await bridge.openPath();
+        if (!opened) return;
+        if (opened.kind === "directory") {
+          setFileExplorerDir(opened.path);
+          return;
+        }
+        const openResult = await bridge.openFile(opened.path);
+        if (!openResult.ok) {
+          window.alert(openResult.errorMessage);
+          return;
+        }
+        flushImeCompositionSideEffects("load-into-active-tab");
+        const stat = await bridge.getFileStat?.(opened.path).catch(() => null);
+        const saved: SavedFileStat = stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
+        void tabManager.loadIntoActiveTab(
+          opened.path,
+          getPathBaseName(opened.path),
+          openResult.content,
+          saved,
+        );
+        return;
+      }
+
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".md,.markdown,.txt";
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const text = reader.result as string;
+          flushImeCompositionSideEffects("load-local-file");
+          void tabManager.loadIntoActiveTab(
+            null,
+            file.name || "document.md",
+            text,
+          );
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    },
+    [flushImeCompositionSideEffects, setFileExplorerDir, showTabLimitNotice, tabManager],
+  );
+
+  const handleSave = useCallback(
+    async (event: ReactMouseEvent<HTMLButtonElement>) => {
+      await saveDocument(event.shiftKey);
+    },
+    [saveDocument],
+  );
+
+  const handleToggleTcy = useCallback(() => {
+    coreRef.current?.toggleTcy();
+  }, []);
+
+  const handleCut = useCallback(() => {
+    cutSelection();
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    copySelection();
+  }, []);
+
+  const handlePaste = useCallback(async () => {
+    await pasteFromClipboard();
+  }, []);
+
+  const handleDocumentThemeChange = useCallback(
+    (docTheme: DocumentTheme) => {
+      const matchedSystemPreset = ui.docThemePresets.find(
+        (preset) =>
+          isSystemDocPreset(preset) && preset.baseDocTheme === docTheme,
+      );
+      if (matchedSystemPreset) {
+        ui.setActiveDocThemePresetId(matchedSystemPreset.id);
+        if (docTheme === "ui-linked") {
+          // Keep ui-linked document colors synchronized with the current UI theme/preset.
+          ui.syncDocColorSettings(
+            resolveDocThemeColors(docTheme, ui.theme, {
+              activeUiThemePresetId: ui.activeUiThemePresetId,
+              uiThemePresets: ui.uiThemePresets,
+            }),
+          );
+        }
+        return;
+      }
+      ui.setDocumentTheme(docTheme);
+      ui.setDocColorSettings(
+        resolveDocThemeColors(docTheme, ui.theme, {
+          activeUiThemePresetId: ui.activeUiThemePresetId,
+          uiThemePresets: ui.uiThemePresets,
+        }),
+      );
+    },
+    [ui],
+  );
+
+  const documentTheme = ui.documentTheme;
+  const activeDocThemePresetId = ui.activeDocThemePresetId;
+  const activeUiThemePresetId = ui.activeUiThemePresetId;
+  const uiThemePresets = ui.uiThemePresets;
+  const uiTheme = ui.theme;
+  const docColorSettings = ui.docColorSettings;
+  const syncDocColorSettings = ui.syncDocColorSettings;
+  const activeDocPreset = activeDocThemePresetId
+    ? (ui.docThemePresets.find(
+        (preset) => preset.id === activeDocThemePresetId,
+      ) ?? null)
+    : null;
+  const shouldFollowUiThemeForDocument =
+    documentTheme === "ui-linked" &&
+    activeDocPreset !== null &&
+    isSystemDocPreset(activeDocPreset) &&
+    activeDocPreset.baseDocTheme === "ui-linked";
+
+  useEffect(() => {
+    if (!shouldFollowUiThemeForDocument) return;
+    // Follow UI theme only while the linked system preset is active.
+    const linked = resolveDocThemeColors("ui-linked", uiTheme, {
+      activeUiThemePresetId,
+      uiThemePresets,
+    });
+    const current = docColorSettings;
+    if (
+      current.pageColor === linked.pageColor &&
+      current.textColor === linked.textColor &&
+      current.headingColor === linked.headingColor
+    ) {
+      return;
+    }
+    syncDocColorSettings(linked);
+  }, [
+    shouldFollowUiThemeForDocument,
+    uiTheme,
+    docColorSettings,
+    activeUiThemePresetId,
+    uiThemePresets,
+    syncDocColorSettings,
+  ]);
+
+  const handleOpenThemeStudioPane = useCallback(() => {
+    setRightPaneOpen(true);
+    ui.setRightPaneTab("theme");
+    ui.setDisplaySettingsOpen(false);
+  }, [setRightPaneOpen, ui]);
+
+  const handleOpenDocumentSettingsPane = useCallback(() => {
+    setRightPaneOpen(true);
+    ui.setRightPaneTab("document");
+    ui.setDisplaySettingsOpen(false);
+  }, [setRightPaneOpen, ui]);
+
+  const [pendingDocumentSettingsChange, setPendingDocumentSettingsChange] =
+    useState<PendingDocumentSettingsChange | null>(null);
+
+  const applyDocumentSettingsChange = useCallback(
+    (pendingChange: PendingDocumentSettingsChange) => {
+      const core = coreRef.current;
+      if (!core) return;
+
+      const currentEffectiveLineBreakPolicy = ui.effectiveLineBreakPolicy;
+      core.setFrontmatterPrefix(pendingChange.nextFrontmatterPrefix);
+      const frontmatterPatchedMarkdown = core.saveMarkdown();
+
+      if (
+        pendingChange.nextEffectiveLineBreakPolicy !==
+        currentEffectiveLineBreakPolicy
+      ) {
+        core.setLineBreakPolicy(pendingChange.nextEffectiveLineBreakPolicy);
+        core.applyLineBreakPolicyNow(pendingChange.nextEffectiveLineBreakPolicy);
+      }
+
+      const nextMarkdown = core.saveMarkdown();
+      ui.patchActiveTab({
+        frontmatterFields: pendingChange.nextFrontmatterFields,
+        markdownSnapshot: nextMarkdown,
+        characterCount: countDocumentBodyCharacters(nextMarkdown),
+      });
+      ui.recalcDirtyFromCore();
+
+      if (
+        pendingChange.nextEffectiveLineBreakPolicy ===
+        currentEffectiveLineBreakPolicy
+      ) {
+        return;
+      }
+
+      if (pendingChange.nextEffectiveLineBreakPolicy === "commonmark-strict") {
+        const changedByPolicy = frontmatterPatchedMarkdown !== nextMarkdown;
+        const dirtyAfter =
+          ui.activeTab.cleanMarkdownSnapshot.length !== nextMarkdown.length ||
+          ui.activeTab.cleanMarkdownSnapshot !== nextMarkdown;
+        ui.showLineBreakPolicyNotice(
+          formatDocumentTypeNoticeMessage(pendingChange.nextDocumentType, {
+            changed: changedByPolicy,
+            dirty: dirtyAfter,
+          }),
+          dirtyAfter,
+        );
+        ui.pulseCommonmarkBadge();
+        return;
+      }
+
+      ui.clearLineBreakPolicyNotice();
+    },
+    [ui],
+  );
+
+  const handleConfirmLineBreakPolicyChange = useCallback(() => {
+    // BETA-SP9: commonmark-strict 確認後も大文書 guard を適用
+    if (pendingDocumentSettingsChange) {
+      const change = pendingDocumentSettingsChange;
+      setPendingDocumentSettingsChange(null);
+      largeDocGuard.requestGuardedAction(
+        activeDocumentCharacterCount,
+        "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
+        () => applyDocumentSettingsChange(change),
+      );
+      return;
+    }
+    // useAppUiState 経由の requestLineBreakPolicyChange → confirmLineBreakPolicyChange
+    largeDocGuard.requestGuardedAction(
+      activeDocumentCharacterCount,
+      "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
+      () => ui.confirmLineBreakPolicyChange(),
+    );
+  }, [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, pendingDocumentSettingsChange, ui]);
+
+  const handleCancelLineBreakPolicyChange = useCallback(() => {
+    setPendingDocumentSettingsChange(null);
+    ui.cancelLineBreakPolicyChange();
+  }, [ui]);
+
+  const documentSettingsMarkdown = ui.activeTab.markdownSnapshot;
+  const documentSettingsSplit =
+    splitLeadingFrontmatter(documentSettingsMarkdown);
+  const documentSettingsHasMalformedLeadingFence =
+    /^---[ \t]*(?:\r\n|\n|\r)/.test(documentSettingsMarkdown) &&
+    !documentSettingsSplit.hasFrontmatter;
+  const canEditDocumentSettings =
+    !ui.fullPlainEditActive &&
+    !documentSettingsHasMalformedLeadingFence &&
+    canSafelyPatchFrontmatter(documentSettingsSplit.frontmatterPrefix);
+
+  const handleDocumentSettingsChange = useCallback(
+    (nextSettings: {
+      documentType: DocumentType;
+      title: string;
+      author: string;
+      translator: string;
+    }) => {
+      if (ui.fullPlainEditActive) return;
+
+      const core = coreRef.current;
+      if (!core) return;
+
+      const currentMarkdown = core.peekMarkdown();
+      const split = splitLeadingFrontmatter(currentMarkdown);
+      const hasMalformedLeadingFence =
+        /^---[ \t]*(?:\r\n|\n|\r)/.test(currentMarkdown) && !split.hasFrontmatter;
+      if (
+        hasMalformedLeadingFence ||
+        !canSafelyPatchFrontmatter(split.frontmatterPrefix)
+      ) {
+        return;
+      }
+
+      const nextFrontmatterPrefix = patchFrontmatterKnownScalars(
+        split.frontmatterPrefix,
+        {
+          documentType: nextSettings.documentType,
+          title: nextSettings.title,
+          author: nextSettings.author,
+          translator: nextSettings.translator,
+        },
+      );
+      if (nextFrontmatterPrefix === split.frontmatterPrefix) return;
+
+      const nextFrontmatterFields = parseFrontmatterFields(nextFrontmatterPrefix);
+      const nextDocumentType = resolveDocumentType(nextFrontmatterFields);
+      const nextEffectiveLineBreakPolicy =
+        resolveEffectiveLineBreakPolicyForDocumentSettings(
+          nextFrontmatterFields,
+          ui.activeTab.lineBreakPolicy,
+        );
+      const pendingChange = {
+        nextFrontmatterPrefix,
+        nextFrontmatterFields,
+        nextDocumentType,
+        nextEffectiveLineBreakPolicy,
+      };
+
+      if (
+        nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy &&
+        nextEffectiveLineBreakPolicy === "commonmark-strict"
+      ) {
+        setPendingDocumentSettingsChange(pendingChange);
+        return;
+      }
+
+      // BETA-SP9: 実効ポリシーが変わる場合は大文書 guard
+      if (nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy) {
+        largeDocGuard.requestGuardedAction(
+          activeDocumentCharacterCount,
+          "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
+          () => applyDocumentSettingsChange(pendingChange),
+        );
+        return;
+      }
+
+      applyDocumentSettingsChange(pendingChange);
+    },
+    [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, ui],
+  );
+
+  const openFullPlainEdit = useCallback(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    core.setParagraphPlainMode(false);
+    ui.setParagraphPlainModeActive(false);
+    ui.setFullPlainEditValue(core.saveMarkdown());
+    ui.setFullPlainEditError("");
+    ui.setFullPlainEditActive(true);
+  }, [ui]);
+
+  const applyFullPlainEdit = useCallback((): boolean => {
+    const core = coreRef.current;
+    if (!core || !ui.fullPlainEditActive) return false;
+    const draftMarkdown =
+      sourceModeController.getValue() ?? ui.fullPlainEditValue;
+    try {
+      core.loadMarkdown(draftMarkdown);
+      const normalizedMarkdown = core.saveMarkdown();
+      syncActiveTabFrontmatter(normalizedMarkdown);
+      ui.setFullPlainEditValue(normalizedMarkdown);
+      sourceModeController.setValue(normalizedMarkdown, {
+        resetHistory: true,
+      });
+      ui.setFullPlainEditError("");
+      return true;
+    } catch {
+      ui.setFullPlainEditError(
+        "Markdown適用に失敗しました。入力内容を確認してください。",
+      );
+      return false;
+    }
+  }, [sourceModeController, syncActiveTabFrontmatter, ui]);
+
+  const closeFullPlainEdit = useCallback(() => {
+    ui.setFullPlainEditActive(false);
+    ui.setFullPlainEditError("");
+    // Full Plain editing may have set dirty based on Source Mode content.
+    // After discarding, re-evaluate dirty from the core (unchanged) content.
+    ui.recalcDirtyFromCore();
+  }, [ui]);
+  // BETA-SP1: guardSourceModeDraft の遅延参照用 ref に closeFullPlainEdit を登録
+  guardSourceModeDraftDepsRef.current.closeFullPlainEdit = closeFullPlainEdit;
+
+  // BETA-SP9: Source Mode apply を guard でラップ
+  const guardedApplyAndCloseFullPlainEdit = useCallback(() => {
+    const ok = applyFullPlainEdit();
+    if (ok) closeFullPlainEdit();
+  }, [applyFullPlainEdit, closeFullPlainEdit]);
+
+  const toggleFullPlainEdit = useCallback(() => {
+    if (ui.fullPlainEditActive) {
+      largeDocGuard.requestGuardedAction(
+        activeDocumentCharacterCount,
+        "Source Mode から通常表示へ戻るときは、大きな文書では数秒かかる場合があります。続行しますか。",
+        guardedApplyAndCloseFullPlainEdit,
+      );
+      return;
+    }
+    openFullPlainEdit();
+  }, [
+    activeDocumentCharacterCount,
+    guardedApplyAndCloseFullPlainEdit,
+    largeDocGuard,
+    openFullPlainEdit,
+    ui.fullPlainEditActive,
+  ]);
+
+  const activeDocumentInfo: ActiveDocumentInfo = {
+    characterCount: activeDocumentCharacterCount,
+    createdAtText: ui.activeTab.filePath
+      ? formatDocumentInfoDate(activeDocumentStat?.ctimeMs ?? null)
+      : "—",
+    updatedAtText: ui.activeTab.filePath
+      ? formatDocumentInfoDate(activeDocumentStat?.mtimeMs ?? null)
+      : "—",
+    pathText: ui.activeTab.filePath ?? "未保存",
+    pathTitle: ui.activeTab.filePath ?? "未保存",
+  };
+  const resolvedDocumentType = resolveDocumentType(ui.activeTab.frontmatterFields);
+
+  return (
+    <main className="app-shell">
+      <UnifiedHeader
+        leftPaneOpen={leftPaneOpen}
+        rightPaneOpen={rightPaneOpen}
+        onToggleLeftPane={() => setLeftPaneOpen((v) => !v)}
+        onToggleRightPane={() => setRightPaneOpen((v) => !v)}
+        usesNativeWindowControls={ui.usesNativeWindowControls}
+        onWindowMinimize={handleWindowMinimize}
+        onWindowClose={handleWindowClose}
+        platform={ui.platform}
+        toolbarVisible={ui.toolbarVisible}
+        onToggleToolbarVisible={ui.toggleToolbarVisible}
+        toolbarOffset={ui.toolbarOffset}
+        onToolbarOffsetChange={ui.setToolbarOffset}
+        onToolbarOffsetReset={ui.resetToolbarOffset}
+        rubyVisible={ui.rubyVisible}
+        writingMode={ui.writingMode}
+        availability={effectiveAvailability}
+        paragraphPlainModeActive={ui.paragraphPlainModeActive}
+        fullPlainEditActive={ui.fullPlainEditActive}
+        displaySettingsOpen={ui.displaySettingsOpen}
+        onRunMarkCommand={runMarkCommand}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onToggleInlineCode={handleToggleInlineCode}
+        onInsertHorizontalRule={handleInsertHorizontalRule}
+        onToggleHeading={handleToggleHeading}
+        onToggleBulletList={handleToggleBulletList}
+        onToggleOrderedList={handleToggleOrderedList}
+        onToggleChecklist={handleToggleChecklist}
+        onToggleBlockquote={handleToggleBlockquote}
+        onToggleCodeBlock={handleToggleCodeBlock}
+        onClearFormat={handleClearFormat}
+        onSetOrUnsetLink={openLinkPrompt}
+        onInsertImage={openImagePrompt}
+        onInsertRubyBouten={openRubyBoutenPrompt}
+        onToggleTcy={handleToggleTcy}
+        onToggleRubyVisible={() => {
+          const charCount = activeDocumentCharacterCount;
+          largeDocGuard.requestGuardedAction(
+            charCount,
+            "ルビ表示の切替は、大きな文書では数秒かかる場合があります。続行しますか。",
+            () => ui.setRubyVisible((v) => !v),
+          );
+        }}
+        onToggleWritingMode={ui.toggleWritingMode}
+        documentType={resolvedDocumentType}
+        hasDocumentBehaviorOverride={ui.lineBreakPolicyLockReason === "frontmatter"}
+        onOpenDocumentSettings={handleOpenDocumentSettingsPane}
+        onToggleParagraphPlainMode={toggleParagraphPlainMode}
+        onToggleFullPlainEdit={toggleFullPlainEdit}
+        onOpenDisplaySettings={() => ui.setDisplaySettingsOpen(true)}
+        onShowEditorInlineHint={ui.showEditorInlineHint}
+        searchOpen={search.state.open}
+        onOpenSearch={search.openSearch}
+        onLoad={handleLoad}
+        onSave={handleSave}
+        onOpenAppMenu={handleOpenAppMenu}
+        appTitleVisible={ui.appTitleVisible}
+        appTitleText={ui.appTitleText}
+      />
+
+      <Workspace
+        workspaceRef={workspaceRef}
+        editorDivRef={editorDivRef}
+        sourceModeController={sourceModeController}
+        leftPaneOpen={leftPaneOpen}
+        leftWidth={leftWidth}
+        rightPaneOpen={rightPaneOpen}
+        rightWidth={rightWidth}
+        fileExplorerDir={fileExplorerDir}
+        fileExplorerRootLoaded={fileExplorerRootLoaded}
+        fileExplorerEntries={fileExplorerEntries}
+        fileExplorerClipboardMode={fileExplorerClipboardMode}
+        fileExplorerClipboardSourcePath={fileExplorerClipboardSourcePath}
+        fileExplorerOperationError={fileExplorerOperationError}
+        activeDocumentInfo={activeDocumentInfo}
+        canFileExplorerPaste={canFileExplorerPaste}
+        tabs={ui.tabs}
+        activeTabId={ui.activeTabId}
+        fullPlainEditActive={ui.fullPlainEditActive}
+        fullPlainEditValue={ui.fullPlainEditValue}
+        fullPlainEditError={ui.fullPlainEditError}
+        rubyVisible={ui.rubyVisible}
+        frontmatterVisible={ui.frontmatterVisible}
+        frontmatterShowAuthors={ui.frontmatterShowAuthors}
+        frontmatterShowTranslators={ui.frontmatterShowTranslators}
+        frontmatterShowRoleLabels={ui.frontmatterShowRoleLabels}
+        writingMode={ui.writingMode}
+        frontmatterFields={ui.activeTab.frontmatterFields}
+        effectiveLineBreakPolicy={ui.effectiveLineBreakPolicy}
+        editorInlineHintMessage={ui.editorInlineHintMessage}
+        documentTheme={ui.documentTheme}
+        docFontPreset={ui.docFontPreset}
+        docHeadingFont={ui.docHeadingFont}
+        docColorSettings={ui.docColorSettings}
+        selectedFont={ui.selectedFont}
+        rightPaneTab={ui.rightPaneTab}
+        headings={ui.headings}
+        activeHeadingIndex={ui.activeHeadingIndex}
+        foldedHeadingPositions={ui.foldedHeadingPositions}
+        onDividerMouseDown={handleDividerMouseDown}
+        onFileExplorerCreateNote={handleCreateNote}
+        onFileExplorerCreateFolder={handleCreateFolder}
+        onFileExplorerRenameEntry={handleRenameEntry}
+        onFileExplorerDeleteEntry={handleDeleteEntry}
+        onFileExplorerRevealInFileManager={handleRevealInFileManager}
+        onFileExplorerEntryActivate={handleFileSelect}
+        onFileExplorerEntrySelect={handleFileSelectOnly}
+        onFileExplorerOpenInNewTab={handleFileOpenInNewTab}
+        onFileExplorerCut={handleCutSelectedFile}
+        onFileExplorerCopy={handleCopySelectedFile}
+        onFileExplorerPaste={handlePasteIntoSelection}
+        onDismissFileExplorerError={clearFileExplorerOperationError}
+        onSetActiveTab={(tabId: string) => {
+          flushImeCompositionSideEffects("workspace-switch-tab");
+          void tabManager.switchTab(tabId);
+        }}
+        onAddTab={() => {
+          flushImeCompositionSideEffects("workspace-add-tab");
+          void tabManager.addNewTab();
+        }}
+        tabLimitReached={tabLimitReached}
+        onCloseTab={(tabId: string) => {
+          flushImeCompositionSideEffects("workspace-close-tab");
+          void tabManager.closeTab(tabId);
+        }}
+        onFullPlainEditChange={ui.handleFullPlainEditChange}
+        onApplyFullPlainEdit={() => {
+          largeDocGuard.requestGuardedAction(
+            activeDocumentCharacterCount,
+            "Source Mode から通常表示へ戻るときは、大きな文書では数秒かかる場合があります。続行しますか。",
+            guardedApplyAndCloseFullPlainEdit,
+          );
+        }}
+        onCloseFullPlainEdit={closeFullPlainEdit}
+        onSetRightPaneTab={ui.setRightPaneTab}
+        onToggleHeadingFold={handleToggleHeadingFold}
+        onRequestHeadingPreview={handleRequestHeadingPreview}
+        onScrollToPos={(pos) => coreRef.current?.scrollToPos(pos)}
+        caretColor={resolveCaretColor(
+          ui.caretColorMode,
+          ui.caretColorCustom,
+          ui.docColorSettings.pageColor,
+        )}
+        onEmptyUntitledSurfaceClick={() => {
+          if (
+            ui.activeTab.filePath === null &&
+            ui.activeTab.markdownSnapshot === "" &&
+            !ui.fullPlainEditActive &&
+            !ui.paragraphPlainModeActive
+          ) {
+            coreRef.current?.focusEditor();
+          }
+        }}
+        searchBarSlot={
+          <SearchBar
+            open={search.state.open}
+            replaceOpen={search.state.replaceOpen}
+            query={search.state.query}
+            replacement={search.state.replacement}
+            caseSensitive={search.state.caseSensitive}
+            matchCount={search.state.searchState.matchCount}
+            currentIndex={search.state.searchState.currentIndex}
+            searchInputRef={search.searchInputRef}
+            onQueryChange={search.updateQuery}
+            onReplacementChange={search.setReplacement}
+            onToggleCaseSensitive={search.toggleCaseSensitive}
+            onToggleReplace={() => search.setReplaceOpen((v) => !v)}
+            onExecuteSearch={search.executeSearch}
+            onNext={search.searchNext}
+            onPrev={search.searchPrev}
+            onReplaceOne={search.replaceOne}
+            onReplaceAll={search.replaceAll}
+            onClose={search.closeSearch}
+          />
+        }
+        documentSettingsSlot={
+          <DocumentSettingsPanel
+            canEdit={canEditDocumentSettings}
+            fullPlainEditActive={ui.fullPlainEditActive}
+            documentType={resolvedDocumentType}
+            title={ui.activeTab.frontmatterFields.title ?? ""}
+            author={ui.activeTab.frontmatterFields.author ?? ""}
+            translator={ui.activeTab.frontmatterFields.translator ?? ""}
+            hasDocumentBehaviorOverride={
+              ui.lineBreakPolicyLockReason === "frontmatter"
+            }
+            writingMode={ui.writingMode}
+            recommendedWritingMode={ui.typeRecommendedWritingMode}
+            writingModeFollowsTypeRecommendation={
+              ui.writingModeFollowsTypeRecommendation
+            }
+            onChangeSettings={handleDocumentSettingsChange}
+            onResetWritingModeToRecommendation={
+              ui.resetWritingModeToTypeRecommendation
+            }
+          />
+        }
+        themeStudioSlot={
+          <ThemeStudioPanel
+            uiThemePresets={ui.uiThemePresets}
+            activeUiThemePresetId={ui.activeUiThemePresetId}
+            currentUiTheme={ui.theme}
+            currentUiFont={ui.uiFont}
+            currentUiFontScale={ui.uiFontScale}
+            currentUiTextPrimary={ui.uiTextPrimary}
+            docThemePresets={ui.docThemePresets}
+            activeDocThemePresetId={ui.activeDocThemePresetId}
+            currentDocColorSettings={ui.docColorSettings}
+            currentDocTheme={ui.documentTheme}
+            currentDocFontPreset={ui.docFontPreset}
+            currentDocHeadingFont={ui.docHeadingFont}
+            displaySettings={ui.displaySettings}
+            registeredFonts={ui.registeredFonts}
+            onSetActiveUiThemePresetId={ui.setActiveUiThemePresetId}
+            onSetActiveDocThemePresetId={ui.setActiveDocThemePresetId}
+            onDetachActiveDocThemePreset={ui.detachActiveDocThemePreset}
+            onSaveUiThemePreset={ui.saveUiThemePreset}
+            onSaveDocThemePreset={ui.saveDocThemePreset}
+            onOverwriteUiThemePreset={ui.overwriteUiThemePreset}
+            onOverwriteDocThemePreset={ui.overwriteDocThemePreset}
+            onPreviewUiThemeDraft={ui.previewUiThemeDraft}
+            onPreviewDocThemeDraft={ui.previewDocThemeDraft}
+            onRenameUiThemePreset={ui.renameUiThemePreset}
+            onRenameDocThemePreset={ui.renameDocThemePreset}
+            onDuplicateUiThemePreset={ui.duplicateUiThemePreset}
+            onDuplicateDocThemePreset={ui.duplicateDocThemePreset}
+            onDeleteUiThemePreset={ui.deleteUiThemePreset}
+            onDeleteDocThemePreset={ui.deleteDocThemePreset}
+            onSetUiFont={ui.setUiFont}
+            onSetUiFontScale={ui.setUiFontScale}
+            onSetDocFontPreset={ui.setDocFontPreset}
+            onSetDocHeadingFont={ui.setDocHeadingFont}
+            onSetDisplayNumber={ui.setDisplayNumber}
+          />
+        }
+      />
+
+      <EditorContextMenu
+        visible={ctxMenu.visible}
+        x={ctxMenu.x}
+        y={ctxMenu.y}
+        availability={ctxMenu.availability}
+        writingMode={ui.writingMode}
+        menuRef={ctxMenuRef}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        onCut={handleCut}
+        onCopy={handleCopy}
+        onPaste={handlePaste}
+        onSelectAll={handleCtxSelectAll}
+        onBold={() => coreRef.current?.execute("bold")}
+        onItalic={() => coreRef.current?.execute("italic")}
+        onStrike={() => coreRef.current?.execute("strike")}
+        onHighlight={() => coreRef.current?.execute("highlight")}
+        onHeading={handleCtxHeading}
+        onBulletList={handleToggleBulletList}
+        onOrderedList={handleToggleOrderedList}
+        onChecklist={handleToggleChecklist}
+        onRuby={openRubyBoutenPrompt}
+        onTcy={handleToggleTcy}
+        onClearFormat={handleClearFormat}
+        onMoveListUp={handleCtxMoveUp}
+        onMoveListDown={handleCtxMoveDown}
+        onClose={closeCtxMenu}
+      />
+
+      <FileTransferConflictModal
+        conflict={transferConflict}
+        onCancel={cancelTransferConflict}
+        onOverwrite={resolveTransferConflictByOverwrite}
+        onRename={resolveTransferConflictByRename}
+      />
+
+      <FileExplorerNamePromptModal
+        prompt={fileExplorerNamePrompt}
+        onCancel={cancelFileExplorerNamePrompt}
+        onSubmit={submitFileExplorerNamePrompt}
+      />
+
+      <UnsavedChangesModal
+        open={unsavedModalOpen}
+        onCancel={() => resolveUnsavedContinueAction("cancel")}
+        onSaveAndContinue={() => resolveUnsavedContinueAction("save")}
+        onDiscardAndContinue={() => resolveUnsavedContinueAction("discard")}
+      />
+
+      <ExternalEditConflictModal
+        conflictKind={conflictModalKind}
+        onAction={resolveConflictAction}
+      />
+
+      <SaveFailureModal
+        info={saveFailureInfo}
+        onAction={resolveSaveFailureAction}
+      />
+
+      <BackupWarningNotice
+        message={backupWarningMessage}
+        onDismiss={dismissBackupWarning}
+      />
+
+      <DisplaySettingsModal
+        open={ui.displaySettingsOpen}
+        displaySettings={ui.displaySettings}
+        writingMode={ui.writingMode}
+        theme={ui.theme}
+        uiThemePresets={ui.uiThemePresets}
+        activeUiThemePresetId={ui.activeUiThemePresetId}
+        uiFont={ui.uiFont}
+        uiTextPrimary={ui.uiTextPrimary}
+        uiFontScale={ui.uiFontScale}
+        toolbarIconColor={ui.toolbarIconColor}
+        toolbarIconStroke={ui.toolbarIconStroke}
+        toolbarScale={ui.toolbarScale}
+        appTitleVisible={ui.appTitleVisible}
+        appTitlePreset={ui.appTitlePreset}
+        appTitleCustom={ui.appTitleCustom}
+        appTitleColor={ui.appTitleColor}
+        appTitleFont={ui.appTitleFont}
+        documentTheme={ui.documentTheme}
+        docFontPreset={ui.docFontPreset}
+        docHeadingFont={ui.docHeadingFont}
+        docColorSettings={ui.docColorSettings}
+        registeredFonts={ui.registeredFonts}
+        selectedFont={ui.selectedFont}
+        frontmatterVisible={ui.frontmatterVisible}
+        frontmatterShowAuthors={ui.frontmatterShowAuthors}
+        frontmatterShowTranslators={ui.frontmatterShowTranslators}
+        frontmatterShowRoleLabels={ui.frontmatterShowRoleLabels}
+        onClose={() => ui.setDisplaySettingsOpen(false)}
+        onReset={() => {
+          ui.setDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
+          handleDocumentThemeChange("ui-linked");
+          ui.setDocFontPreset(DEFAULT_DOC_FONT_PRESET);
+          ui.setDocHeadingFont(DEFAULT_DOC_HEADING_FONT);
+          ui.setUiTextPrimary(null);
+          ui.setUiFontScale(DEFAULT_UI_FONT_SCALE);
+          ui.setToolbarIconColor(null);
+          ui.setToolbarIconStroke(DEFAULT_TOOLBAR_ICON_STROKE);
+          ui.setToolbarScale(DEFAULT_TOOLBAR_SCALE);
+          ui.setAppTitleVisible(DEFAULT_APP_TITLE_VISIBLE);
+          ui.setAppTitlePreset(DEFAULT_APP_TITLE_PRESET);
+          ui.setAppTitleCustom(DEFAULT_APP_TITLE_CUSTOM);
+          ui.setAppTitleColor(null);
+          ui.setAppTitleFont(DEFAULT_APP_TITLE_FONT);
+          ui.setSelectedFont(null);
+          ui.setFrontmatterVisible(DEFAULT_FRONTMATTER_VISIBLE);
+          ui.setFrontmatterShowAuthors(DEFAULT_FRONTMATTER_SHOW_AUTHORS);
+          ui.setFrontmatterShowTranslators(DEFAULT_FRONTMATTER_SHOW_TRANSLATORS);
+          ui.setFrontmatterShowRoleLabels(DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS);
+        }}
+        onSetDisplayNumber={ui.setDisplayNumber}
+        onAutoTcyEnabledChange={ui.setAutoTcyEnabled}
+        onAutoTcyNumbersOnlyChange={ui.setAutoTcyNumbersOnly}
+        onSetHeadingDividerLevel={ui.setHeadingDividerLevel}
+        onSetHeadingAlignHorizontal={ui.setHeadingAlignHorizontal}
+        onSetHeadingAlignVertical={ui.setHeadingAlignVertical}
+        onThemeChange={ui.setTheme}
+        onSetActiveUiThemePresetId={ui.setActiveUiThemePresetId}
+        onUiFontChange={ui.setUiFont}
+        onUiTextPrimaryChange={ui.setUiTextPrimary}
+        onUiFontScaleChange={ui.setUiFontScale}
+        onToolbarIconColorChange={ui.setToolbarIconColor}
+        onToolbarIconStrokeChange={ui.setToolbarIconStroke}
+        onToolbarScaleChange={ui.setToolbarScale}
+        onAppTitleVisibleChange={ui.setAppTitleVisible}
+        onAppTitlePresetChange={ui.setAppTitlePreset}
+        onAppTitleCustomChange={ui.setAppTitleCustom}
+        onAppTitleColorChange={ui.setAppTitleColor}
+        onAppTitleFontChange={ui.setAppTitleFont}
+        onDocumentThemeChange={handleDocumentThemeChange}
+        onDocFontPresetChange={ui.setDocFontPreset}
+        onDocHeadingFontChange={ui.setDocHeadingFont}
+        onDocColorSettingsChange={ui.setDocColorSettings}
+        onSelectedFontChange={ui.setSelectedFont}
+        onRegisteredFontsChange={ui.setRegisteredFonts}
+        onFrontmatterVisibleChange={ui.setFrontmatterVisible}
+        onFrontmatterShowAuthorsChange={ui.setFrontmatterShowAuthors}
+        onFrontmatterShowTranslatorsChange={ui.setFrontmatterShowTranslators}
+        onFrontmatterShowRoleLabelsChange={ui.setFrontmatterShowRoleLabels}
+        caretColorMode={ui.caretColorMode}
+        caretColorCustom={ui.caretColorCustom}
+        onCaretColorModeChange={ui.setCaretColorMode}
+        onCaretColorCustomChange={ui.setCaretColorCustom}
+        onOpenThemeStudio={handleOpenThemeStudioPane}
+        onSendBugReport={() => void sendBugReport()}
+        onSendFeedback={() => void sendFeedback()}
+        onOpenRepository={() => void openRepository()}
+      />
+
+      {ui.lineBreakPolicyNoticeMessage && (
+        <div
+          className={`app-global-toast${ui.lineBreakPolicyNoticeIsDirty ? " is-dirty" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="app-global-toast-message">
+            {ui.lineBreakPolicyNoticeMessage}
+          </span>
+          <button
+            type="button"
+            className="app-global-toast-close"
+            onClick={ui.clearLineBreakPolicyNotice}
+            aria-label="通知を閉じる"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {tabLimitNotice && (
+        <div className="app-global-toast" role="status" aria-live="polite">
+          <span className="app-global-toast-message">{tabLimitNotice}</span>
+          <button
+            type="button"
+            className="app-global-toast-close"
+            onClick={() => setTabLimitNotice(null)}
+            aria-label="通知を閉じる"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <LargeDocumentGuardModal
+        pendingAction={largeDocGuard.pendingAction}
+        onConfirm={largeDocGuard.confirmPendingAction}
+        onCancel={largeDocGuard.cancelPendingAction}
+      />
+
+      <LineBreakPolicyConfirmModal
+        pendingPolicy={
+          pendingDocumentSettingsChange
+            ? "commonmark-strict"
+            : ui.pendingLineBreakPolicy
+        }
+        documentType={
+          pendingDocumentSettingsChange?.nextDocumentType ??
+          resolveDocumentType(ui.activeTab.frontmatterFields)
+        }
+        onConfirm={handleConfirmLineBreakPolicyChange}
+        onCancel={handleCancelLineBreakPolicyChange}
+      />
+
+      <ImeProfilerHud snapshot={imeProfilerHudSnapshot} />
+
+      <PromptModal
+        promptModal={promptModal}
+        promptValue={promptValue}
+        promptInputRef={promptInputRef}
+        rubyBoutenTab={rubyBoutenTab}
+        boutenValue={boutenValue}
+        customBoutenInput={customBoutenInput}
+        boutenOptions={boutenOptions}
+        customBoutenChars={customBoutenChars}
+        onPromptValueChange={setPromptValue}
+        onPromptCancel={handlePromptCancel}
+        onPromptSubmit={handlePromptSubmit}
+        onRubyBoutenTabChange={setRubyBoutenTab}
+        onBoutenValueChange={setBoutenValue}
+        onCustomBoutenInputChange={setCustomBoutenInput}
+        onAddCustomBoutenChar={addCustomBoutenChar}
+        onRemoveSelectedCustomBoutenChar={removeSelectedCustomBoutenChar}
+        imageSrc={imageSrc}
+        imageAlt={imageAlt}
+        imageTitle={imageTitle}
+        onImageSrcChange={setImageSrc}
+        onImageAltChange={setImageAlt}
+        onImageTitleChange={setImageTitle}
+      />
+    </main>
+  );
+}
+
+export default App;
