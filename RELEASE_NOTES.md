@@ -1,7 +1,12 @@
-# Nyoze 0.1.0-beta.1 Release Notes
+# Nyoze 0.1.0-beta.2 Release Notes
 
-Nyoze 0.1.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの初回 beta 版です。
+Nyoze 0.1.0-beta.2 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 2 回目の配布版です。
 この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。
+
+- 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
+- インストールと初回起動: [INSTALL.md](./INSTALL.md)
+
+今回の更新では、`Paragraph Plain` で文書の先頭 / 末尾段落を編集中、外側方向の境界矢印のあとに `Enter` を押すと、段落分割されず textarea 内で改行されたり、解除時に変更が反映されないことがある不具合を修正しました。
 
 ## 対象
 
@@ -12,10 +17,10 @@ Nyoze 0.1.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown 
 ## 配布物
 
 - macOS:
-  - `Nyoze-Mac-0.1.0-beta.1-arm64-Installer.dmg`
-  - `Nyoze-Mac-0.1.0-beta.1-x64-Installer.dmg`
+  - `Nyoze-Mac-0.1.0-beta.2-arm64-Installer.dmg`
+  - `Nyoze-Mac-0.1.0-beta.2-x64-Installer.dmg`
 - Windows:
-  - `Nyoze-Windows-0.1.0-beta.1-Setup.exe`
+  - `Nyoze-Windows-0.1.0-beta.2-Setup.exe`
 - Linux:
   - beta 初回では公式パッケージを提供しません
 

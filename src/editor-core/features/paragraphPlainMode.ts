@@ -216,6 +216,12 @@ export function createParagraphPlainModeController(
   }
   let paragraphPlainOverlayLayoutCache = createEmptyParagraphPlainOverlayLayoutCache()
   let paragraphPlainLastOverlayMeasureAt: number | null = null
+  // One-shot flag: when true, the next startParagraphPlain() scrolls the
+  // target block into view before overlay positioning. Set by Enter split so
+  // that a new last-line paragraph emerging below the viewport still follows
+  // the caret. Regular activations / block switches leave it false to avoid
+  // gratuitous scroll jumps.
+  let paragraphPlainScrollIntoViewPending = false
   // CSS variable name set on the overlay host (outside ProseMirror's DOM)
   // to avoid triggering ProseMirror's MutationObserver infinite loop.
   const PP_RESERVED_BLOCK_SIZE_VAR = '--pp-reserved-block-size'
@@ -731,6 +737,22 @@ export function createParagraphPlainModeController(
     }
     paragraphPlainActivePos = pos
 
+    // When a preceding action (currently only Enter split) requested scroll
+    // follow-through, nudge the scroll host so the newly active block is
+    // inside the viewport before we position the overlay against its rect.
+    // Done before overlay focus so focus({ preventScroll: true }) still holds.
+    if (paragraphPlainScrollIntoViewPending) {
+      paragraphPlainScrollIntoViewPending = false
+      const targetEl = resolveBlockElementAtPos(view, pos, typeName)
+      if (targetEl) {
+        try {
+          targetEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+        } catch {
+          // Non-fatal: older engines may reject the options bag.
+        }
+      }
+    }
+
     if (!paragraphPlainOverlayEl) return
     paragraphPlainOverlayEl.value = markdown
     paragraphPlainOverlayEl.style.display = ''
@@ -890,12 +912,31 @@ export function createParagraphPlainModeController(
     if (!direction) return false
 
     const currentPos = paragraphPlainCurrent.from
+
+    // Preflight: only commit when there is actually an adjacent plain block.
+    // Committing first at a no-target boundary would clear paragraphPlainCurrent
+    // while leaving the overlay visible, which orphans the overlay state and
+    // causes the next Enter to fall through to the native textarea newline.
+    const preflightTarget = findAdjacentPlainBlock(editor.state, currentPos, direction)
+    if (!preflightTarget) {
+      // No-target boundary arrow: treat as no-op inside Paragraph Plain so the
+      // key doesn't fall through to native textarea navigation/newline.
+      return true
+    }
+
     const committed = commitCurrentParagraphPlain(true)
     if (!committed) return false
 
     const state = editor.state
     const target = findAdjacentPlainBlock(state, currentPos, direction)
-    if (!target) return false
+    if (!target) {
+      // Commit changed the document in a way that removed the adjacent target.
+      // Recover overlay state from the fresh view instead of orphaning it.
+      if (paragraphPlainLastView) {
+        syncParagraphPlainStateFromView(paragraphPlainLastView)
+      }
+      return true
+    }
 
     const targetMarkdown = serializeBlockNode(state, target.node, target.pos, getLineBreakPolicy())
     const offset = direction === 'prev' ? targetMarkdown.length : 0
@@ -975,6 +1016,11 @@ export function createParagraphPlainModeController(
     } finally {
       paragraphPlainApplying = false
     }
+
+    // Request scroll follow-through for the re-entry into Paragraph Plain on
+    // the freshly created after-block. Without this, splits at the viewport
+    // bottom leave the new overlay / caret clipped outside .editor-surface.
+    paragraphPlainScrollIntoViewPending = true
 
     requestAnimationFrame(() => {
       if (paragraphPlainActive && paragraphPlainLastView) {
@@ -1148,6 +1194,7 @@ export function createParagraphPlainModeController(
       paragraphPlainPlugin = null
     }
     destroyParagraphPlainOverlay()
+    paragraphPlainScrollIntoViewPending = false
     paragraphPlainActive = false
     emitParagraphPlainModeChange(false)
     pushLog('plainParagraph', 'disabled')

@@ -25,6 +25,8 @@
 !/build/icons/**
 !/LICENSE
 !/NOTICE
+!/CHANGELOG.md
+!/INSTALL.md
 !/RELEASE_NOTES.md
 
 # Deny common local/OS/editor artifacts even under allowed directories.

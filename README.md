@@ -239,9 +239,11 @@ npm run package:mac:x64
 ## ドキュメント
 
 - 操作マニュアル: [MANUAL.md](./MANUAL.md)
+- インストールと初回起動: [INSTALL.md](./INSTALL.md)
+- 更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - beta リリースノート: [RELEASE_NOTES.md](./RELEASE_NOTES.md)
 
-beta テスター向けの既知制限、配布上の注意、報告時の注意は `RELEASE_NOTES.md` を正本としてまとめています。
+beta テスター向けの既知制限、配布上の注意、報告時の注意は `RELEASE_NOTES.md` を正本としてまとめています。版ごとの履歴は `CHANGELOG.md`、配布物の導入と初回起動の案内は `INSTALL.md` にまとめています。
 
 ## ライセンス
 
