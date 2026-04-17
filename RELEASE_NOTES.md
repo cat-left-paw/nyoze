@@ -26,6 +26,8 @@ Nyoze 0.1.0-beta.2 は、縦書き日本語執筆を主目的とした Markdown 
 
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 
+macOS 配布物は現状、Developer ID 署名と Apple notarization（公証）に未対応です。初回起動時に Gatekeeper の強い警告が出ることがあり、`完了` で閉じたあとに `システム設定 > プライバシーとセキュリティ > このまま開く` が必要になる場合があります。対処は [INSTALL.md](./INSTALL.md) を参照してください。
+
 ## 主な機能
 
 - 縦書き / 横書きの WYSIWYG 編集
