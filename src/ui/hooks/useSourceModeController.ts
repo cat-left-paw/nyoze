@@ -1,6 +1,6 @@
 import { EditorState, Transaction } from '@codemirror/state'
 import { redo, redoDepth, undo, undoDepth } from '@codemirror/commands'
-import type { EditorView } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import { useRef } from 'react'
 
 type SourceModeSelection = {
@@ -32,6 +32,21 @@ export type SourceModeController = {
   redo: () => boolean
   canUndo: () => boolean
   canRedo: () => boolean
+  /**
+   * Snapshot the document offset nearest the center of the CodeMirror viewport.
+   * Used to restore an approximate scroll position when leaving Source Mode.
+   */
+  captureViewportCenterOffset: () => number | null
+  /**
+   * Legacy name kept for compatibility with older wiring. It intentionally
+   * returns the center offset now, matching the PM-side centered restore.
+   */
+  captureTopVisibleOffset: () => number | null
+  /**
+   * Scroll so the given document offset is near the viewport center.
+   * No-op when offset is null or out of range. Does not steal focus.
+   */
+  scrollOffsetIntoView: (offset: number | null) => void
 }
 
 function clampSelection(
@@ -56,6 +71,48 @@ export function useSourceModeController(): SourceModeController {
     const emitStateChange = () => {
       stateVersionRef.current += 1
       listenersRef.current.forEach((listener) => listener())
+    }
+    const captureViewportCenterOffset = (): number | null => {
+      const editor = attachedEditorRef.current
+      if (!editor) return null
+      const { view } = editor
+      const scroller = view.scrollDOM
+      const rect = scroller.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return null
+
+      // The PM restore centers the resolved position, so capture Source Mode's
+      // viewport center too. Capturing the top edge here causes a half-screen
+      // jump when returning to the regular editor.
+      const probeY = rect.top + rect.height / 2
+      try {
+        const block = view.lineBlockAtHeight(probeY - view.documentTop)
+        const blockCenter =
+          block.to > block.from
+            ? Math.floor((block.from + block.to) / 2)
+            : block.from
+        return Math.max(0, Math.min(blockCenter, view.state.doc.length))
+      } catch {
+        // Fall through to coordinate probing when CodeMirror has not measured
+        // line blocks yet.
+      }
+      const contentRect = view.contentDOM.getBoundingClientRect()
+      const probeX =
+        contentRect.width > 0
+          ? contentRect.left + Math.min(16, contentRect.width / 2)
+          : rect.left + Math.min(16, rect.width / 2)
+      const probes: Array<[number, number]> = [
+        [probeX, probeY],
+        [probeX, rect.top + rect.height * 0.45],
+        [probeX, rect.top + rect.height * 0.55],
+        [rect.left + rect.width / 2, probeY],
+      ]
+      for (const [x, y] of probes) {
+        const pos = view.posAtCoords({ x, y }, false)
+        if (typeof pos === 'number') {
+          return Math.max(0, Math.min(pos, view.state.doc.length))
+        }
+      }
+      return null
     }
 
     controllerRef.current = {
@@ -137,6 +194,21 @@ export function useSourceModeController(): SourceModeController {
       canRedo() {
         const editor = attachedEditorRef.current
         return editor ? redoDepth(editor.view.state) > 0 : false
+      },
+      captureViewportCenterOffset() {
+        return captureViewportCenterOffset()
+      },
+      captureTopVisibleOffset() {
+        return captureViewportCenterOffset()
+      },
+      scrollOffsetIntoView(offset) {
+        const editor = attachedEditorRef.current
+        if (!editor || offset === null) return
+        const max = editor.view.state.doc.length
+        const clamped = Math.max(0, Math.min(offset, max))
+        editor.view.dispatch({
+          effects: EditorView.scrollIntoView(clamped, { y: 'center' }),
+        })
       },
     }
   }

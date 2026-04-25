@@ -23,6 +23,9 @@ export type UiTheme = Theme
 /** Phase5-H: UI font selector */
 export type UiFont = 'mincho' | 'gothic' | `custom:${string}`
 
+/** 0.1.1-beta.1 T1: UI language mode */
+export type UiLanguageMode = 'ja' | 'en' | 'mixed'
+
 /** App title preset selector */
 export type AppTitlePreset = 'nyoze' | 'nyoze-upper' | 'nyoze-kanji' | 'custom'
 
@@ -153,6 +156,7 @@ export type DebugSettings = {
 export type SettingsJson = {
   uiTheme?: Theme
   uiFont?: UiFont
+  uiLanguageMode?: UiLanguageMode
   uiTextPrimary?: string | null
   uiFontScale?: number
   toolbarIconColor?: string | null

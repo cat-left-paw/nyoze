@@ -25,6 +25,9 @@ export const UI_THEME_TOKEN_KEYS = [
   '--scrollbar-thumb',
   '--scrollbar-thumb-hover',
   '--scrollbar-corner',
+  '--slider-track',
+  '--slider-thumb',
+  '--slider-thumb-hover',
 ] as const
 
 /**
@@ -81,5 +84,11 @@ export function deriveUiThemeTokens(
     '--scrollbar-thumb': scrollbarBase,
     '--scrollbar-thumb-hover': `color-mix(in srgb, ${scrollbarBase} 80%, ${textPrimary} 20%)`,
     '--scrollbar-corner': `color-mix(in srgb, ${baseBg} 80%, ${border} 20%)`,
+    // Slider (range input) — thumb uses accent directly; track blends textPrimary
+    // into baseBg so the rail is always visible even when `border` sits close to
+    // `baseBg` on pale palettes (previously the track collapsed to near-invisible).
+    '--slider-track': `color-mix(in srgb, ${textPrimary} 28%, ${baseBg} 72%)`,
+    '--slider-thumb': accent,
+    '--slider-thumb-hover': `color-mix(in srgb, ${accent} 80%, ${textPrimary} 20%)`,
   }
 }

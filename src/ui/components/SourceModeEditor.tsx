@@ -1,15 +1,18 @@
 import { history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
-import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { syntaxHighlighting } from '@codemirror/language'
 import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
 import type { SourceModeController } from '../hooks/useSourceModeController'
+import { sourceModeHighlightStyle } from './sourceModeHighlightStyle'
 
 type SourceModeEditorProps = {
   controller: SourceModeController
   initialValue: string
+  /** Document offset to scroll near on mount. Null or out-of-range keeps the top. */
+  initialScrollOffset?: number | null
   onChange: (value: string) => void
   onApply: () => void
   onClose: () => void
@@ -40,7 +43,7 @@ function buildSourceModeExtensions(options: {
   return [
     history(),
     markdown(),
-    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    syntaxHighlighting(sourceModeHighlightStyle, { fallback: true }),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({
       'aria-label': 'Source Mode editor',
@@ -97,12 +100,14 @@ function createSourceModeState(
 export function SourceModeEditor({
   controller,
   initialValue,
+  initialScrollOffset,
   onChange,
   onApply,
   onClose,
 }: SourceModeEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const initialValueRef = useRef(initialValue)
+  const initialScrollOffsetRef = useRef(initialScrollOffset ?? null)
   const onChangeRef = useRef(onChange)
   const onApplyRef = useRef(onApply)
   const onCloseRef = useRef(onClose)
@@ -133,6 +138,22 @@ export function SourceModeEditor({
     })
 
     controller.attachEditor({ view, createState })
+    // Defer the initial scroll by two animation frames so CodeMirror finishes
+    // its first measure pass before we request scrollIntoView. Running too
+    // early lands on a zero-height viewport and silently no-ops.
+    const pendingOffset = initialScrollOffsetRef.current
+    if (typeof pendingOffset === 'number') {
+      const raf1 = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          controller.scrollOffsetIntoView(pendingOffset)
+        })
+      })
+      return () => {
+        window.cancelAnimationFrame(raf1)
+        controller.attachEditor(null)
+        view.destroy()
+      }
+    }
     return () => {
       controller.attachEditor(null)
       view.destroy()

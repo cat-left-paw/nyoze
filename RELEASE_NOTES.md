@@ -1,12 +1,20 @@
-# Nyoze 0.1.0-beta.2 Release Notes
+# Nyoze 0.1.1-beta.1 Release Notes
 
-Nyoze 0.1.0-beta.2 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 2 回目の配布版です。
+Nyoze 0.1.1-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 更新版です。
 この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。
 
 - 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
 
-今回の更新では、`Paragraph Plain` で文書の先頭 / 末尾段落を編集中、外側方向の境界矢印のあとに `Enter` を押すと、段落分割されず textarea 内で改行されたり、解除時に変更が反映されないことがある不具合を修正しました。
+## 今回の更新
+
+- `UI Language` に `ja` / `en` / `mixed` を追加し、主要 UI の stage1 i18n を導入しました。
+- Theme / slider / chip / tooltip / header 周辺を見直し、`Display Settings` の `TCY` を独立セクション化しました。
+- shortcut を整理し、Ruby 挿入は `Cmd/Ctrl + Alt/Option + R`、左右 pane toggle は `Cmd/Ctrl + Alt/Option + ,` / `.`、outline previous / next は `Cmd/Ctrl + Shift + ,` / `.`、outline fold toggle は `Cmd/Ctrl + Shift + L` に統一しました。
+- 左ペイン文書情報に `Type` / `EOL` を追加し、Ruby 挿入時の scroll jump と、縦書き見出し先頭付近の `ArrowLeft` 不具合を修正しました。
+- 同一文書内の scroll restore を改善し、writing-mode 切替、tab restore、`Source Mode` 往復で先頭へ戻りにくくしました。`Source Mode → 通常` は近似復元ですが、「大きく先頭へ戻る」回帰は Playwright E2E で固定しています。
+- 日本語引用符つき強調の reopen / round-trip を改善し、`**「文学的な気分」**や**「情緒」**` のような単一装飾の隣接ペアが崩れにくくなりました。
+- Windows 配布物は installer から zip へ切り替えました。`0.1.0-beta.1` / `0.1.0-beta.2` の installer 利用者も、`0.1.1-beta.1` は zip を展開して同梱の `Nyoze.exe` を起動してください。
 
 ## 対象
 
@@ -17,16 +25,19 @@ Nyoze 0.1.0-beta.2 は、縦書き日本語執筆を主目的とした Markdown 
 ## 配布物
 
 - macOS:
-  - `Nyoze-Mac-0.1.0-beta.2-arm64-Installer.dmg`
-  - `Nyoze-Mac-0.1.0-beta.2-x64-Installer.dmg`
+  - `Nyoze-Mac-0.1.1-beta.1-arm64-Installer.dmg`
+  - `Nyoze-Mac-0.1.1-beta.1-x64-Installer.dmg`
 - Windows:
-  - `Nyoze-Windows-0.1.0-beta.2-Setup.exe`
+  - `Nyoze-Windows-0.1.1-beta.1-x64.zip`
 - Linux:
-  - beta 初回では公式パッケージを提供しません
+  - 現時点の beta では公式パッケージを提供しません
 
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
+Windows 版は `x64` 向け zip のみで、32bit Windows は現行 beta の対象外です。
 
 macOS 配布物は現状、Developer ID 署名と Apple notarization（公証）に未対応です。初回起動時に Gatekeeper の強い警告が出ることがあり、`完了` で閉じたあとに `システム設定 > プライバシーとセキュリティ > このまま開く` が必要になる場合があります。対処は [INSTALL.md](./INSTALL.md) を参照してください。
+
+Windows では、`0.1.0-beta.1` / `0.1.0-beta.2` では installer を配布していましたが、`0.1.1-beta.1` は Smart App Control の影響により zip 配布へ切り替えています。既存 installer 利用者も、この版では zip 展開後の `README.txt` を確認し、同梱の `Nyoze.exe` を使ってください。
 
 ## 主な機能
 
@@ -35,7 +46,7 @@ macOS 配布物は現状、Developer ID 署名と Apple notarization（公証）
 - Markdownでの基本的な装飾と、ルビ、縦中横の表示と編集
 - `Document Type` の `Novel` / `Article` 切り替えによる、文芸用途と、ブログ記事 / 技術文書系の両方に合わせた文書運用
 - 複数タブ、File Explorer、保存前バックアップ、外部編集競合の最小検知
-- 豊富なテーマ切り替えと、GUI での簡単なテーマ編集と表示設定の調整
+- `UI Language` の `ja` / `en` / `mixed` 切り替えと、豊富なテーマ / 表示設定の調整
 - Paragraph Plain による段落単位の Markdown ソース編集
 - Source Mode による全文 Markdown ソース編集
 - frontmatter の読み取り表示と、Document Settings からの限定キー編集
@@ -59,7 +70,7 @@ Nyoze で見出し、太字、リスト、リンクなどの Markdown 記法を�
 
 ## beta 版の重要な既知制限
 
-開いてすぐ保存しても Markdown の表記がまったく変わらないことは、beta 初回の対象外です。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります。
+開いてすぐ保存しても Markdown の表記がまったく変わらないことは、現行 beta の対象外です。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります。
 
 特に次の構文や表記は完全保持しません。
 
@@ -75,7 +86,11 @@ Nyoze で見出し、太字、リスト、リンクなどの Markdown 記法を�
 
 Source Mode は raw save 専用導線ではありません。Apply / Save 時には Nyoze の parser / serializer を通るため、reference-style link や table などは raw のまま保存されない場合があります。
 
+日本語引用符つき強調のうち、`**A**や**B**` / `*A*や*B*` / `~~A~~や~~B~~` のような単一装飾の隣接は改善済みです。ただし、`***A***や***B***` や `**~~A~~**や**~~B~~**` のような複合装飾が隣接する場合は、beta では reopen / 保存後に表記が崩れることがあります。
+
 beta で実用上対応している文字コードは UTF-8 のみです。非 UTF-8 ファイルは文字化け状態で上書きしないよう、通常編集対象として開きません。Shift-JIS / CP932 などの文書は、事前に UTF-8 へ変換してから利用してください。
+
+`UI Language` は stage1 導入です。主要な visible label / tooltip は切り替わりますが、長い helper 文や一部通知文、詳細 error 文面までは完全移行していません。
 
 長大文書では、特に次の組み合わせで入力や描画が重くなる場合があります。
 
@@ -88,13 +103,14 @@ beta で実用上対応している文字コードは UTF-8 のみです。非 U
 
 重く感じたときは、まずルビ表示をオフにする、`Paragraph Plain` を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします。
 
-beta 初回では、長大文書に対する仮想化や表示範囲に応じた描画最適化は入れていません。
+beta では、長大文書に対する仮想化や表示範囲に応じた描画最適化はまだ入れていません。
 
 ## まだ対応していない導線
 
 - OS からの drag and drop 読み込み
 - Open With からの起動引き渡し
 - `.md` の OS 全体関連付け
+- Windows installer の安定配布（`0.1.1-beta.1` では zip 配布へ一時切り替え）
 - frontmatter の一般編集 UI
 - 高度な競合解決 / merge UI
 - autosave / crash recovery journal

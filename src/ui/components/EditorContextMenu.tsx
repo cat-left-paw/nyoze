@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { CommandAvailability } from '../../editor-core/types'
-import type { WritingMode } from '../../settings/types'
+import type { UiLanguageMode, WritingMode } from '../../settings/types'
 import {
   IconArrowDown,
   IconArrowBackUp,
@@ -10,6 +10,7 @@ import {
   IconBold,
   IconSquareCheck,
   IconClipboard,
+  IconClipboardText,
   IconCopy,
   IconDiamond,
   IconEraser,
@@ -30,6 +31,7 @@ import {
   IconStrikethrough,
   IconNumber123,
 } from '@tabler/icons-react'
+import { createUiTextGetter } from '../i18n/uiText'
 
 const ICON_SIZE = 16
 const ICON_STROKE = 1.2
@@ -56,12 +58,14 @@ type EditorContextMenuProps = {
   y: number
   availability: CommandAvailability
   writingMode: WritingMode
+  uiLanguageMode: UiLanguageMode
   menuRef: RefObject<HTMLDivElement | null>
   onUndo: () => void
   onRedo: () => void
   onCut: () => void
   onCopy: () => void
   onPaste: () => void | Promise<void>
+  onPastePlain: () => void | Promise<void>
   onSelectAll: () => void
   onBold: () => void
   onItalic: () => void
@@ -85,12 +89,14 @@ export function EditorContextMenu({
   y,
   availability,
   writingMode,
+  uiLanguageMode,
   menuRef,
   onUndo,
   onRedo,
   onCut,
   onCopy,
   onPaste,
+  onPastePlain,
   onSelectAll,
   onBold,
   onItalic,
@@ -107,6 +113,7 @@ export function EditorContextMenu({
   onMoveListDown,
   onClose,
 }: EditorContextMenuProps) {
+  const t = createUiTextGetter(uiLanguageMode)
   const localRef = useRef<HTMLDivElement | null>(null)
   const [submenuDirection, setSubmenuDirection] = useState<'right' | 'left'>('right')
 
@@ -156,7 +163,7 @@ export function EditorContextMenu({
   const headingEntries: MenuItem[] = [
     {
       id: 'h1',
-      label: 'Heading 1',
+      label: t('editor.heading.level1'),
       icon: <IconH1 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isHeading === 1,
@@ -165,7 +172,7 @@ export function EditorContextMenu({
     },
     {
       id: 'h2',
-      label: 'Heading 2',
+      label: t('editor.heading.level2'),
       icon: <IconH2 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isHeading === 2,
@@ -174,7 +181,7 @@ export function EditorContextMenu({
     },
     {
       id: 'h3',
-      label: 'Heading 3',
+      label: t('editor.heading.level3'),
       icon: <IconH3 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isHeading === 3,
@@ -183,7 +190,7 @@ export function EditorContextMenu({
     },
     {
       id: 'h4',
-      label: 'Heading 4',
+      label: t('editor.heading.level4'),
       icon: <IconH4 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isHeading === 4,
@@ -192,7 +199,7 @@ export function EditorContextMenu({
     },
     {
       id: 'h5',
-      label: 'Heading 5',
+      label: t('editor.heading.level5'),
       icon: <IconH5 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isHeading === 5,
@@ -201,7 +208,7 @@ export function EditorContextMenu({
     },
     {
       id: 'h6',
-      label: 'Heading 6',
+      label: t('editor.heading.level6'),
       icon: <IconH6 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isHeading === 6,
@@ -210,7 +217,7 @@ export function EditorContextMenu({
     },
     {
       id: 'paragraph',
-      label: 'Clear Heading',
+      label: t('editor.heading.clear'),
       icon: <IconHeadingOff size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: a.isHeading === false || !a.canBlockTransforms,
       action: wrap(() => onHeading(0)),
@@ -221,7 +228,7 @@ export function EditorContextMenu({
   const entries: MenuEntry[] = [
     {
       id: 'undo',
-      label: 'Undo',
+      label: t('common.undo'),
       icon: <IconArrowBackUp size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canUndo,
       action: wrap(onUndo),
@@ -229,7 +236,7 @@ export function EditorContextMenu({
     },
     {
       id: 'redo',
-      label: 'Redo',
+      label: t('common.redo'),
       icon: <IconArrowForwardUp size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canRedo,
       action: wrap(onRedo),
@@ -238,7 +245,7 @@ export function EditorContextMenu({
     { separator: true, id: 'sep-edit-history' },
     {
       id: 'cut',
-      label: 'Cut',
+      label: t('common.cut'),
       icon: <IconScissors size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canCut,
       action: wrap(onCut),
@@ -246,7 +253,7 @@ export function EditorContextMenu({
     },
     {
       id: 'copy',
-      label: 'Copy',
+      label: t('common.copy'),
       icon: <IconCopy size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canCopy,
       action: wrap(onCopy),
@@ -254,15 +261,22 @@ export function EditorContextMenu({
     },
     {
       id: 'paste',
-      label: 'Paste',
+      label: t('common.paste'),
       icon: <IconClipboard size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canPaste,
       action: wrap(onPaste),
       shortcut: `${mod}+V`,
     },
     {
+      id: 'pastePlain',
+      label: t('editor.pastePlain'),
+      icon: <IconClipboardText size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canPaste,
+      action: wrap(onPastePlain),
+    },
+    {
       id: 'selectAll',
-      label: 'Select All',
+      label: t('common.selectAll'),
       icon: <IconSelectAll size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canSelectAll,
       action: wrap(onSelectAll),
@@ -271,7 +285,7 @@ export function EditorContextMenu({
     { separator: true, id: 'sep-clipboard' },
     {
       id: 'bold',
-      label: 'Bold',
+      label: t('editor.bold'),
       icon: <IconBold size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBold,
       active: a.isBold,
@@ -280,7 +294,7 @@ export function EditorContextMenu({
     },
     {
       id: 'italic',
-      label: 'Italic',
+      label: t('editor.italic'),
       icon: <IconItalic size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canItalic,
       active: a.isItalic,
@@ -289,7 +303,7 @@ export function EditorContextMenu({
     },
     {
       id: 'strike',
-      label: 'Strikethrough',
+      label: t('editor.strike'),
       icon: <IconStrikethrough size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canStrike,
       active: a.isStrike,
@@ -298,7 +312,7 @@ export function EditorContextMenu({
     },
     {
       id: 'highlight',
-      label: 'Highlight',
+      label: t('editor.highlight'),
       icon: <IconHighlight size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canHighlight,
       active: a.isHighlight,
@@ -307,14 +321,14 @@ export function EditorContextMenu({
     { separator: true, id: 'sep-format' },
     {
       id: 'heading-submenu',
-      label: 'Heading',
+      label: t('editor.heading'),
       icon: <IconHeading size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       submenu: headingEntries,
     },
     {
       id: 'bulletList',
-      label: 'Bullet List',
+      label: t('editor.bulletList'),
       icon: <IconList size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isBulletList,
@@ -322,7 +336,7 @@ export function EditorContextMenu({
     },
     {
       id: 'orderedList',
-      label: 'Ordered List',
+      label: t('editor.orderedList'),
       icon: <IconListNumbers size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isOrderedList,
@@ -330,7 +344,7 @@ export function EditorContextMenu({
     },
     {
       id: 'checklist',
-      label: 'Checklist',
+      label: t('editor.checklist'),
       icon: <IconSquareCheck size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       active: a.isChecklist,
@@ -338,7 +352,7 @@ export function EditorContextMenu({
     },
     {
       id: 'moveUp',
-      label: 'Move List Item Up',
+      label: t('editor.moveListItemUp'),
       icon: <IconArrowUp size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canMoveListUp,
       action: wrap(onMoveListUp),
@@ -346,7 +360,7 @@ export function EditorContextMenu({
     },
     {
       id: 'moveDown',
-      label: 'Move List Item Down',
+      label: t('editor.moveListItemDown'),
       icon: <IconArrowDown size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canMoveListDown,
       action: wrap(onMoveListDown),
@@ -355,21 +369,21 @@ export function EditorContextMenu({
     { separator: true, id: 'sep-extra' },
     {
       id: 'ruby',
-      label: 'Insert Ruby',
+      label: t('editor.insertRuby'),
       icon: <IconDiamond size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canInsertRuby,
       action: wrap(onRuby),
     },
     {
       id: 'tcy',
-      label: 'TCY',
+      label: t('editor.tcy'),
       icon: <IconNumber123 size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canToggleTcy,
       action: wrap(onTcy),
     },
     {
       id: 'clearFormat',
-      label: 'Clear Format',
+      label: t('editor.clearFormat'),
       icon: <IconEraser size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canClearFormat,
       action: wrap(onClearFormat),

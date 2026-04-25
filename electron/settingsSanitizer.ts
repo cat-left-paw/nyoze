@@ -8,6 +8,7 @@
  * This module runs in the main process (Node) and has no renderer deps.
  */
 import { resolveAutoTcyDigitRange } from "../src/editor-core/features/autoTcy";
+import { normalizeUiLanguageMode } from "../src/settings/uiLanguageMode";
 
 // ---- Constants ----
 
@@ -374,6 +375,8 @@ export function sanitizeSettingsJson(
   // --- Theme enums ---
   if (isValidTheme(raw.uiTheme)) out.uiTheme = raw.uiTheme;
   if (isValidUiFont(raw.uiFont)) out.uiFont = raw.uiFont;
+  const uiLanguageMode = normalizeUiLanguageMode(raw.uiLanguageMode);
+  if (uiLanguageMode) out.uiLanguageMode = uiLanguageMode;
   if (
     typeof raw.documentTheme === "string" &&
     VALID_DOC_THEMES.has(raw.documentTheme)

@@ -6,6 +6,7 @@ import type {
   HeadingInfo,
   LineBreakPolicy,
   LogEntry,
+  MarkdownDocumentOptions,
 } from "../../editor-core/types";
 import { resolveAutoTcyDigitRange } from "../../editor-core/features/autoTcy";
 import type { FrontmatterFields } from "../../editor-core/io/frontmatter";
@@ -31,6 +32,7 @@ import {
   UI_THEME_MAIN_COLORS,
 } from "../../settings/defaults";
 import { normalizeAppTitleCustomValue } from "../../settings/appTitleCustom";
+import { normalizeUiLanguageMode } from "../../settings/uiLanguageMode";
 import { normalizeTheme } from "../../settings/themeUtils";
 import {
   migrateToSettingsJson,
@@ -57,6 +59,7 @@ import {
   loadSelectedFont,
   loadSettingsJson,
   loadUiFont,
+  loadUiLanguageMode,
   loadUiFontScale,
   loadUiTextPrimary,
   loadToolbarIconColor,
@@ -84,6 +87,7 @@ import {
   saveRubyVisibility,
   saveSelectedFont,
   saveUiFont,
+  saveUiLanguageMode,
   saveUiFontScale,
   saveUiTextPrimary,
   saveToolbarIconColor,
@@ -110,6 +114,7 @@ import type {
   DocumentTheme,
   Theme,
   UiFont,
+  UiLanguageMode,
   UiThemePreset,
   WritingMode,
 } from "../../settings/types";
@@ -188,6 +193,8 @@ export type EditorTab = {
   cleanMarkdownSnapshot: string;
   /** Per-tab frontmatter parsed from the markdown. */
   frontmatterFields: FrontmatterFields;
+  /** Effective per-document Markdown options used by the active runtime. */
+  documentMarkdownOptions: MarkdownDocumentOptions;
   /** Per-tab character count of the document body. */
   characterCount: number;
   /** BETA-IO1: File stat baseline for external edit conflict detection. null for untitled. */
@@ -200,6 +207,23 @@ export type EditorTab = {
   lineBreakPolicy: LineBreakPolicy;
   /** BETA-SP11: 読み込み時に検出した改行種別。保存時に復元する。 */
   eol: "lf" | "crlf";
+  /** Per-tab editor surface scroll state for same-document restore. */
+  scrollTop: number;
+  scrollLeft: number;
+  /**
+   * Layout-independent viewport anchor (textOffset + PM pos) captured on
+   * tab leave / writing-mode toggle / Source Mode enter. Used to restore the
+   * visible region across writing-mode changes and Source Mode round-trips.
+   */
+  viewportAnchorPmPos: number | null;
+  viewportAnchorTextOffset: number | null;
+  viewportAnchorTextTotal: number | null;
+  /**
+   * Source Mode scroll offset captured while the Source Mode overlay was
+   * visible. Used to restore near the same Markdown location when returning
+   * to WYSIWYG, and to re-enter Source Mode at the same offset next time.
+   */
+  sourceModeTopOffset: number | null;
 };
 
 export type ActiveTabPatch = Partial<
@@ -211,12 +235,19 @@ export type ActiveTabPatch = Partial<
     | "markdownSnapshot"
     | "cleanMarkdownSnapshot"
     | "frontmatterFields"
+    | "documentMarkdownOptions"
     | "characterCount"
     | "savedStat"
     | "writingMode"
     | "writingModeFollowsTypeRecommendation"
     | "lineBreakPolicy"
     | "eol"
+    | "scrollTop"
+    | "scrollLeft"
+    | "viewportAnchorPmPos"
+    | "viewportAnchorTextOffset"
+    | "viewportAnchorTextTotal"
+    | "sourceModeTopOffset"
   >
 >;
 
@@ -610,12 +641,19 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       markdownSnapshot: "",
       cleanMarkdownSnapshot: "",
       frontmatterFields: {},
+      documentMarkdownOptions: { preserveEmptyParagraphs: false },
       characterCount: 0,
       savedStat: null,
       writingMode: initialWritingMode.current,
       writingModeFollowsTypeRecommendation: true,
       lineBreakPolicy: initialLineBreakPolicy.current,
       eol: "lf",
+      scrollTop: 0,
+      scrollLeft: 0,
+      viewportAnchorPmPos: null,
+      viewportAnchorTextOffset: null,
+      viewportAnchorTextTotal: null,
+      sourceModeTopOffset: null,
     },
   ]);
   const [activeTabId, setActiveTabId] = useState(INITIAL_TAB_ID);
@@ -634,6 +672,9 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
 
   const [theme, _setTheme] = useState(loadUiTheme);
   const [uiFont, _setUiFont] = useState<UiFont>(() => loadUiFont());
+  const [uiLanguageMode, setUiLanguageMode] = useState<UiLanguageMode>(() =>
+    loadUiLanguageMode(),
+  );
   const [uiTextPrimary, _setUiTextPrimary] = useState<string | null>(() =>
     loadUiTextPrimary(),
   );
@@ -720,11 +761,19 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
         markdownSnapshot: "",
         cleanMarkdownSnapshot: "",
         frontmatterFields: {},
+        documentMarkdownOptions: { preserveEmptyParagraphs: false },
         characterCount: 0,
         savedStat: null,
         writingMode: initialWritingMode.current,
         writingModeFollowsTypeRecommendation: true,
         lineBreakPolicy: initialLineBreakPolicy.current,
+        eol: "lf",
+        scrollTop: 0,
+        scrollLeft: 0,
+        viewportAnchorPmPos: null,
+        viewportAnchorTextOffset: null,
+        viewportAnchorTextTotal: null,
+        sourceModeTopOffset: null,
       },
     [tabs, activeTabId],
   );
@@ -756,6 +805,10 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       if (normalizedTheme) _setTheme(normalizedTheme);
       const normalizedUiFont = normalizeUiFont(settings.uiFont);
       if (normalizedUiFont) _setUiFont(normalizedUiFont);
+      const normalizedUiLanguageMode = normalizeUiLanguageMode(
+        settings.uiLanguageMode,
+      );
+      if (normalizedUiLanguageMode) setUiLanguageMode(normalizedUiLanguageMode);
       if (settings.uiTextPrimary !== undefined) {
         _setUiTextPrimary(normalizeUiTextPrimary(settings.uiTextPrimary));
       }
@@ -923,6 +976,13 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       void patchSettingsJson({ uiFont });
     }
   }, [uiFont, settingsSyncReady]);
+
+  useEffect(() => {
+    saveUiLanguageMode(uiLanguageMode);
+    if (settingsSyncReady) {
+      void patchSettingsJson({ uiLanguageMode });
+    }
+  }, [uiLanguageMode, settingsSyncReady]);
 
   useEffect(() => {
     if (uiTextPrimary === null) {
@@ -2367,6 +2427,8 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setTheme,
     uiFont,
     setUiFont,
+    uiLanguageMode,
+    setUiLanguageMode,
     uiTextPrimary,
     setUiTextPrimary,
     uiFontScale,

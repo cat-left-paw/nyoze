@@ -40,6 +40,11 @@ type CreateMarkdownIoControllerOptions = {
   defaultEditorContent: unknown
   splitLeadingFrontmatter: (markdown: string) => SplitFrontmatterResult
   joinWithFrontmatter: (frontmatterPrefix: string, body: string) => string
+  applyDocumentMarkdownOptionsForLoad?: (args: {
+    frontmatterPrefix: string
+    markdownBody: string
+    lineBreakPolicy: LineBreakPolicy
+  }) => void
   measureCanonicalDiff: (source: string, canonical: string) => CanonicalDiffResult
   shortenForLog: (value: string, maxLength: number) => string
   maxDiffLogOps: number
@@ -59,6 +64,7 @@ export function createMarkdownIoController({
   defaultEditorContent,
   splitLeadingFrontmatter,
   joinWithFrontmatter,
+  applyDocumentMarkdownOptionsForLoad,
   measureCanonicalDiff,
   shortenForLog,
   maxDiffLogOps,
@@ -80,6 +86,11 @@ export function createMarkdownIoController({
     frontmatterPrefix = split.frontmatterPrefix
 
     const currentPolicy = getLineBreakPolicy()
+    applyDocumentMarkdownOptionsForLoad?.({
+      frontmatterPrefix,
+      markdownBody: split.body,
+      lineBreakPolicy: currentPolicy,
+    })
     const content = parseMarkdownToJson(split.body, currentPolicy)
     setEditorContent(content)
 

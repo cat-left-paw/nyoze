@@ -9,6 +9,7 @@ import {
   IconFileText,
   IconHeading,
   IconHighlight,
+  IconNumbers,
   IconThumbUp,
   IconTool,
   IconTypography,
@@ -19,6 +20,7 @@ import type {
   AppTitlePreset,
   DisplaySettings,
   DisplaySettingsNumericKey,
+  DocThemePreset,
   DocumentColorSettings,
   DocumentFontPreset,
   DocumentHeadingFont,
@@ -26,6 +28,7 @@ import type {
   HeadingAlign,
   Theme,
   UiFont,
+  UiLanguageMode,
   UiThemePreset,
   WritingMode,
 } from "../../settings/types";
@@ -35,22 +38,26 @@ import {
   APP_TITLE_PRESET_LABELS,
   DEFAULT_TOOLBAR_ICON_STROKE,
   DEFAULT_TOOLBAR_SCALE,
-  DOC_HEADING_FONT_LABELS,
-  DOC_FONT_PRESET_LABELS,
-  DOCUMENT_THEME_LABELS,
   MAX_TOOLBAR_ICON_STROKE,
   MAX_TOOLBAR_SCALE,
   MIN_TOOLBAR_ICON_STROKE,
   MIN_TOOLBAR_SCALE,
   THEME_LABELS,
-  UI_FONT_LABELS,
   UI_THEME_FONT_PRESETS,
   UI_THEME_TEXT_PRIMARY_PRESETS,
 } from "../../settings/defaults";
 import { getAppTitleCustomDisplayWidth } from "../../settings/appTitleCustom";
+import {
+  isBundledDocThemePreset,
+  isBundledUiThemePreset,
+  isStandardDocThemePresetId,
+  isSystemUiThemePreset,
+} from "../../settings/theme-packs";
 import { UI_THEME_VALUES } from "../../settings/themeUtils";
 import type { CaretColorMode } from "../../theme/caretColor";
 import { useFocusTrap } from "../hooks/useFocusTrap";
+import { createUiTextGetter } from "../i18n/uiText";
+import { buildBundledUiPresetGroups } from "../utils/themePresetGrouping";
 import { DisplayNumberSlider } from "./DisplayNumberSlider";
 import {
   createDefaultDisplaySettingsSectionOpenState,
@@ -63,6 +70,7 @@ type DisplaySettingsModalProps = {
   open: boolean;
   displaySettings: DisplaySettings;
   writingMode: WritingMode;
+  uiLanguageMode: UiLanguageMode;
   theme: Theme;
   uiThemePresets: UiThemePreset[];
   activeUiThemePresetId: string | null;
@@ -78,6 +86,8 @@ type DisplaySettingsModalProps = {
   appTitleColor: string | null;
   appTitleFont: AppTitleFont;
   documentTheme: DocumentTheme;
+  docThemePresets: DocThemePreset[];
+  activeDocThemePresetId: string | null;
   docFontPreset: DocumentFontPreset;
   docHeadingFont: DocumentHeadingFont;
   docColorSettings: DocumentColorSettings;
@@ -106,6 +116,7 @@ type DisplaySettingsModalProps = {
   onThemeChange: (theme: Theme) => void;
   onSetActiveUiThemePresetId: (id: string) => void;
   onUiFontChange: (value: UiFont) => void;
+  onUiLanguageModeChange: (value: UiLanguageMode) => void;
   onUiTextPrimaryChange: (value: string | null) => void;
   onUiFontScaleChange: (value: number) => void;
   onToolbarIconColorChange: (value: string | null) => void;
@@ -117,6 +128,7 @@ type DisplaySettingsModalProps = {
   onAppTitleColorChange: (value: string | null) => void;
   onAppTitleFontChange: (value: AppTitleFont) => void;
   onDocumentThemeChange: (docTheme: DocumentTheme) => void;
+  onSetActiveDocThemePresetId: (id: string) => void;
   onDocFontPresetChange: (preset: DocumentFontPreset) => void;
   onDocHeadingFontChange: (value: DocumentHeadingFont) => void;
   onDocColorSettingsChange: (settings: DocumentColorSettings) => void;
@@ -136,11 +148,6 @@ type DisplaySettingsModalProps = {
   onSendFeedback: () => void;
   onOpenRepository: () => void;
 };
-
-function isSystemUiPreset(preset: UiThemePreset): boolean {
-  if (preset.kind) return preset.kind === "system";
-  return preset.id.startsWith("preset-ui-");
-}
 
 type SectionHeadingProps = {
   title: string;
@@ -185,6 +192,7 @@ export function DisplaySettingsModal({
   open,
   displaySettings,
   writingMode,
+  uiLanguageMode,
   theme,
   uiThemePresets,
   activeUiThemePresetId,
@@ -200,6 +208,8 @@ export function DisplaySettingsModal({
   appTitleColor,
   appTitleFont,
   documentTheme,
+  docThemePresets,
+  activeDocThemePresetId,
   docFontPreset,
   docHeadingFont,
   docColorSettings,
@@ -220,6 +230,7 @@ export function DisplaySettingsModal({
   onThemeChange,
   onSetActiveUiThemePresetId,
   onUiFontChange,
+  onUiLanguageModeChange,
   onUiTextPrimaryChange,
   onUiFontScaleChange,
   onToolbarIconColorChange,
@@ -231,6 +242,7 @@ export function DisplaySettingsModal({
   onAppTitleColorChange,
   onAppTitleFontChange,
   onDocumentThemeChange,
+  onSetActiveDocThemePresetId,
   onDocFontPresetChange,
   onDocHeadingFontChange,
   onDocColorSettingsChange,
@@ -249,6 +261,7 @@ export function DisplaySettingsModal({
   onSendFeedback,
   onOpenRepository,
 }: DisplaySettingsModalProps) {
+  const t = createUiTextGetter(uiLanguageMode);
   const overlayRef = useRef<HTMLDivElement>(null);
   const previousOpenRef = useRef(open);
   useFocusTrap(overlayRef, open);
@@ -345,13 +358,34 @@ export function DisplaySettingsModal({
       ? null
       : (uiThemePresets.find((preset) => preset.id === activeUiThemePresetId) ??
         null);
+  const bundledUiThemePresets = uiThemePresets
+    .filter((preset) => isBundledUiThemePreset(preset));
   const customUiThemePresets = uiThemePresets
-    .filter((preset) => !isSystemUiPreset(preset))
+    .filter((preset) => !isSystemUiThemePreset(preset))
     .sort((a, b) => a.name.localeCompare(b.name, "ja"));
   const selectedUiThemeValue =
-    activeUiPreset && !isSystemUiPreset(activeUiPreset)
+    activeUiPreset && !activeUiPreset.id.startsWith("preset-ui-")
       ? `preset:${activeUiPreset.id}`
       : `theme:${theme}`;
+  const activeDocPreset =
+    activeDocThemePresetId === null
+      ? null
+      : (docThemePresets.find((preset) => preset.id === activeDocThemePresetId) ??
+        null);
+  const bundledDocThemePresets = docThemePresets
+    .filter((preset) => isBundledDocThemePreset(preset))
+    .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const customDocThemePresets = docThemePresets
+    .filter(
+      (preset) =>
+        !isStandardDocThemePresetId(preset.id) &&
+        !isBundledDocThemePreset(preset),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const selectedDocThemeValue =
+    activeDocPreset && !isStandardDocThemePresetId(activeDocPreset.id)
+      ? `preset:${activeDocPreset.id}`
+      : `theme:${documentTheme}`;
 
   const handleUiThemeSelect = useCallback(
     (value: string) => {
@@ -363,7 +397,8 @@ export function DisplaySettingsModal({
       if (!value.startsWith("theme:")) return;
       const nextTheme = value.slice("theme:".length) as Theme;
       const systemPreset = uiThemePresets.find(
-        (preset) => isSystemUiPreset(preset) && preset.baseTheme === nextTheme,
+        (preset) =>
+          isSystemUiThemePreset(preset) && preset.baseTheme === nextTheme,
       );
       if (systemPreset) {
         onSetActiveUiThemePresetId(systemPreset.id);
@@ -372,6 +407,18 @@ export function DisplaySettingsModal({
       onThemeChange(nextTheme);
     },
     [onSetActiveUiThemePresetId, onThemeChange, uiThemePresets],
+  );
+  const handleDocumentThemeSelect = useCallback(
+    (value: string) => {
+      if (value.startsWith("preset:")) {
+        const id = value.slice("preset:".length);
+        if (id) onSetActiveDocThemePresetId(id);
+        return;
+      }
+      if (!value.startsWith("theme:")) return;
+      onDocumentThemeChange(value.slice("theme:".length) as DocumentTheme);
+    },
+    [onDocumentThemeChange, onSetActiveDocThemePresetId],
   );
 
   useEffect(() => {
@@ -452,11 +499,44 @@ export function DisplaySettingsModal({
   const effectiveToolbarIconColor = toolbarIconColor ?? effectiveUiTextPrimary;
   const effectiveAppTitleColor =
     appTitleColor ?? APP_TITLE_COLOR_PRESETS[theme];
+  const uiFontLabels = {
+    mincho: t("font.mincho"),
+    gothic: t("font.gothic"),
+  } as const;
+  const docHeadingFontLabels = {
+    "same-as-body": t("font.sameAsBody"),
+    mincho: uiFontLabels.mincho,
+    gothic: uiFontLabels.gothic,
+  } as const;
+  const documentThemeLabels = {
+    "ui-linked": t("displaySettings.documentTheme.uiLinked"),
+    "paper-light": t("displaySettings.documentTheme.paperLight"),
+    "paper-dark": t("displaySettings.documentTheme.paperDark"),
+    bow: t("displaySettings.documentTheme.bow"),
+    wob: t("displaySettings.documentTheme.wob"),
+    "soft-neutral": t("displaySettings.documentTheme.softNeutral"),
+  } as const;
+  const appTitlePresetLabels = {
+    ...APP_TITLE_PRESET_LABELS,
+    custom: t("displaySettings.appTitlePreset.custom"),
+  };
+  const bundledUiPresetGroups = buildBundledUiPresetGroups(
+    bundledUiThemePresets,
+    t("common.curated"),
+  );
 
   const headingAlignLabels: Record<HeadingAlign, string> =
     writingMode === "horizontal-tb"
-      ? { start: "左", center: "中央", end: "右" }
-      : { start: "上", center: "中央", end: "下" };
+      ? {
+          start: t("displaySettings.align.left"),
+          center: t("displaySettings.align.center"),
+          end: t("displaySettings.align.right"),
+        }
+      : {
+          start: t("displaySettings.align.top"),
+          center: t("displaySettings.align.center"),
+          end: t("displaySettings.align.bottom"),
+        };
   const currentDocHeadingAlign: HeadingAlign =
     writingMode === "horizontal-tb"
       ? displaySettings.headingAlignHorizontal
@@ -472,21 +552,53 @@ export function DisplaySettingsModal({
         className="display-settings-dialog"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="prompt-title">表示設定</div>
+        <div className="prompt-title">{t("displaySettings.title")}</div>
 
         <div className="settings-scroll-container">
           {/* ── Section 1: 基本 ── */}
           <div className="settings-section">
             <SectionHeading
-              title="基本設定"
+              title={t("displaySettings.section.basic")}
               icon={IconAdjustmentsHorizontal}
               isOpen={sectionOpenState.basic}
               onToggle={() => toggleSection("basic")}
             />
             {sectionOpenState.basic && (
               <div className="settings-section-body">
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("settings.uiLanguageMode")}
+                    </div>
+                    {uiLanguageMode === "mixed" && (
+                      <div className="setting-item-desc">
+                        {t("settings.uiLanguageMode.option.mixed", "helper")}
+                      </div>
+                    )}
+                  </div>
+                  <div className="setting-item-control">
+                    <select
+                      className="setting-select"
+                      value={uiLanguageMode}
+                      onChange={(e) =>
+                        onUiLanguageModeChange(e.target.value as UiLanguageMode)
+                      }
+                    >
+                      <option value="ja">
+                        {t("settings.uiLanguageMode.option.ja")}
+                      </option>
+                      <option value="en">
+                        {t("settings.uiLanguageMode.option.en")}
+                      </option>
+                      <option value="mixed">
+                        {t("settings.uiLanguageMode.option.mixed")}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+
                 <DisplayNumberSlider
-                  label="フォントサイズ"
+                  label={t("displaySettings.fontSize")}
                   min={14}
                   max={36}
                   step={1}
@@ -498,7 +610,7 @@ export function DisplaySettingsModal({
                 />
 
                 <DisplayNumberSlider
-                  label="行間"
+                  label={t("displaySettings.lineHeight")}
                   min={1.2}
                   max={2.8}
                   step={0.05}
@@ -508,12 +620,35 @@ export function DisplaySettingsModal({
                     onSetDisplayNumber("lineHeight", value, 1.2, 2.8)
                   }
                 />
+              </div>
+            )}
+          </div>
+
+          {/* ── Section 2: TCY ── */}
+          <div className="settings-section">
+            <SectionHeading
+              title={t("displaySettings.section.tcy")}
+              icon={IconNumbers}
+              isOpen={sectionOpenState.tcy}
+              onToggle={() => toggleSection("tcy")}
+            />
+            {sectionOpenState.tcy && (
+              <div className="settings-section-body">
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-desc">
+                      {t("displaySettings.section.tcy", "helper")}
+                    </div>
+                  </div>
+                </div>
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">auto TCY</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.autoTcy")}
+                    </div>
                     <div className="setting-item-desc">
-                      表示のみ。文書自体は変更しない
+                      {t("displaySettings.autoTcy", "helper")}
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -525,16 +660,18 @@ export function DisplaySettingsModal({
                           onAutoTcyEnabledChange(e.target.checked)
                         }
                       />
-                      縦書き WYSIWYG で有効にする
+                      {t("displaySettings.autoTcyVerticalWysiwyg")}
                     </label>
                   </div>
                 </div>
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">auto TCY 対象</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.autoTcyTarget")}
+                    </div>
                     <div className="setting-item-desc">
-                      英字を含む短い単語や URL 断片を対象外にする
+                      {t("displaySettings.autoTcyTarget", "helper")}
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -547,19 +684,19 @@ export function DisplaySettingsModal({
                           onAutoTcyNumbersOnlyChange(e.target.checked)
                         }
                       />
-                      数字だけを対象にする
+                      {t("displaySettings.autoTcyDigitsOnly")}
                     </label>
                   </div>
                 </div>
 
                 <DisplayNumberSlider
-                  label="最小桁数"
+                  label={t("displaySettings.minDigits")}
                   min={1}
                   max={4}
                   step={1}
                   value={displaySettings.autoTcyMinDigits}
                   valueText={String(displaySettings.autoTcyMinDigits)}
-                  description="対象トークンの下限。記号ペア（!! / !? / ??）は常に対象です"
+                  description={t("displaySettings.minDigits", "helper")}
                   disabled={!displaySettings.autoTcyEnabled}
                   onChange={(value) =>
                     onSetDisplayNumber("autoTcyMinDigits", value, 1, 4)
@@ -567,7 +704,7 @@ export function DisplaySettingsModal({
                 />
 
                 <DisplayNumberSlider
-                  label="最大桁数"
+                  label={t("displaySettings.maxDigits")}
                   min={1}
                   max={4}
                   step={1}
@@ -582,10 +719,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 2: フォント ── */}
+          {/* ── Section 3: フォント ── */}
           <div className="settings-section">
             <SectionHeading
-              title="フォント"
+              title={t("displaySettings.section.font")}
               icon={IconTypography}
               isOpen={sectionOpenState.font}
               onToggle={() => toggleSection("font")}
@@ -594,7 +731,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">文書フォント</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.documentFont")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="setting-options">
@@ -609,7 +748,7 @@ export function DisplaySettingsModal({
                               onDocFontPresetChange(value);
                             }}
                           />
-                          {DOC_FONT_PRESET_LABELS[value]}
+                          {uiFontLabels[value]}
                         </label>
                       ))}
                     </div>
@@ -617,12 +756,14 @@ export function DisplaySettingsModal({
                 </div>
 
                 <div className="font-register-section">
-                  <div className="font-register-heading">カスタムフォント</div>
+                  <div className="font-register-heading">
+                    {t("displaySettings.customFonts")}
+                  </div>
                   <div className="font-register-input-row">
                     <input
                       type="text"
                       className="font-register-input"
-                      placeholder="フォント名を入力"
+                      placeholder={t("displaySettings.fontNamePlaceholder")}
                       value={fontInput}
                       onChange={(e) => setFontInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -638,7 +779,7 @@ export function DisplaySettingsModal({
                       onClick={handleAddFont}
                       disabled={!fontInput.trim()}
                     >
-                      登録
+                      {t("common.register")}
                     </button>
                     <button
                       type="button"
@@ -646,7 +787,9 @@ export function DisplaySettingsModal({
                       onClick={handleFetchSystemFonts}
                       disabled={systemFontsLoading}
                     >
-                      {systemFontsLoading ? "取得中…" : "システムフォント取得"}
+                      {systemFontsLoading
+                        ? t("displaySettings.fetchingSystemFonts")
+                        : t("displaySettings.fetchSystemFonts")}
                     </button>
                   </div>
 
@@ -696,7 +839,7 @@ export function DisplaySettingsModal({
                             type="button"
                             className="font-remove-btn"
                             onClick={() => handleRemoveFont(font)}
-                            title="削除"
+                            title={t("common.remove")}
                           >
                             ×
                           </button>
@@ -708,12 +851,15 @@ export function DisplaySettingsModal({
                   {systemFonts !== null && (
                     <div className="system-font-list">
                       <div className="system-font-list-header">
-                        <span>システムフォント（{systemFonts.length}件）</span>
+                        <span>
+                          {t("displaySettings.systemFonts")}（{systemFonts.length}
+                          件）
+                        </span>
                         <button
                           type="button"
                           className="font-remove-btn"
                           onClick={() => setSystemFonts(null)}
-                          title="閉じる"
+                          title={t("common.close")}
                         >
                           ×
                         </button>
@@ -730,7 +876,7 @@ export function DisplaySettingsModal({
                             <span style={{ fontFamily: font }}>{font}</span>
                             {registeredFonts.includes(font) && (
                               <span className="system-font-registered-badge">
-                                登録済
+                                {t("displaySettings.registered")}
                               </span>
                             )}
                           </button>
@@ -743,10 +889,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 3: ルビ ── */}
+          {/* ── Section 4: ルビ ── */}
           <div className="settings-section">
             <SectionHeading
-              title="ルビ"
+              title={t("displaySettings.section.ruby")}
               icon={IconDiamond}
               isOpen={sectionOpenState.ruby}
               onToggle={() => toggleSection("ruby")}
@@ -755,7 +901,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">ルビサイズ</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.rubySize")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -783,7 +931,9 @@ export function DisplaySettingsModal({
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">ルビ位置オフセット</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.rubyOffset")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -812,10 +962,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 4: 見出し設定 ── */}
+          {/* ── Section 5: 見出し設定 ── */}
           <div className="settings-section">
             <SectionHeading
-              title="見出し設定"
+              title={t("displaySettings.section.heading")}
               icon={IconHeading}
               isOpen={sectionOpenState.heading}
               onToggle={() => toggleSection("heading")}
@@ -824,7 +974,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">見出しフォント</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.headingFont")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <select
@@ -837,13 +989,13 @@ export function DisplaySettingsModal({
                       }
                     >
                       <option value="same-as-body">
-                        {DOC_HEADING_FONT_LABELS["same-as-body"]}
+                        {docHeadingFontLabels["same-as-body"]}
                       </option>
                       <option value="mincho">
-                        {DOC_HEADING_FONT_LABELS.mincho}
+                        {docHeadingFontLabels.mincho}
                       </option>
                       <option value="gothic">
-                        {DOC_HEADING_FONT_LABELS.gothic}
+                        {docHeadingFontLabels.gothic}
                       </option>
                       {isCustomHeadingFont && !hasHeadingCustomFontOption && (
                         <option value={docHeadingFont}>
@@ -861,7 +1013,9 @@ export function DisplaySettingsModal({
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">見出し色</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.headingColor")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="color-control">
@@ -889,18 +1043,20 @@ export function DisplaySettingsModal({
                         })
                       }
                     >
-                      本文色でリセット
+                      {t("displaySettings.resetToBodyColor")}
                     </button>
                   </div>
                 </div>
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">見出し位置</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.headingAlign")}
+                    </div>
                     <div className="setting-item-desc">
                       {writingMode === "horizontal-tb"
-                        ? "横書き（H1〜H6 共通）"
-                        : "縦書き（H1〜H6 共通）"}
+                        ? t("displaySettings.headingAlignHorizontal")
+                        : t("displaySettings.headingAlignVertical")}
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -922,7 +1078,9 @@ export function DisplaySettingsModal({
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">見出し後マージン</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.headingMarginAfter")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -951,7 +1109,7 @@ export function DisplaySettingsModal({
                 <div className="setting-item">
                   <div className="setting-item-info">
                     <div className="setting-item-name">
-                      見出し区切り線（レベル別）
+                      {t("displaySettings.headingDividers")}
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -982,10 +1140,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 5: 余白設定 ── */}
+          {/* ── Section 6: 余白設定 ── */}
           <div className="settings-section">
             <SectionHeading
-              title="余白設定"
+              title={t("displaySettings.section.spacing")}
               icon={IconArrowsMoveHorizontal}
               isOpen={sectionOpenState.spacing}
               onToggle={() => toggleSection("spacing")}
@@ -994,7 +1152,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">上余白</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.paddingTop")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -1022,7 +1182,9 @@ export function DisplaySettingsModal({
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">下余白</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.paddingBottom")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -1051,10 +1213,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 6: フロントマター表示 ── */}
+          {/* ── Section 7: フロントマター表示 ── */}
           <div className="settings-section">
             <SectionHeading
-              title="フロントマター表示"
+              title={t("displaySettings.section.frontmatter")}
               icon={IconFileText}
               isOpen={sectionOpenState.frontmatter}
               onToggle={() => toggleSection("frontmatter")}
@@ -1069,7 +1231,7 @@ export function DisplaySettingsModal({
                       onFrontmatterVisibleChange(e.target.checked)
                     }
                   />
-                  <span>フロントマターを表示</span>
+                  <span>{t("displaySettings.frontmatterVisible")}</span>
                 </label>
                 <label className="settings-toggle-row">
                   <input
@@ -1080,7 +1242,7 @@ export function DisplaySettingsModal({
                       onFrontmatterShowAuthorsChange(e.target.checked)
                     }
                   />
-                  <span>著者情報を表示</span>
+                  <span>{t("displaySettings.frontmatterAuthors")}</span>
                 </label>
                 <label className="settings-toggle-row">
                   <input
@@ -1091,7 +1253,7 @@ export function DisplaySettingsModal({
                       onFrontmatterShowTranslatorsChange(e.target.checked)
                     }
                   />
-                  <span>翻訳者情報を表示</span>
+                  <span>{t("displaySettings.frontmatterTranslators")}</span>
                 </label>
                 <label className="settings-toggle-row">
                   <input
@@ -1102,16 +1264,16 @@ export function DisplaySettingsModal({
                       onFrontmatterShowRoleLabelsChange(e.target.checked)
                     }
                   />
-                  <span>役割ラベルを表示</span>
+                  <span>{t("displaySettings.frontmatterRoleLabels")}</span>
                 </label>
               </div>
             )}
           </div>
 
-          {/* ── Section 7: UIテーマ ── */}
+          {/* ── Section 8: UIテーマ ── */}
           <div className="settings-section">
             <SectionHeading
-              title="UIテーマ"
+              title={t("displaySettings.section.uiTheme")}
               icon={IconDeviceImacHeart}
               isOpen={sectionOpenState.uiTheme}
               onToggle={() => toggleSection("uiTheme")}
@@ -1120,7 +1282,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">選択</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.select")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <select
@@ -1128,15 +1292,27 @@ export function DisplaySettingsModal({
                       value={selectedUiThemeValue}
                       onChange={(e) => handleUiThemeSelect(e.target.value)}
                     >
-                      <optgroup label="標準">
+                      <optgroup label={t("common.standard")}>
                         {UI_THEME_VALUES.map((value) => (
                           <option key={value} value={`theme:${value}`}>
                             {THEME_LABELS[value]}
                           </option>
                         ))}
                       </optgroup>
+                      {bundledUiPresetGroups.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.presets.map((preset) => (
+                            <option
+                              key={preset.id}
+                              value={`preset:${preset.id}`}
+                            >
+                              {preset.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
                       {customUiThemePresets.length > 0 && (
-                        <optgroup label="カスタム">
+                        <optgroup label={t("common.custom")}>
                           {customUiThemePresets.map((preset) => (
                             <option
                               key={preset.id}
@@ -1152,7 +1328,9 @@ export function DisplaySettingsModal({
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">UIフォント</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.uiFont")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <select
@@ -1160,8 +1338,8 @@ export function DisplaySettingsModal({
                       value={uiFont}
                       onChange={(e) => onUiFontChange(e.target.value as UiFont)}
                     >
-                      <option value="mincho">{UI_FONT_LABELS.mincho}</option>
-                      <option value="gothic">{UI_FONT_LABELS.gothic}</option>
+                      <option value="mincho">{uiFontLabels.mincho}</option>
+                      <option value="gothic">{uiFontLabels.gothic}</option>
                       {isCustomUiFont && !hasUiCustomFontOption && (
                         <option value={uiFont}>{uiCustomFontName}</option>
                       )}
@@ -1178,13 +1356,15 @@ export function DisplaySettingsModal({
                         onUiFontChange(UI_THEME_FONT_PRESETS[theme])
                       }
                     >
-                      テーマ指定に戻す
+                      {t("common.resetToThemeDefault")}
                     </button>
                   </div>
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">UI文字色</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.uiTextColor")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="color-control">
@@ -1202,13 +1382,15 @@ export function DisplaySettingsModal({
                       className="font-register-btn"
                       onClick={() => onUiTextPrimaryChange(null)}
                     >
-                      テーマ指定色に戻す
+                      {t("common.resetToThemeColor")}
                     </button>
                   </div>
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">UI文字サイズ倍率</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.uiFontScale")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -1230,9 +1412,11 @@ export function DisplaySettingsModal({
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">テーマ管理</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.themeManagement")}
+                    </div>
                     <div className="setting-item-desc">
-                      UIテーマプリセットの作成・編集
+                      {t("displaySettings.themeManagement", "helper")}
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -1241,7 +1425,7 @@ export function DisplaySettingsModal({
                       className="font-register-btn"
                       onClick={onOpenThemeStudio}
                     >
-                      開く
+                      {t("displaySettings.openThemeStudio")}
                     </button>
                   </div>
                 </div>
@@ -1249,10 +1433,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 8: ツールバー ── */}
+          {/* ── Section 9: ツールバー ── */}
           <div className="settings-section">
             <SectionHeading
-              title="ツールバー"
+              title={t("displaySettings.section.toolbar")}
               icon={IconTool}
               isOpen={sectionOpenState.toolbar}
               onToggle={() => toggleSection("toolbar")}
@@ -1262,7 +1446,7 @@ export function DisplaySettingsModal({
                 <div className="setting-item">
                   <div className="setting-item-info">
                     <div className="setting-item-name">
-                      ツールバーアイコン色
+                      {t("displaySettings.toolbarIconColor")}
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -1283,14 +1467,16 @@ export function DisplaySettingsModal({
                       className="font-register-btn"
                       onClick={() => onToolbarIconColorChange(null)}
                     >
-                      通常色に戻す
+                      {t("displaySettings.resetToNormalColor")}
                     </button>
                   </div>
                 </div>
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">ツールバー線の太さ</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.toolbarIconStroke")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="slider-control">
@@ -1315,7 +1501,7 @@ export function DisplaySettingsModal({
                         onToolbarIconStrokeChange(DEFAULT_TOOLBAR_ICON_STROKE)
                       }
                     >
-                      標準に戻す
+                      {t("common.resetToDefault")}
                     </button>
                   </div>
                 </div>
@@ -1323,7 +1509,7 @@ export function DisplaySettingsModal({
                 <div className="setting-item">
                   <div className="setting-item-info">
                     <div className="setting-item-name">
-                      ツールバーサイズ倍率
+                      {t("displaySettings.toolbarScale")}
                     </div>
                     <div className="setting-item-desc">
                       トップバー内に収まる範囲で調整します
@@ -1352,7 +1538,7 @@ export function DisplaySettingsModal({
                         onToolbarScaleChange(DEFAULT_TOOLBAR_SCALE)
                       }
                     >
-                      標準に戻す
+                      {t("common.resetToDefault")}
                     </button>
                   </div>
                 </div>
@@ -1360,10 +1546,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 9: アプリロゴ ── */}
+          {/* ── Section 10: アプリロゴ ── */}
           <div className="settings-section">
             <SectionHeading
-              title="アプリロゴ"
+              title={t("displaySettings.section.appTitle")}
               icon={IconBrandGithub}
               isOpen={sectionOpenState.appLogo}
               onToggle={() => toggleSection("appLogo")}
@@ -1372,7 +1558,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">アプリロゴ表示</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.appTitleVisible")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <label className="setting-checkbox-label">
@@ -1383,7 +1571,7 @@ export function DisplaySettingsModal({
                           onAppTitleVisibleChange(e.target.checked)
                         }
                       />
-                      表示する
+                      {t("common.show")}
                     </label>
                   </div>
                 </div>
@@ -1392,7 +1580,9 @@ export function DisplaySettingsModal({
                   <>
                     <div className="setting-item">
                       <div className="setting-item-info">
-                        <div className="setting-item-name">アプリ名</div>
+                        <div className="setting-item-name">
+                          {t("displaySettings.appTitlePreset")}
+                        </div>
                       </div>
                       <div className="setting-item-control">
                         <select
@@ -1413,7 +1603,7 @@ export function DisplaySettingsModal({
                             ] as const
                           ).map((preset) => (
                             <option key={preset} value={preset}>
-                              {APP_TITLE_PRESET_LABELS[preset]}
+                              {appTitlePresetLabels[preset]}
                             </option>
                           ))}
                         </select>
@@ -1423,14 +1613,16 @@ export function DisplaySettingsModal({
                     {appTitlePreset === "custom" && (
                       <div className="setting-item">
                         <div className="setting-item-info">
-                          <div className="setting-item-name">カスタム名</div>
+                          <div className="setting-item-name">
+                            {t("displaySettings.appTitleCustom")}
+                          </div>
                         </div>
                         <div className="setting-item-control">
                           <input
                             type="text"
                             className="setting-text-input"
                             value={appTitleCustom}
-                            placeholder="アプリ名を入力"
+                            placeholder={t("displaySettings.appTitlePlaceholder")}
                             onChange={(e) =>
                               onAppTitleCustomChange(e.target.value)
                             }
@@ -1445,7 +1637,9 @@ export function DisplaySettingsModal({
 
                     <div className="setting-item">
                       <div className="setting-item-info">
-                        <div className="setting-item-name">アプリ名文字色</div>
+                        <div className="setting-item-name">
+                          {t("displaySettings.appTitleColor")}
+                        </div>
                       </div>
                       <div className="setting-item-control">
                         <div className="color-control">
@@ -1465,7 +1659,7 @@ export function DisplaySettingsModal({
                           className="font-register-btn"
                           onClick={() => onAppTitleColorChange(null)}
                         >
-                          テーマ指定色に戻す
+                          {t("common.resetToThemeColor")}
                         </button>
                       </div>
                     </div>
@@ -1473,7 +1667,7 @@ export function DisplaySettingsModal({
                     <div className="setting-item">
                       <div className="setting-item-info">
                         <div className="setting-item-name">
-                          アプリ名フォント
+                          {t("displaySettings.appTitleFont")}
                         </div>
                       </div>
                       <div className="setting-item-control">
@@ -1484,13 +1678,11 @@ export function DisplaySettingsModal({
                             onAppTitleFontChange(e.target.value as AppTitleFont)
                           }
                         >
-                          <option value="ui-default">UIフォントと同じ</option>
-                          <option value="mincho">
-                            {UI_FONT_LABELS.mincho}
+                          <option value="ui-default">
+                            {t("displaySettings.sameAsUiFont")}
                           </option>
-                          <option value="gothic">
-                            {UI_FONT_LABELS.gothic}
-                          </option>
+                          <option value="mincho">{uiFontLabels.mincho}</option>
+                          <option value="gothic">{uiFontLabels.gothic}</option>
                           {isCustomAppTitleFont &&
                             !hasAppTitleCustomFontOption && (
                               <option value={appTitleFont}>
@@ -1511,10 +1703,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 10: 文書テーマ ── */}
+          {/* ── Section 11: 文書テーマ ── */}
           <div className="settings-section">
             <SectionHeading
-              title="文書テーマ"
+              title={t("displaySettings.section.documentTheme")}
               icon={IconHighlight}
               isOpen={sectionOpenState.documentTheme}
               onToggle={() => toggleSection("documentTheme")}
@@ -1523,37 +1715,65 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">選択</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.select")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <select
                       className="setting-select"
-                      value={documentTheme}
-                      onChange={(e) =>
-                        onDocumentThemeChange(e.target.value as DocumentTheme)
-                      }
+                      value={selectedDocThemeValue}
+                      onChange={(e) => handleDocumentThemeSelect(e.target.value)}
                     >
-                      {(
-                        [
-                          "ui-linked",
-                          "paper-light",
-                          "paper-dark",
-                          "bow",
-                          "wob",
-                          "soft-neutral",
-                        ] as const
-                      ).map((value) => (
-                        <option key={value} value={value}>
-                          {DOCUMENT_THEME_LABELS[value]}
-                        </option>
-                      ))}
+                      <optgroup label={t("common.standard")}>
+                        {(
+                          [
+                            "ui-linked",
+                            "paper-light",
+                            "paper-dark",
+                            "bow",
+                            "wob",
+                            "soft-neutral",
+                          ] as const
+                        ).map((value) => (
+                          <option key={value} value={`theme:${value}`}>
+                            {documentThemeLabels[value]}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {bundledDocThemePresets.length > 0 && (
+                        <optgroup label={t("common.curated")}>
+                          {bundledDocThemePresets.map((preset) => (
+                            <option
+                              key={preset.id}
+                              value={`preset:${preset.id}`}
+                            >
+                              {preset.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {customDocThemePresets.length > 0 && (
+                        <optgroup label={t("common.custom")}>
+                          {customDocThemePresets.map((preset) => (
+                            <option
+                              key={preset.id}
+                              value={`preset:${preset.id}`}
+                            >
+                              {preset.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                 </div>
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">ページ色</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.pageColor")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="color-control">
@@ -1576,7 +1796,9 @@ export function DisplaySettingsModal({
 
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">本文色</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.bodyColor")}
+                    </div>
                   </div>
                   <div className="setting-item-control">
                     <div className="color-control">
@@ -1600,7 +1822,9 @@ export function DisplaySettingsModal({
                 {/* BETA-DISP1: キャレット色 */}
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">キャレット色</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.caretColor")}
+                    </div>
                     <div className="setting-item-desc">
                       カーソル（キャレット）の色を指定します
                     </div>
@@ -1615,8 +1839,12 @@ export function DisplaySettingsModal({
                         )
                       }
                     >
-                      <option value="auto">自動（背景に合わせる）</option>
-                      <option value="custom">カスタム</option>
+                      <option value="auto">
+                        {t("displaySettings.caretColorAuto")}
+                      </option>
+                      <option value="custom">
+                        {t("displaySettings.caretColorCustom")}
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -1624,7 +1852,9 @@ export function DisplaySettingsModal({
                 {caretColorMode === "custom" && (
                   <div className="setting-item">
                     <div className="setting-item-info">
-                      <div className="setting-item-name">キャレットカスタム色</div>
+                      <div className="setting-item-name">
+                        {t("displaySettings.caretColorCustomValue")}
+                      </div>
                     </div>
                     <div className="setting-item-control">
                       <div className="color-control">
@@ -1646,10 +1876,10 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 11: サポート ── */}
+          {/* ── Section 12: サポート ── */}
           <div className="settings-section">
             <SectionHeading
-              title="サポート"
+              title={t("displaySettings.section.support")}
               icon={IconThumbUp}
               isOpen={sectionOpenState.support}
               onToggle={() => toggleSection("support")}
@@ -1658,7 +1888,9 @@ export function DisplaySettingsModal({
               <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">不具合報告</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.support.bugReport")}
+                    </div>
                     <div className="setting-item-desc">
                       不具合報告フォームを開きます
                     </div>
@@ -1669,13 +1901,15 @@ export function DisplaySettingsModal({
                       className="font-register-btn"
                       onClick={onSendBugReport}
                     >
-                      不具合を報告
+                      {t("displaySettings.support.reportBug")}
                     </button>
                   </div>
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">フィードバック</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.support.feedback")}
+                    </div>
                     <div className="setting-item-desc">
                       感想・要望のフィードバックフォームを開きます
                     </div>
@@ -1686,13 +1920,15 @@ export function DisplaySettingsModal({
                       className="font-register-btn"
                       onClick={onSendFeedback}
                     >
-                      フィードバックを送る
+                      {t("displaySettings.support.sendFeedback")}
                     </button>
                   </div>
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">更新確認</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.support.updateCheck")}
+                    </div>
                     <div className="setting-item-desc">
                       最新版かどうかを確認します
                     </div>
@@ -1704,7 +1940,9 @@ export function DisplaySettingsModal({
                       onClick={() => void handleCheckForUpdate()}
                       disabled={updateCheckLoading}
                     >
-                      {updateCheckLoading ? "確認中…" : "更新を確認"}
+                      {updateCheckLoading
+                        ? t("displaySettings.support.checking")
+                        : t("displaySettings.support.checkNow")}
                     </button>
                     {updateCheckResult && (
                       <span className="slider-value">{updateCheckResult}</span>
@@ -1713,7 +1951,9 @@ export function DisplaySettingsModal({
                 </div>
                 <div className="setting-item">
                   <div className="setting-item-info">
-                    <div className="setting-item-name">リポジトリ</div>
+                    <div className="setting-item-name">
+                      {t("displaySettings.support.repository")}
+                    </div>
                     <div className="setting-item-desc">
                       プロジェクトのリポジトリページを開きます
                       <br />
@@ -1727,7 +1967,7 @@ export function DisplaySettingsModal({
                       className="font-register-btn"
                       onClick={onOpenRepository}
                     >
-                      リポジトリを開く
+                      {t("displaySettings.support.openRepository")}
                     </button>
                   </div>
                 </div>
@@ -1749,10 +1989,10 @@ export function DisplaySettingsModal({
               }
             }}
           >
-            初期値に戻す
+            {t("displaySettings.resetDefaults")}
           </button>
           <button type="button" onClick={onClose}>
-            閉じる
+            {t("common.close")}
           </button>
         </div>
       </section>

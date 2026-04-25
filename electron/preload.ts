@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { UiLanguageMode } from '../src/settings/types'
 
 const e2eBridge =
   process.env.NYOZE_E2E === '1'
@@ -121,7 +122,8 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
       ipcRenderer.invoke('shell:openExternal', url) as Promise<boolean>,
   },
   menu: {
-    openAppMenu: () => ipcRenderer.invoke('menu:openAppMenu') as Promise<void>,
+    openAppMenu: (uiLanguageMode: UiLanguageMode) =>
+      ipcRenderer.invoke('menu:openAppMenu', uiLanguageMode) as Promise<void>,
     onMenuCommand: (callback: (command: string) => void) => {
       const channels = [
         'menu:new-document',

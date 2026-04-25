@@ -54,7 +54,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEventHandler, ReactNode } from 'react'
 import type { CommandAvailability } from '../../editor-core/types'
 import type { DocumentType } from '../../editor-core/io/frontmatterDocumentSettings'
-import type { WritingMode } from '../../settings/types'
+import type { UiLanguageMode, WritingMode } from '../../settings/types'
+import { createUiTextGetter } from '../i18n/uiText'
 import {
   getPlainFormattingUnavailableMessage,
   resolveFormattingButtonState,
@@ -93,6 +94,7 @@ type UnifiedHeaderProps = {
   onWindowClose: () => void
   // Platform
   platform: string
+  uiLanguageMode: UiLanguageMode
   // Toolbar visibility & drag
   toolbarVisible: boolean
   onToggleToolbarVisible: () => void
@@ -142,15 +144,6 @@ type UnifiedHeaderProps = {
   appTitleText: string
 }
 
-const headingItems = [
-  { id: 'h1', label: 'Heading 1', level: 1, icon: IconH1 },
-  { id: 'h2', label: 'Heading 2', level: 2, icon: IconH2 },
-  { id: 'h3', label: 'Heading 3', level: 3, icon: IconH3 },
-  { id: 'h4', label: 'Heading 4', level: 4, icon: IconH4 },
-  { id: 'h5', label: 'Heading 5', level: 5, icon: IconH5 },
-  { id: 'h6', label: 'Heading 6', level: 6, icon: IconH6 },
-] as const
-
 export function UnifiedHeader({
   leftPaneOpen,
   rightPaneOpen,
@@ -160,6 +153,7 @@ export function UnifiedHeader({
   onWindowMinimize,
   onWindowClose,
   platform,
+  uiLanguageMode,
   toolbarVisible,
   onToggleToolbarVisible,
   toolbarOffset,
@@ -204,9 +198,18 @@ export function UnifiedHeader({
   appTitleVisible,
   appTitleText,
 }: UnifiedHeaderProps) {
+  const t = createUiTextGetter(uiLanguageMode)
   const isVertical = writingMode === 'vertical-rl'
   const isMac = platform === 'darwin'
-  const documentTypeLabel = formatDocumentTypeLabel(documentType)
+  const documentTypeLabel = formatDocumentTypeLabel(documentType, uiLanguageMode)
+  const headingItems = [
+    { id: 'h1', label: t('editor.heading.level1'), level: 1, icon: IconH1 },
+    { id: 'h2', label: t('editor.heading.level2'), level: 2, icon: IconH2 },
+    { id: 'h3', label: t('editor.heading.level3'), level: 3, icon: IconH3 },
+    { id: 'h4', label: t('editor.heading.level4'), level: 4, icon: IconH4 },
+    { id: 'h5', label: t('editor.heading.level5'), level: 5, icon: IconH5 },
+    { id: 'h6', label: t('editor.heading.level6'), level: 6, icon: IconH6 },
+  ] as const
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
   const headingMenuRef = useRef<HTMLDivElement | null>(null)
@@ -416,8 +419,8 @@ export function UnifiedHeader({
             className='toolbar-btn-icon-only'
             onClick={onOpenAppMenu}
             type='button'
-            data-tooltip='Menu'
-            aria-label='Menu'
+            data-tooltip={t('common.menu')}
+            aria-label={t('common.menu')}
           >
             <IconMenu2 size={ICON_SIZE} stroke={ICON_STROKE} />
           </button>
@@ -425,8 +428,8 @@ export function UnifiedHeader({
         <button
           className={`pane-toggle has-tooltip${leftPaneOpen ? ' active' : ''}`}
           onClick={onToggleLeftPane}
-          data-tooltip={leftPaneOpen ? 'Close Left Pane' : 'Open Left Pane'}
-          aria-label={leftPaneOpen ? 'Close Left Pane' : 'Open Left Pane'}
+          data-tooltip={leftPaneOpen ? t('header.closeLeftPane') : t('header.openLeftPane')}
+          aria-label={leftPaneOpen ? t('header.closeLeftPane') : t('header.openLeftPane')}
           type='button'
         >
           {leftPaneOpen ? (
@@ -441,8 +444,8 @@ export function UnifiedHeader({
           onClick={onToggleToolbarVisible}
           onDoubleClick={onToolbarOffsetReset}
           type='button'
-          data-tooltip={toolbarVisible ? 'Hide Toolbar' : 'Show Toolbar'}
-          aria-label={toolbarVisible ? 'Hide Toolbar' : 'Show Toolbar'}
+          data-tooltip={toolbarVisible ? t('header.hideToolbar') : t('header.showToolbar')}
+          aria-label={toolbarVisible ? t('header.hideToolbar') : t('header.showToolbar')}
           aria-expanded={toolbarVisible}
         >
           {toolbarVisible ? (
@@ -470,8 +473,8 @@ export function UnifiedHeader({
               onMouseDown={handleDragHandleMouseDown}
               onDoubleClick={onToolbarOffsetReset}
               type='button'
-              data-tooltip='Drag Toolbar'
-              aria-label='Drag toolbar'
+              data-tooltip={t('header.dragToolbar')}
+              aria-label={t('header.dragToolbar')}
               tabIndex={-1}
             >
               <IconGripVertical />
@@ -480,8 +483,8 @@ export function UnifiedHeader({
           className='toolbar-btn-icon-only'
           onClick={onToggleWritingMode}
           type='button'
-          data-tooltip={isVertical ? 'Switch Horizontal' : 'Switch Vertical'}
-          aria-label={isVertical ? 'Switch Horizontal' : 'Switch Vertical'}
+          data-tooltip={isVertical ? t('editor.switchHorizontal') : t('editor.switchVertical')}
+          aria-label={isVertical ? t('editor.switchHorizontal') : t('editor.switchVertical')}
         >
           {isVertical ? (
             <IconSwitchVertical size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -493,8 +496,8 @@ export function UnifiedHeader({
           className='toolbar-btn-icon-only'
           onClick={onLoad}
           type='button'
-          data-tooltip={shiftPressed ? 'New Document' : 'Load'}
-          aria-label={shiftPressed ? 'New Document' : 'Load'}
+          data-tooltip={shiftPressed ? t('common.newDocument') : t('common.load')}
+          aria-label={shiftPressed ? t('common.newDocument') : t('common.load')}
         >
           {shiftPressed ? (
             <IconFilePlus size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -506,8 +509,8 @@ export function UnifiedHeader({
           className='toolbar-btn-icon-only'
           onClick={onSave}
           type='button'
-          data-tooltip={shiftPressed ? 'Save As' : 'Save'}
-          aria-label={shiftPressed ? 'Save As' : 'Save'}
+          data-tooltip={shiftPressed ? t('common.saveAs') : t('common.save')}
+          aria-label={shiftPressed ? t('common.saveAs') : t('common.save')}
         >
           {shiftPressed ? (
             <ShiftPlusIcon>
@@ -523,8 +526,8 @@ export function UnifiedHeader({
           onClick={onUndo}
           disabled={!availability.canUndo}
           type='button'
-          data-tooltip='Undo'
-          aria-label='Undo'
+          data-tooltip={t('common.undo')}
+          aria-label={t('common.undo')}
         >
           <IconArrowBackUp size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -533,8 +536,8 @@ export function UnifiedHeader({
           onClick={onRedo}
           disabled={!availability.canRedo}
           type='button'
-          data-tooltip='Redo'
-          aria-label='Redo'
+          data-tooltip={t('common.redo')}
+          aria-label={t('common.redo')}
         >
           <IconArrowForwardUp size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -544,9 +547,9 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('bold'))}
           type='button'
           tabIndex={-1}
-          aria-label='Bold'
+          aria-label={t('editor.bold')}
           aria-pressed={availability.isBold}
-          {...getFormattingButtonProps('Bold', !availability.canBold)}
+          {...getFormattingButtonProps(t('editor.bold'), !availability.canBold)}
         >
           <IconBold size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -555,9 +558,9 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('italic'))}
           type='button'
           tabIndex={-1}
-          aria-label='Italic'
+          aria-label={t('editor.italic')}
           aria-pressed={availability.isItalic}
-          {...getFormattingButtonProps('Italic', !availability.canItalic)}
+          {...getFormattingButtonProps(t('editor.italic'), !availability.canItalic)}
         >
           <IconItalic size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -566,9 +569,9 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('strike'))}
           type='button'
           tabIndex={-1}
-          aria-label='Strike'
+          aria-label={t('editor.strike')}
           aria-pressed={availability.isStrike}
-          {...getFormattingButtonProps('Strike', !availability.canStrike)}
+          {...getFormattingButtonProps(t('editor.strike'), !availability.canStrike)}
         >
           <IconStrikethrough size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -577,9 +580,9 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('highlight'))}
           type='button'
           tabIndex={-1}
-          aria-label='Highlight'
+          aria-label={t('editor.highlight')}
           aria-pressed={availability.isHighlight}
-          {...getFormattingButtonProps('Highlight', !availability.canHighlight)}
+          {...getFormattingButtonProps(t('editor.highlight'), !availability.canHighlight)}
         >
           <IconHighlight size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -588,9 +591,9 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleInlineCode)}
           type='button'
           tabIndex={-1}
-          aria-label='Inline Code'
+          aria-label={t('editor.inlineCode')}
           aria-pressed={availability.isInlineCode}
-          {...getFormattingButtonProps('Inline Code', !availability.canInlineCode)}
+          {...getFormattingButtonProps(t('editor.inlineCode'), !availability.canInlineCode)}
         >
           <IconCode size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -599,8 +602,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onClearFormat)}
           type='button'
           tabIndex={-1}
-          aria-label='Clear Format'
-          {...getFormattingButtonProps('Clear Format', !availability.canClearFormat)}
+          aria-label={t('editor.clearFormat')}
+          {...getFormattingButtonProps(t('editor.clearFormat'), !availability.canClearFormat)}
         >
           <IconEraser size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -611,16 +614,16 @@ export function UnifiedHeader({
             onClick={withPlainFormattingGuard(() => setHeadingMenuOpen((prev) => !prev))}
             type='button'
             tabIndex={-1}
-            aria-label='Heading'
+            aria-label={t('editor.heading')}
             aria-haspopup='menu'
             aria-expanded={headingMenuOpen}
-            {...getFormattingButtonProps('Heading', !availability.canBlockTransforms)}
+            {...getFormattingButtonProps(t('editor.heading'), !availability.canBlockTransforms)}
           >
             <IconHeading size={ICON_SIZE} stroke={ICON_STROKE} />
             <IconChevronDown size={12} stroke={ICON_STROKE} />
           </button>
           {headingMenuOpen && (
-            <div className='toolbar-heading-menu' role='menu' aria-label='Heading Menu'>
+            <div className='toolbar-heading-menu' role='menu' aria-label={t('editor.headingMenu')}>
               {headingItems.map((item) => {
                 const Icon = item.icon
                 return (
@@ -652,7 +655,7 @@ export function UnifiedHeader({
                 })}
               >
                 <IconHeadingOff size={16} stroke={ICON_STROKE} />
-                <span>Clear Heading</span>
+                <span>{t('editor.heading.clear')}</span>
               </button>
             </div>
           )}
@@ -662,8 +665,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleBulletList)}
           type='button'
           tabIndex={-1}
-          aria-label='Bullet List'
-          {...getFormattingButtonProps('Bullet List', !availability.canBlockTransforms)}
+          aria-label={t('editor.bulletList')}
+          {...getFormattingButtonProps(t('editor.bulletList'), !availability.canBlockTransforms)}
         >
           <IconList size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -672,8 +675,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleOrderedList)}
           type='button'
           tabIndex={-1}
-          aria-label='Ordered List'
-          {...getFormattingButtonProps('Ordered List', !availability.canBlockTransforms)}
+          aria-label={t('editor.orderedList')}
+          {...getFormattingButtonProps(t('editor.orderedList'), !availability.canBlockTransforms)}
         >
           <IconListNumbers size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -682,8 +685,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleChecklist)}
           type='button'
           tabIndex={-1}
-          aria-label='Checklist'
-          {...getFormattingButtonProps('Checklist', !availability.canBlockTransforms)}
+          aria-label={t('editor.checklist')}
+          {...getFormattingButtonProps(t('editor.checklist'), !availability.canBlockTransforms)}
         >
           <IconSquareCheck size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -692,8 +695,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleBlockquote)}
           type='button'
           tabIndex={-1}
-          aria-label='Blockquote'
-          {...getFormattingButtonProps('Blockquote', !availability.canBlockTransforms)}
+          aria-label={t('editor.blockquote')}
+          {...getFormattingButtonProps(t('editor.blockquote'), !availability.canBlockTransforms)}
         >
           <IconBlockquote size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -702,8 +705,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleCodeBlock)}
           type='button'
           tabIndex={-1}
-          aria-label='Code Block'
-          {...getFormattingButtonProps('Code Block', !availability.canBlockTransforms)}
+          aria-label={t('editor.codeBlock')}
+          {...getFormattingButtonProps(t('editor.codeBlock'), !availability.canBlockTransforms)}
         >
           <IconCodeDots size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -713,8 +716,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onSetOrUnsetLink)}
           type='button'
           tabIndex={-1}
-          aria-label='Link'
-          {...getFormattingButtonProps('Link', false)}
+          aria-label={t('editor.link')}
+          {...getFormattingButtonProps(t('editor.link'), false)}
         >
           <IconLink size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -723,8 +726,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onInsertImage)}
           type='button'
           tabIndex={-1}
-          aria-label='Image'
-          {...getFormattingButtonProps('Image', false)}
+          aria-label={t('editor.image')}
+          {...getFormattingButtonProps(t('editor.image'), false)}
         >
           <IconPhoto size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -733,8 +736,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onInsertRubyBouten)}
           type='button'
           tabIndex={-1}
-          aria-label='Ruby'
-          {...getFormattingButtonProps('Ruby', !availability.canInsertRuby)}
+          aria-label={t('editor.insertRuby')}
+          {...getFormattingButtonProps(t('editor.insertRuby'), !availability.canInsertRuby)}
         >
           <IconDiamond size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -743,8 +746,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onToggleTcy)}
           type='button'
           tabIndex={-1}
-          aria-label='TCY'
-          {...getFormattingButtonProps('TCY', !availability.canToggleTcy)}
+          aria-label={t('editor.tcy')}
+          {...getFormattingButtonProps(t('editor.tcy'), !availability.canToggleTcy)}
         >
           <IconNumber123 size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
@@ -754,8 +757,8 @@ export function UnifiedHeader({
           onClick={withPlainFormattingGuard(onInsertHorizontalRule)}
           type='button'
           tabIndex={-1}
-          aria-label='Horizontal Rule'
-          {...getFormattingButtonProps('Horizontal Rule', !availability.canBlockTransforms)}
+          aria-label={t('editor.horizontalRule')}
+          {...getFormattingButtonProps(t('editor.horizontalRule'), !availability.canBlockTransforms)}
         >
           {isVertical ? (
             <IconSeparatorVertical size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -769,8 +772,8 @@ export function UnifiedHeader({
           onClick={onOpenSearch}
           type='button'
           disabled={fullPlainEditActive}
-          data-tooltip='Search'
-          aria-label='Search'
+          data-tooltip={t('common.search')}
+          aria-label={t('common.search')}
           aria-pressed={searchOpen}
         >
           <IconSearch size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -779,8 +782,8 @@ export function UnifiedHeader({
           className={`toolbar-btn-icon-only${rubyVisible ? ' toggle-active' : ''}`}
           onClick={onToggleRubyVisible}
           type='button'
-          data-tooltip='Ruby View'
-          aria-label='Ruby View'
+          data-tooltip={t('editor.rubyView')}
+          aria-label={t('editor.rubyView')}
           aria-pressed={rubyVisible}
         >
           {rubyVisible ? (
@@ -796,8 +799,8 @@ export function UnifiedHeader({
           onClick={onToggleParagraphPlainMode}
           disabled={fullPlainEditActive || (!availability.canParagraphPlain && !paragraphPlainModeActive)}
           type='button'
-          data-tooltip='Paragraph Plain'
-          aria-label='Paragraph Plain'
+          data-tooltip={t('editor.paragraphPlain')}
+          aria-label={t('editor.paragraphPlain')}
           aria-pressed={paragraphPlainModeActive}
         >
           <IconPilcrow size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -807,8 +810,8 @@ export function UnifiedHeader({
           onClick={onToggleFullPlainEdit}
           disabled={paragraphPlainModeActive}
           type='button'
-          data-tooltip='Source Mode'
-          aria-label='Source Mode'
+          data-tooltip={t('editor.sourceMode')}
+          aria-label={t('editor.sourceMode')}
           aria-pressed={fullPlainEditActive}
         >
           <IconFileCode size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -817,8 +820,8 @@ export function UnifiedHeader({
           className={`toolbar-btn-icon-only${displaySettingsOpen ? ' toggle-active' : ''}`}
           onClick={onOpenDisplaySettings}
           type='button'
-          data-tooltip='View Settings'
-          aria-label='View Settings'
+          data-tooltip={t('editor.viewSettings')}
+          aria-label={t('editor.viewSettings')}
           aria-pressed={displaySettingsOpen}
         >
           <IconSettings size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -836,15 +839,15 @@ export function UnifiedHeader({
           onClick={onOpenDocumentSettings}
           aria-label={
             hasDocumentBehaviorOverride
-              ? `Document Type: ${documentTypeLabel}. 文書内の互換設定により改行解釈が固定されています。クリックで Document Settings を開く`
-              : `Document Type: ${documentTypeLabel}. クリックで Document Settings を開く`
+              ? `${t('documentSettings.documentType')}: ${documentTypeLabel}. ${t('documentType.overrideLockedNotice', 'tooltip')}. ${t('documentSettings.openPanel', 'tooltip')}`
+              : `${t('documentSettings.documentType')}: ${documentTypeLabel}. ${t('documentSettings.openPanel', 'tooltip')}`
           }
-          data-tooltip={formatDocumentTypeHeaderTooltip(documentType, hasDocumentBehaviorOverride)}
+          data-tooltip={formatDocumentTypeHeaderTooltip(documentType, hasDocumentBehaviorOverride, uiLanguageMode)}
         >
           <span className='editor-tab-policy-badge'>{documentTypeLabel}</span>
           {hasDocumentBehaviorOverride ? (
             <span className='unified-header-line-break-policy-doc' aria-hidden='true'>
-              固定
+              {t('documentType.fixedBadge')}
             </span>
           ) : null}
         </button>
@@ -852,8 +855,8 @@ export function UnifiedHeader({
         <button
           className={`pane-toggle has-tooltip${rightPaneOpen ? ' active' : ''}`}
           onClick={onToggleRightPane}
-          data-tooltip={rightPaneOpen ? 'Close Right Pane' : 'Open Right Pane'}
-          aria-label={rightPaneOpen ? 'Close Right Pane' : 'Open Right Pane'}
+          data-tooltip={rightPaneOpen ? t('header.closeRightPane') : t('header.openRightPane')}
+          aria-label={rightPaneOpen ? t('header.closeRightPane') : t('header.openRightPane')}
           type='button'
         >
           {rightPaneOpen ? (
@@ -867,8 +870,8 @@ export function UnifiedHeader({
             <button
               className='window-control-btn has-tooltip'
               type='button'
-              data-tooltip='Minimize'
-              aria-label='Minimize'
+              data-tooltip={t('common.minimize')}
+              aria-label={t('common.minimize')}
               onClick={onWindowMinimize}
             >
               <IconMinus size={12} stroke={1.7} />
@@ -876,8 +879,8 @@ export function UnifiedHeader({
             <button
               className='window-control-btn window-control-btn-close has-tooltip'
               type='button'
-              data-tooltip='Close'
-              aria-label='Close'
+              data-tooltip={t('common.close')}
+              aria-label={t('common.close')}
               onClick={onWindowClose}
             >
               <IconX size={11} stroke={1.7} />

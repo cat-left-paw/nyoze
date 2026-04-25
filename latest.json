@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-beta.2",
-  "releaseUrl": "https://github.com/cat-left-paw/nyoze/releases/tag/v0.1.0-beta.2",
-  "notes": "Fix Paragraph Plain boundary behavior"
+  "version": "0.1.1-beta.1",
+  "releaseUrl": "https://github.com/cat-left-paw/nyoze/releases/tag/v0.1.1-beta.1",
+  "notes": "Add stage1 UI language support, shortcut polish, and scroll restore improvements"
 }

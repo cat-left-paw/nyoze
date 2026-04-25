@@ -21,6 +21,11 @@ export type LineBreakPolicy = 'obsidian-paragraph' | 'commonmark-strict'
 /** Callback for line break policy changes */
 export type LineBreakPolicyListener = (policy: LineBreakPolicy) => void
 
+/** Per-document Markdown serialization / parse options. */
+export type MarkdownDocumentOptions = {
+  preserveEmptyParagraphs: boolean
+}
+
 export type SelectionRange = { from: number; to: number }
 
 export type RubyEditContext = {
@@ -29,6 +34,7 @@ export type RubyEditContext = {
   text: string
   ruby: string
   overlapsExistingRuby: boolean
+  hasDelimiter: boolean
 }
 
 export type ParagraphSourceContext = {
@@ -59,6 +65,24 @@ export type HeadingUiSnapshot = {
 
 /** Callback for content update events (for dirty tracking) */
 export type UpdateListener = () => void
+
+/**
+ * Layout-independent anchor into the current document, used to restore the
+ * editor surface near the same content position after writing-mode toggle or
+ * Source Mode round-trip. Both fields are optional hints; callers pick the
+ * best available axis.
+ */
+export type ViewportAnchor = {
+  /** PM doc position nearest the viewport center. Clamped to doc bounds. */
+  pmPos: number
+  /**
+   * Accumulated `textBetween(0, pmPos, '\n')` length up to `pmPos`. Useful for
+   * approximate line-number mapping with plain-text editors (Source Mode).
+   */
+  textOffset: number
+  /** Total PM doc text length at capture time (for ratio fallback). */
+  textTotal: number
+}
 
 /** Callback for safely opening an already validated external URL. */
 export type OpenExternalUrl = (url: string) => Promise<boolean>
@@ -206,8 +230,17 @@ export interface EditorCoreHandle {
   /** Set markdown line break policy */
   setLineBreakPolicy(policy: LineBreakPolicy): LineBreakPolicy
 
-  /** Apply line-break normalization to current document immediately using given policy */
-  applyLineBreakPolicyNow(policy: LineBreakPolicy): boolean
+  /** Update per-document Markdown options without reparsing the current document. */
+  setDocumentMarkdownOptions(options: MarkdownDocumentOptions): MarkdownDocumentOptions
+
+  /** Read the effective per-document Markdown options currently used by the core. */
+  getDocumentMarkdownOptions(): MarkdownDocumentOptions
+
+  /** Apply line-break / document-option normalization to current document immediately. */
+  applyLineBreakPolicyNow(
+    policy: LineBreakPolicy,
+    options?: MarkdownDocumentOptions,
+  ): boolean
 
   /** Subscribe line break policy changes */
   onLineBreakPolicyChange(listener: LineBreakPolicyListener): () => void
@@ -284,6 +317,33 @@ export interface EditorCoreHandle {
 
   /** Scroll editor to the given document position (auto-unfolds ancestors) */
   scrollToPos(pos: number): void
+
+  /**
+   * Snapshot a layout-independent viewport anchor near the visible center of
+   * the PM editor surface. Returns null when the surface is hidden / detached.
+   */
+  captureViewportAnchor(): ViewportAnchor | null
+
+  /**
+   * Scroll the PM editor surface so the given anchor's PM position is near the
+   * viewport center, without moving the cursor or stealing focus. rAF timing
+   * is managed by the caller.
+   */
+  restoreViewportAnchor(anchor: ViewportAnchor): void
+
+  /**
+   * Scroll the PM editor surface so a doc position roughly at the given ratio
+   * (0..1) is near the viewport center. Approximate fallback when exact PM
+   * pos mapping is unavailable (Source Mode round-trip).
+   */
+  scrollEditorSurfaceToRatio(ratio: number): void
+
+  /**
+   * Scroll the PM editor surface so a position near the given PM text offset
+   * (`doc.textBetween` axis) is centered. Returns false when the surface is
+   * hidden / detached or the offset cannot be resolved.
+   */
+  scrollEditorSurfaceToTextOffset(textOffset: number): boolean
 
   /** Return a short preview text for the heading body at the given position */
   getHeadingPreview(pos: number): string

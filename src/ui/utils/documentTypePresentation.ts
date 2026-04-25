@@ -1,34 +1,62 @@
 import type { DocumentType } from "../../editor-core/io/frontmatterDocumentSettings";
+import type { UiLanguageMode } from "../../settings/types";
+import { createUiTextGetter } from "../i18n/uiText";
 
 type DocumentTypeNoticeOptions = {
   changed: boolean;
   dirty: boolean;
 };
 
-export function formatDocumentTypeLabel(type: DocumentType): string {
+function formatDocumentTypeLabelFallback(type: DocumentType): string {
   if (type === "novel") return "Novel";
   if (type === "article") return "Article";
   return "未設定";
 }
 
-export function formatDocumentTypeSublabel(type: DocumentType): string {
+export function formatDocumentTypeLabel(
+  type: DocumentType,
+  mode?: UiLanguageMode,
+): string {
+  if (!mode) return formatDocumentTypeLabelFallback(type);
+  const t = createUiTextGetter(mode);
+  if (type === "novel") return t("documentType.label.novel");
+  if (type === "article") return t("documentType.label.article");
+  return t("documentType.label.unset");
+}
+
+function formatDocumentTypeSublabelFallback(type: DocumentType): string {
   if (type === "novel") return "縦書き推奨";
   if (type === "article") return "横書き推奨";
   return "標準の執筆設定を使います";
 }
 
-export function formatDocumentTypeOverrideHelp(): string {
+export function formatDocumentTypeSublabel(
+  type: DocumentType,
+  mode?: UiLanguageMode,
+): string {
+  if (!mode) return formatDocumentTypeSublabelFallback(type);
+  const t = createUiTextGetter(mode);
+  if (type === "novel") return t("documentType.sublabel.novel", "helper");
+  if (type === "article") return t("documentType.sublabel.article", "helper");
+  return t("documentType.sublabel.unset", "helper");
+}
+
+function formatDocumentTypeOverrideHelpFallback(): string {
   return "この文書は文書内の互換設定により、Document Type とは別の改行解釈が固定されています。必要なら Source Mode で互換設定を編集または削除してください。";
 }
 
+export function formatDocumentTypeOverrideHelp(mode?: UiLanguageMode): string {
+  if (!mode) return formatDocumentTypeOverrideHelpFallback();
+  return createUiTextGetter(mode)("documentType.overrideHelp", "helper");
+}
+
 export function formatDocumentTypeHeaderTooltip(
-  type: DocumentType,
-  hasOverride: boolean,
+  _type: DocumentType,
+  _hasOverride: boolean,
+  mode?: UiLanguageMode,
 ): string {
-  if (!hasOverride) {
-    return `Document Type: ${formatDocumentTypeLabel(type)}\nクリックで Document Settings を開く`;
-  }
-  return `Document Type: ${formatDocumentTypeLabel(type)}\n文書内の互換設定により改行解釈が固定されています\nクリックで Document Settings を開く`;
+  if (!mode) return "Open Document Settings";
+  return createUiTextGetter(mode)("documentSettings.openPanel");
 }
 
 export function formatDocumentTypeConfirmTitle(type: DocumentType): string {

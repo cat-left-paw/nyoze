@@ -1,11 +1,13 @@
 import type { Node as PMNode, Mark } from '@tiptap/pm/model'
-import type { LineBreakPolicy } from '../types'
+import type { LineBreakPolicy, MarkdownDocumentOptions } from '../types'
+import { supportsPreservedEmptyParagraphBoundary } from './emptyParagraphPreservation'
 import {
   chooseCodeFence,
   escapeMarkdownBracketText,
   escapeMarkdownTitle,
   escapeMarkdownUrlDestination,
 } from './markdownEscaping'
+import { encodeAozoraInlineNode } from './clipboardSlicePlainText'
 
 /**
  * Serialize a ProseMirror document to Markdown.
@@ -72,11 +74,55 @@ function hasLinkMark(marks: Mark[]): boolean {
   return false
 }
 
+/**
+ * Resolve the effective marks for an inline node with text children
+ * (aozoraRuby, aozoraTcy).
+ *
+ * When bold/italic/etc. is applied in the WYSIWYG editor, ProseMirror
+ * may attach the marks to the text children rather than the node itself.
+ * This function merges node-level marks with marks that are common to
+ * ALL text children, so the serializer treats the node as decorated.
+ */
+function resolveInlineNodeMarks(node: PMNode): Mark[] {
+  const nodeMarks = [...node.marks]
+
+  // Collect marks common to ALL text children
+  let childCommon: Mark[] | null = null
+  if (node.childCount > 0) {
+    node.forEach((child) => {
+      if (!child.isText) {
+        childCommon = []
+        return
+      }
+      const marks = [...child.marks]
+      if (childCommon === null) {
+        childCommon = marks
+      } else {
+        childCommon = childCommon.filter((m) => marks.some((cm) => m.eq(cm)))
+      }
+    })
+  }
+  const commonChildMarks = childCommon ?? []
+
+  // Merge: node-level marks + child-common marks (deduplicated)
+  if (commonChildMarks.length === 0) return nodeMarks
+  if (nodeMarks.length === 0) return commonChildMarks
+
+  const merged = [...nodeMarks]
+  for (const cm of commonChildMarks) {
+    if (!merged.some((m) => m.eq(cm))) {
+      merged.push(cm)
+    }
+  }
+  return merged
+}
+
 export function serializeMarkdown(
   doc: PMNode,
   lineBreakPolicy: LineBreakPolicy = 'commonmark-strict',
+  options?: MarkdownDocumentOptions,
 ): string {
-  const serializer = new MarkdownWriter(lineBreakPolicy)
+  const serializer = new MarkdownWriter(lineBreakPolicy, options)
   serializer.serializeDoc(doc)
   return serializer.getOutput()
 }
@@ -86,7 +132,10 @@ class MarkdownWriter {
   private blockSeparatorNeeded = false
   private lastDocBlockType: string | null = null
 
-  constructor(private readonly lineBreakPolicy: LineBreakPolicy) {}
+  constructor(
+    private readonly lineBreakPolicy: LineBreakPolicy,
+    private readonly options?: MarkdownDocumentOptions,
+  ) {}
 
   getOutput(): string {
     if (this.lineBreakPolicy === 'obsidian-paragraph') {
@@ -96,7 +145,12 @@ class MarkdownWriter {
   }
 
   serializeDoc(doc: PMNode): void {
+    const children: PMNode[] = []
     doc.forEach((child) => {
+      children.push(child)
+    })
+
+    children.forEach((child, index) => {
       if (this.lastDocBlockType !== null) {
         if (this.lineBreakPolicy === 'obsidian-paragraph') {
           this.appendObsidianSeparator(child.type.name)
@@ -104,6 +158,14 @@ class MarkdownWriter {
           this.blockSeparatorNeeded = true
         }
       }
+
+      if (this.shouldPreserveEmptyParagraph(children, index)) {
+        this.ensureBlockSeparator()
+        this.output += '\n'
+        this.lastDocBlockType = child.type.name
+        return
+      }
+
       this.serializeBlock(child, '')
       this.lastDocBlockType = child.type.name
     })
@@ -119,6 +181,45 @@ class MarkdownWriter {
     return this.lineBreakPolicy === 'commonmark-strict' ? '  \n' : '\n'
   }
 
+  private shouldPreserveEmptyParagraph(children: PMNode[], index: number): boolean {
+    if (
+      this.lineBreakPolicy !== 'commonmark-strict' ||
+      this.options?.preserveEmptyParagraphs !== true
+    ) {
+      return false
+    }
+
+    const child = children[index]
+    if (child.type.name !== 'paragraph' || child.childCount > 0) {
+      return false
+    }
+
+    const previous = this.findAdjacentContentBlock(children, index, -1)
+    const next = this.findAdjacentContentBlock(children, index, 1)
+    if (!previous || !next) {
+      return false
+    }
+
+    return (
+      supportsPreservedEmptyParagraphBoundary(previous.type.name) &&
+      supportsPreservedEmptyParagraphBoundary(next.type.name)
+    )
+  }
+
+  private findAdjacentContentBlock(
+    children: PMNode[],
+    startIndex: number,
+    step: -1 | 1,
+  ): PMNode | null {
+    for (let index = startIndex + step; index >= 0 && index < children.length; index += step) {
+      const child = children[index]
+      if (child.type.name === 'paragraph' && child.childCount === 0) {
+        continue
+      }
+      return child
+    }
+    return null
+  }
   private normalizeInlineText(text: string): string {
     if (this.lineBreakPolicy !== 'commonmark-strict') return text
     // commonmark-strict save: normalize paragraph-internal line breaks as hard breaks.
@@ -315,22 +416,14 @@ class MarkdownWriter {
       }
 
       if (!child.isText) {
-        let encoded: string | null = null
-        if (child.type.name === 'aozoraRuby') {
-          const base = child.textContent
-          const ruby = (child.attrs.ruby as string) ?? ''
-          const hasDelimiter = child.attrs.hasDelimiter as boolean
-          encoded = hasDelimiter ? `｜${base}《${ruby}》` : `${base}《${ruby}》`
-        } else if (child.type.name === 'aozoraTcy') {
-          encoded = `｟${child.textContent}｠`
-        }
+        const encoded = encodeAozoraInlineNode(child)
 
         if (encoded === null) {
           result += child.textContent
           continue
         }
 
-        const childMarks = sortMarks([...child.marks])
+        const childMarks = sortMarks(resolveInlineNodeMarks(child))
         let commonLen = 0
         while (
           commonLen < activeMarks.length &&

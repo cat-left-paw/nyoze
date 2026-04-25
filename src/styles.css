@@ -1827,11 +1827,30 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   flex-shrink: 0;
 }
 
-.unified-header .unified-header-line-break-policy-btn.has-tooltip[data-tooltip]::after {
-  white-space: pre-line;
-  text-align: center;
-  max-width: min(280px, 92vw);
+/* Right zone buttons: tooltips anchor to the right edge so they don't clip off-screen.
+   Applies to line-break-policy-btn, pane-toggle, window-control-btn, and any future
+   right-aligned has-tooltip children inside the unified-header-right zone. */
+.unified-header .unified-header-right .has-tooltip[data-tooltip]::after,
+.unified-header .unified-header-right .toolbar-btn-icon-only[data-tooltip]::after {
+  left: auto;
+  right: 0;
+  transform: translateY(-4px);
 }
+
+.unified-header .unified-header-right .has-tooltip[data-tooltip]::before,
+.unified-header .unified-header-right .toolbar-btn-icon-only[data-tooltip]::before {
+  left: auto;
+  right: 12px;
+  transform: rotate(45deg);
+}
+
+.unified-header .unified-header-right .has-tooltip[data-tooltip]:hover::after,
+.unified-header .unified-header-right .has-tooltip[data-tooltip]:focus-visible::after,
+.unified-header .unified-header-right .toolbar-btn-icon-only[data-tooltip]:hover::after,
+.unified-header .unified-header-right .toolbar-btn-icon-only[data-tooltip]:focus-visible::after {
+  transform: translateY(0);
+}
+
 
 .toolbar-sep {
   display: inline-block;
@@ -2164,9 +2183,10 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .file-explorer-action-chip {
   position: absolute;
-  inset-inline-end: 0;
-  inset-block-start: calc(100% + 6px);
-  inset-block-end: auto;
+  /* Anchor to left edge so chip expands rightward into the pane (avoids right-edge clipping under overflow:hidden) */
+  left: 0;
+  top: calc(100% + 6px);
+  bottom: auto;
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
@@ -2548,7 +2568,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   font-size: calc(12px * var(--ui-font-scale));
   font-family: inherit;
   cursor: pointer;
-  padding: 10px 12px;
+  padding: 9px 12px 8px;
   border-bottom: 2px solid transparent;
   transition:
     color 0.12s,
@@ -2556,12 +2576,13 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .right-pane-tab:hover {
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
 
 .right-pane-tab.active {
-  color: var(--text-primary);
+  color: color-mix(in srgb, var(--accent) 85%, var(--text-primary) 15%);
   border-bottom-color: var(--accent);
+  font-weight: 600;
 }
 
 .right-pane-version {
@@ -3774,7 +3795,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   text-transform: uppercase;
 }
 
-.document-settings-field input,
+.document-settings-field input:not([type="checkbox"]),
 .document-settings-field select {
   width: 100%;
   min-width: 0;
@@ -3791,6 +3812,22 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .document-settings-reset-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.document-settings-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.document-settings-checkbox-row input[type="checkbox"] {
+  margin: 0;
+}
+
+.document-settings-checkbox-copy {
+  font-size: calc(13px * var(--ui-font-scale));
+  font-weight: 600;
 }
 
 .document-settings-meta,
@@ -4365,6 +4402,51 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .slider-control input[type="range"] {
   min-width: 100px;
   width: 140px;
+  /* Theme-aware range input: override OS defaults with CSS tokens */
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--slider-track, var(--border-main));
+  outline: none;
+  cursor: pointer;
+}
+
+.slider-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--slider-thumb, var(--accent));
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.slider-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--slider-thumb, var(--accent));
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.slider-control input[type="range"]:hover::-webkit-slider-thumb,
+.slider-control input[type="range"]:focus-visible::-webkit-slider-thumb {
+  background: var(--slider-thumb-hover, var(--accent));
+}
+
+.slider-control input[type="range"]:hover::-moz-range-thumb,
+.slider-control input[type="range"]:focus-visible::-moz-range-thumb {
+  background: var(--slider-thumb-hover, var(--accent));
+}
+
+.slider-control input[type="range"]:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .slider-value {
@@ -4727,6 +4809,20 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 [data-aozora-base] {
   /* base text inherits surrounding styles */
+}
+
+/*
+ * Strike mark wrappers (`<s>`, `<del>`, `<strike>`) do not reliably paint
+ * line-through across the inline-block ruby container, so reapply the
+ * decoration to the ruby base text only.
+ */
+.editor-surface .ProseMirror :is(s, del, strike) .tategaki-aozora-ruby > [data-aozora-base] {
+  text-decoration-line: line-through;
+  text-decoration-color: currentColor;
+}
+
+.editor-surface .ProseMirror :is(s, del, strike) .tategaki-aozora-ruby-rt {
+  text-decoration-line: none;
 }
 
 .editor-surface .ProseMirror .tategaki-aozora-ruby-rt {
@@ -5159,33 +5255,36 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px 0;
+  padding: 12px 16px 10px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .theme-studio-title {
   margin: 0;
-  font-size: calc(14px * var(--ui-font-scale));
+  font-size: calc(13px * var(--ui-font-scale));
   font-weight: 600;
   color: var(--text-primary);
+  letter-spacing: 0.01em;
 }
 
 .theme-studio-tabs {
   display: flex;
-  gap: 4px;
+  gap: 3px;
 }
 
 .theme-studio-tab {
-  padding: 5px 12px;
+  padding: 4px 11px;
   border-radius: 6px;
   border: 1px solid var(--border-main);
   background: var(--bg-button);
   color: var(--text-secondary);
-  font-size: calc(12px * var(--ui-font-scale));
+  font-size: calc(11.5px * var(--ui-font-scale));
   cursor: pointer;
   transition:
     background 0.12s,
-    color 0.12s;
+    color 0.12s,
+    border-color 0.12s;
 }
 
 .theme-studio-tab:hover {
@@ -5194,9 +5293,10 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .theme-studio-tab--active {
-  background: var(--accent);
-  color: var(--bg-panel);
-  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-button) 78%);
+  color: color-mix(in srgb, var(--accent) 85%, var(--text-primary) 15%);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border-main) 50%);
+  font-weight: 600;
 }
 
 .theme-studio-body {
@@ -5214,7 +5314,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-  padding: 10px 12px 4px;
+  padding: 10px 12px 6px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border-light);
 }
 
 .theme-icon-chip-action {
@@ -5306,8 +5408,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .theme-action-chip {
   position: absolute;
-  inset-inline-end: 0;
-  inset-block-end: calc(100% + 6px);
+  /* Anchor to left edge so chip expands rightward into the pane (avoids right-edge clipping under overflow:hidden) */
+  left: 0;
+  bottom: calc(100% + 6px);
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
@@ -5367,7 +5470,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .theme-preview-toggle-row {
   display: flex;
   justify-content: flex-end;
-  padding: 0 12px 6px;
+  padding: 6px 12px 6px;
+  border-top: 1px solid var(--border-light);
+  margin-top: 4px;
 }
 
 .theme-preview-window {
@@ -5635,7 +5740,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: flex-end;
+  justify-content: flex-start;
   padding: 2px 12px 8px;
 }
 

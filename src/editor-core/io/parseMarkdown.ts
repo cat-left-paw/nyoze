@@ -2,7 +2,13 @@ import type { Schema, Node as PMNode } from '@tiptap/pm/model'
 import MarkdownIt from 'markdown-it'
 import type Token from 'markdown-it/lib/token.mjs'
 import type { LineBreakPolicy } from '../types'
+import {
+  collectTopLevelMarkdownBlockDescriptors,
+  supportsPreservedEmptyParagraphBoundary,
+} from './emptyParagraphPreservation'
 import { validateDocumentLinkHref } from './linkHrefSafety'
+import { INLINE_PATTERN_WITH_EMPHASIS_REGEX } from './fallbackEmphasis'
+import { rescueOrphanDelimiters } from './rescueOrphanDelimiters'
 
 /**
  * Parse a Markdown string into a ProseMirror document.
@@ -13,21 +19,14 @@ import { validateDocumentLinkHref } from './linkHrefSafety'
  * 3. Unknown HTML (html_inline, html_block) -> atom nodes with attrs.raw.
  * 4. Known tokens -> standard ProseMirror nodes/marks.
  * 5. Aozora ruby/tcy patterns in text -> aozoraRuby/aozoraTcy nodes.
+ * 6. Rescue compound emphasis where markdown-it parsed only the inner mark
+ *    and left the outer delimiter run attached to text tokens.
+ * 7. Fallback emphasis: bold/italic/strike that markdown-it declined to
+ *    parse entirely due to CJK punctuation adjacency -> rescued via regex.
  */
 
 const md = MarkdownIt('commonmark', { html: true })
 md.enable('strikethrough')
-
-/**
- * Combined regex for custom inline patterns:
- *
- * Ruby (explicit delimiter): ｜body《ruby》  or  |body《ruby》
- * Ruby (kanji-only):         漢字《ruby》
- * TCY:                       ｟body｠  (2-4 chars, [A-Za-z0-9!?])
- * Highlight:                 ==text==  (non-empty, no nested ==)
- */
-const INLINE_PATTERN_REGEX =
-  /(?:[｜|]([^｜|《》]+?)|([\u4E00-\u9FFF\u3005\u3400-\u4DBF]+?))《([^》]+?)》|｟([A-Za-z0-9!?]{2,4})｠|==([^=\n]+)==/g
 
 type MarkAttrs = Record<string, unknown>
 
@@ -39,6 +38,8 @@ interface MarkEntry {
 export type ParseMarkdownOptions = {
   /** When false, aozora ruby patterns are kept as plain text instead of aozoraRuby nodes. */
   enableRuby?: boolean
+  /** Preserve extra blank lines between top-level paragraph / heading blocks. */
+  preserveEmptyParagraphs?: boolean
 }
 
 export function parseMarkdown(
@@ -58,7 +59,11 @@ function parseCommonmarkMarkdown(schema: Schema, markdown: string, options?: Par
   const tokens = md.parse(markdown, {})
   const builder = new DocBuilder(schema, markdown, options)
   builder.processTokens(tokens)
-  return builder.build()
+  const doc = builder.build()
+  if (options?.preserveEmptyParagraphs !== true) {
+    return doc
+  }
+  return materializePreservedEmptyParagraphs(schema, doc, tokens)
 }
 
 function normalizeLineEndings(markdown: string): string {
@@ -108,6 +113,40 @@ function parseObsidianParagraphMarkdown(schema: Schema, markdown: string, option
   return createDocNode(schema, children)
 }
 
+function materializePreservedEmptyParagraphs(
+  schema: Schema,
+  doc: PMNode,
+  tokens: Token[],
+): PMNode {
+  const descriptors = collectTopLevelMarkdownBlockDescriptors(tokens)
+  if (descriptors.length !== doc.childCount || descriptors.length < 2) {
+    return doc
+  }
+
+  const children: PMNode[] = []
+  let inserted = false
+  for (let index = 0; index < doc.childCount; index += 1) {
+    const child = doc.child(index)
+    children.push(child)
+
+    if (index >= doc.childCount - 1) continue
+    if (!supportsPreservedEmptyParagraphBoundary(child.type.name)) continue
+
+    const nextChild = doc.child(index + 1)
+    if (!supportsPreservedEmptyParagraphBoundary(nextChild.type.name)) continue
+
+    const extraBlankParagraphs =
+      descriptors[index + 1].startLine - descriptors[index].endLine - 1
+    if (extraBlankParagraphs <= 0) continue
+
+    for (let blankIndex = 0; blankIndex < extraBlankParagraphs; blankIndex += 1) {
+      children.push(createParagraphNode(schema, ''))
+      inserted = true
+    }
+  }
+
+  return inserted ? createDocNode(schema, children) : doc
+}
 function parseObsidianPlainLine(schema: Schema, line: string, options?: ParseMarkdownOptions): PMNode {
   const leadingMatch = line.match(/^[ \t\u3000]+/)
   const leading = leadingMatch?.[0] ?? ''
@@ -385,10 +424,11 @@ class DocBuilder {
   }
 
   private processInlineTokens(tokens: Token[]): void {
+    const rescued = rescueOrphanDelimiters(tokens)
     const frame = this.currentFrame()
 
-    for (let i = 0; i < tokens.length; i++) {
-      const tok = tokens[i]
+    for (let i = 0; i < rescued.length; i++) {
+      const tok = rescued[i]
 
       switch (tok.type) {
         case 'text': {
@@ -587,19 +627,23 @@ class DocBuilder {
   }
 
   /**
-   * Process text that may contain inline patterns (Aozora ruby/tcy, highlight).
+   * Process text that may contain inline patterns (Aozora ruby/tcy, highlight,
+   * fallback emphasis after markdown-it left the whole span as plain text).
    * Splits text at pattern boundaries and emits the appropriate nodes/marks.
    */
   private addTextWithAozora(text: string, marks: MarkEntry[]): void {
     const hasRuby = this.enableRuby ? this.schema.nodes['aozoraRuby'] : undefined
     const hasTcy = this.schema.nodes['aozoraTcy']
     const hasHighlight = this.schema.marks['highlight']
-    if (!hasRuby && !hasTcy && !hasHighlight) {
+    const hasBold = this.schema.marks['bold']
+    const hasItalic = this.schema.marks['italic']
+    const hasStrike = this.schema.marks['strike']
+    if (!hasRuby && !hasTcy && !hasHighlight && !hasBold && !hasItalic && !hasStrike) {
       this.addText(text, marks)
       return
     }
 
-    const regex = new RegExp(INLINE_PATTERN_REGEX.source, 'g')
+    const regex = new RegExp(INLINE_PATTERN_WITH_EMPHASIS_REGEX.source, 'g')
     let lastIndex = 0
     let match: RegExpExecArray | null
 
@@ -619,8 +663,20 @@ class DocBuilder {
         const hasDelimiter = match[1] !== undefined
         this.addRubyNode(body, ruby, hasDelimiter, marks)
       } else if (match[5] !== undefined && hasHighlight) {
-        // Highlight match: group [5]
-        this.addText(match[5], [...marks, { name: 'highlight', attrs: {} }])
+        // Highlight match: group [5] — recurse to parse ruby/tcy inside highlight
+        this.addTextWithAozora(match[5], [...marks, { name: 'highlight', attrs: {} }])
+      } else if (match[6] !== undefined && hasBold && hasItalic) {
+        // Fallback bold+italic: group [6] (***text***)
+        this.addTextWithAozora(match[6], [...marks, { name: 'bold', attrs: {} }, { name: 'italic', attrs: {} }])
+      } else if (match[7] !== undefined && hasBold) {
+        // Fallback bold: group [7] — markdown-it declined due to CJK punctuation adjacency
+        this.addTextWithAozora(match[7], [...marks, { name: 'bold', attrs: {} }])
+      } else if (match[8] !== undefined && hasItalic) {
+        // Fallback italic: group [8]
+        this.addTextWithAozora(match[8], [...marks, { name: 'italic', attrs: {} }])
+      } else if (match[9] !== undefined && hasStrike) {
+        // Fallback strike: group [9]
+        this.addTextWithAozora(match[9], [...marks, { name: 'strike', attrs: {} }])
       } else {
         // Schema doesn't have the required node type; keep as text
         this.addText(match[0], marks)

@@ -3,6 +3,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import type { LineBreakPolicy } from '../types'
 import { handleHomeEndKey, resetHomeEndState } from './homeEndNavigation'
 import { handlePageUpDownKey } from './pageUpDownNavigation'
+import { handleHeadingFoldStartArrowKey } from './headingFoldStartArrowNavigation'
 import { handleRubyBoundaryArrowKey } from './rubyBoundaryArrowNavigation'
 import { handleListTabKey } from './listTabNavigation'
 
@@ -49,6 +50,15 @@ export function createEditorPropsKeyDownHandler({
 
     if (
       handlePageUpDownKey(view, event, {
+        getIsComposing: () => getIsComposing(view.composing),
+        pushLog,
+      })
+    ) {
+      return true
+    }
+
+    if (
+      handleHeadingFoldStartArrowKey(view, event, {
         getIsComposing: () => getIsComposing(view.composing),
         pushLog,
       })

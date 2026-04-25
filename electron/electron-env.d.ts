@@ -138,7 +138,7 @@ interface Window {
       openExternal: (url: string) => Promise<boolean>
     }
     menu: {
-      openAppMenu: () => Promise<void>
+      openAppMenu: (uiLanguageMode: import('../src/settings/types').UiLanguageMode) => Promise<void>
       onMenuCommand: (callback: (command: string) => void) => () => void
     }
     document: {

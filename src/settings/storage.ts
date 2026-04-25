@@ -19,6 +19,7 @@ import {
   DEFAULT_TOOLBAR_ICON_STROKE,
   DEFAULT_TOOLBAR_SCALE,
   DEFAULT_UI_FONT,
+  DEFAULT_UI_LANGUAGE_MODE,
   DEFAULT_UI_FONT_SCALE,
   DEFAULT_LEFT_WIDTH,
   DEFAULT_LINE_BREAK_POLICY,
@@ -47,6 +48,7 @@ import {
   TOOLBAR_VISIBLE_STORAGE_KEY,
   UI_FONT_SCALE_STORAGE_KEY,
   UI_FONT_STORAGE_KEY,
+  UI_LANGUAGE_MODE_STORAGE_KEY,
   UI_TEXT_PRIMARY_STORAGE_KEY,
   UI_THEME_STORAGE_KEY,
   WRITING_MODE_STORAGE_KEY,
@@ -65,10 +67,16 @@ import type {
   SettingsJson,
   Theme,
   UiFont,
+  UiLanguageMode,
   UiThemePreset,
   WritingMode,
 } from './types'
 import { normalizeAppTitleCustomValue } from './appTitleCustom'
+import {
+  isCuratedDocThemePresetId,
+  isCuratedUiThemePresetId,
+} from './theme-packs'
+import { normalizeUiLanguageMode, resolveDefaultUiLanguageMode } from './uiLanguageMode'
 import { normalizeTheme, UI_THEME_VALUES } from './themeUtils'
 import {
   type CaretColorMode,
@@ -405,6 +413,36 @@ export function loadUiFont(): UiFont {
 export function saveUiFont(value: UiFont): void {
   try {
     window.localStorage.setItem(UI_FONT_STORAGE_KEY, value)
+  } catch {
+    // ignore
+  }
+}
+
+export function loadUiLanguageMode(): UiLanguageMode {
+  try {
+    const saved = window.localStorage.getItem(UI_LANGUAGE_MODE_STORAGE_KEY)
+    const normalized = normalizeUiLanguageMode(saved)
+    if (normalized) return normalized
+  } catch {
+    // ignore
+  }
+  try {
+    const preferredLanguages =
+      typeof window.navigator?.languages?.length === 'number' && window.navigator.languages.length > 0
+        ? window.navigator.languages
+        : typeof window.navigator?.language === 'string'
+          ? [window.navigator.language]
+          : null
+    return resolveDefaultUiLanguageMode(preferredLanguages)
+  } catch {
+    // ignore
+  }
+  return DEFAULT_UI_LANGUAGE_MODE
+}
+
+export function saveUiLanguageMode(value: UiLanguageMode): void {
+  try {
+    window.localStorage.setItem(UI_LANGUAGE_MODE_STORAGE_KEY, value)
   } catch {
     // ignore
   }
@@ -928,6 +966,7 @@ export async function saveSettingsJson(settings: SettingsJson): Promise<void> {
     if (settings.docHeadingFont !== undefined) saveDocHeadingFont(settings.docHeadingFont)
     if (settings.documentTheme !== undefined) saveDocumentTheme(settings.documentTheme)
     if (settings.uiFont !== undefined) saveUiFont(settings.uiFont)
+    if (settings.uiLanguageMode !== undefined) saveUiLanguageMode(settings.uiLanguageMode)
     if (settings.uiTextPrimary !== undefined) saveUiTextPrimary(settings.uiTextPrimary)
     if (settings.uiFontScale !== undefined) saveUiFontScale(settings.uiFontScale)
     if (settings.toolbarIconColor !== undefined) {
@@ -1021,7 +1060,10 @@ function normalizePresetKind(
   prefix: 'preset-ui-' | 'preset-doc-',
 ): 'system' | 'custom' {
   if (value === 'system' || value === 'custom') return value
-  return fallbackId.startsWith(prefix) ? 'system' : 'custom'
+  if (fallbackId.startsWith(prefix)) return 'system'
+  if (prefix === 'preset-ui-' && isCuratedUiThemePresetId(fallbackId)) return 'system'
+  if (prefix === 'preset-doc-' && isCuratedDocThemePresetId(fallbackId)) return 'system'
+  return 'custom'
 }
 
 export function validateUiThemePreset(data: unknown): UiThemePreset | null {

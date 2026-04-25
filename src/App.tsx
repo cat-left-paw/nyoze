@@ -14,6 +14,7 @@ import {
 import {
   canSafelyPatchFrontmatter,
   patchFrontmatterKnownScalars,
+  resolveDocumentMarkdownOptions,
   resolveDocumentType,
   resolveTypeDerivedLineBreakPolicy,
 } from "./editor-core/io/frontmatterDocumentSettings";
@@ -79,9 +80,13 @@ import {
   copySelection,
   cutSelection,
   pasteFromClipboard,
+  pasteFromClipboardPlainOnly,
 } from "./ui/utils/nativeEditCommands";
 import { getPathBaseName } from "./ui/utils/path";
-import { formatDocumentTypeNoticeMessage } from "./ui/utils/documentTypePresentation";
+import {
+  formatDocumentTypeLabel,
+  formatDocumentTypeNoticeMessage,
+} from "./ui/utils/documentTypePresentation";
 import { UnifiedHeader } from "./ui/components/UnifiedHeader";
 import { Workspace } from "./ui/components/Workspace";
 import { DocumentSettingsPanel } from "./ui/components/DocumentSettingsPanel";
@@ -142,14 +147,20 @@ type ActiveDocumentInfo = {
   updatedAtText: string;
   pathText: string;
   pathTitle: string;
+  documentTypeLabel: string;
+  eolKind: "lf" | "crlf";
 };
 type PendingDocumentSettingsChange = {
   nextFrontmatterPrefix: string;
   nextFrontmatterFields: FrontmatterFields;
   nextDocumentType: DocumentType;
   nextEffectiveLineBreakPolicy: LineBreakPolicy;
+  nextDocumentMarkdownOptions: {
+    preserveEmptyParagraphs: boolean;
+  };
 };
 type SaveDocumentTarget = Pick<EditorTab, "id" | "title" | "filePath" | "savedStat">;
+type EditorSurfaceScroll = Pick<EditorTab, "scrollTop" | "scrollLeft">;
 
 // R3.5-2 P2: saveDocument の最終結果を ref 経由で close-before-save ラッパーに渡す。
 type SaveDocumentDetail = {
@@ -474,6 +485,13 @@ function App() {
     ui.setParagraphPlainModeActive(next);
   }, [ui]);
 
+  const handleToggleLeftPane = useCallback(() => {
+    setLeftPaneOpen((v) => !v);
+  }, [setLeftPaneOpen]);
+  const handleToggleRightPane = useCallback(() => {
+    setRightPaneOpen((v) => !v);
+  }, [setRightPaneOpen]);
+
   // Global keyboard shortcuts (marks, headings, list move, outline, search)
   useGlobalShortcuts({
     coreRef,
@@ -483,8 +501,11 @@ function App() {
     onOpenSearch: search.openSearch,
     onOpenSearchReplace: search.openSearchReplace,
     onOpenLinkPrompt: openLinkPrompt,
+    onOpenRubyPrompt: openRubyBoutenPrompt,
     onShowEditorInlineHint: ui.showEditorInlineHint,
     onToggleParagraphPlainMode: toggleParagraphPlainMode,
+    onToggleLeftPane: handleToggleLeftPane,
+    onToggleRightPane: handleToggleRightPane,
   });
 
   const handleCtxHeading = useCallback(
@@ -973,6 +994,7 @@ function App() {
           const normalizedCharCount = countDocumentBodyCharacters(normalizedMarkdown);
           ui.patchTab(targetTabId, {
             frontmatterFields: parseFrontmatterFields(frontmatterPrefix),
+            documentMarkdownOptions: core.getDocumentMarkdownOptions(),
             markdownSnapshot: normalizedMarkdown,
             characterCount: normalizedCharCount,
           });
@@ -1296,11 +1318,16 @@ function App() {
 
   const syncActiveTabFrontmatter = useCallback(
     (markdown: string) => {
+      const documentMarkdownOptions =
+        coreRef.current?.getDocumentMarkdownOptions() ?? {
+          preserveEmptyParagraphs: false,
+        };
       const { frontmatterPrefix } = splitLeadingFrontmatter(markdown);
       // BETA-SP10: 同じ引数で 2 回呼ばないよう 1 回に集約する
       const charCount = countDocumentBodyCharacters(markdown);
       ui.patchActiveTab({
         frontmatterFields: parseFrontmatterFields(frontmatterPrefix),
+        documentMarkdownOptions,
         markdownSnapshot: markdown,
         characterCount: charCount,
       });
@@ -1310,21 +1337,47 @@ function App() {
   );
 
   const handleTabContentLoaded = useCallback(
-    (_markdown: string, _fields: ReturnType<typeof parseFrontmatterFields>, charCount: number) => {
+    (
+      _markdown: string,
+      _fields: ReturnType<typeof parseFrontmatterFields>,
+      charCount: number,
+      documentMarkdownOptions: { preserveEmptyParagraphs: boolean },
+    ) => {
+      ui.patchActiveTab({ documentMarkdownOptions });
       setActiveDocumentCharacterCount(charCount);
     },
-    [],
+    [ui],
   );
+
+  const applyEditorScroll = useCallback((position: EditorSurfaceScroll) => {
+    const surface = editorDivRef.current?.closest(".editor-surface");
+    if (!(surface instanceof HTMLElement)) return;
+    surface.scrollTop = position.scrollTop;
+    surface.scrollLeft = position.scrollLeft;
+  }, []);
+
+  const captureEditorScroll = useCallback((): EditorSurfaceScroll => {
+    const surface = editorDivRef.current?.closest(".editor-surface");
+    if (!(surface instanceof HTMLElement)) {
+      return { scrollTop: 0, scrollLeft: 0 };
+    }
+    return {
+      scrollTop: surface.scrollTop,
+      scrollLeft: surface.scrollLeft,
+    };
+  }, []);
+
+  const restoreEditorScroll = useCallback((position: EditorSurfaceScroll) => {
+    requestAnimationFrame(() => {
+      applyEditorScroll(position);
+    });
+  }, [applyEditorScroll]);
 
   const resetEditorScroll = useCallback(() => {
     requestAnimationFrame(() => {
-      const surface = editorDivRef.current?.closest(".editor-surface");
-      if (surface instanceof HTMLElement) {
-        surface.scrollTop = 0;
-        surface.scrollLeft = 0;
-      }
+      applyEditorScroll({ scrollTop: 0, scrollLeft: 0 });
     });
-  }, []);
+  }, [applyEditorScroll]);
 
   // BETA-SP1: Source Mode ドラフト消失防止ガード
   // closeFullPlainEdit は後方で定義されるため、ref 経由で遅延参照する。
@@ -1381,7 +1434,9 @@ function App() {
     notifyActiveDocumentPath: (filePath) => {
       window.nyozeBridge?.document?.setActiveFilePath(filePath);
     },
+    captureEditorScroll,
     resetEditorScroll,
+    restoreEditorScroll,
     defaultWritingMode: ui.defaultWritingMode,
     defaultLineBreakPolicy: ui.defaultLineBreakPolicy,
     guardSourceModeDraft: guardSourceModeDraftFn,
@@ -1780,11 +1835,11 @@ function App() {
   const handleOpenAppMenu = useCallback(() => {
     const openMenu = window.nyozeBridge?.menu?.openAppMenu;
     if (typeof openMenu === "function") {
-      openMenu().catch(() => {
+      openMenu(ui.uiLanguageMode).catch(() => {
         // ignore
       });
     }
-  }, []);
+  }, [ui.uiLanguageMode]);
 
   const handleLoad = useCallback(
     async (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -1866,6 +1921,18 @@ function App() {
   const handlePaste = useCallback(async () => {
     await pasteFromClipboard();
   }, []);
+
+  const handlePastePlain = useCallback(async () => {
+    const r = await pasteFromClipboardPlainOnly();
+    if (r.ok) return;
+    if (r.reason === "clipboard_unavailable") {
+      ui.showEditorInlineHint(
+        "Could not read the clipboard. Allow clipboard access, or use Paste.",
+      );
+      return;
+    }
+    ui.showEditorInlineHint("No plain text on the clipboard.");
+  }, [ui]);
 
   const handleDocumentThemeChange = useCallback(
     (docTheme: DocumentTheme) => {
@@ -1961,29 +2028,47 @@ function App() {
       if (!core) return;
 
       const currentEffectiveLineBreakPolicy = ui.effectiveLineBreakPolicy;
+      const currentDocumentMarkdownOptions =
+        ui.activeTab.documentMarkdownOptions;
+      const lineBreakPolicyChanged =
+        pendingChange.nextEffectiveLineBreakPolicy !==
+        currentEffectiveLineBreakPolicy;
+      const preserveEmptyParagraphsChanged =
+        pendingChange.nextDocumentMarkdownOptions.preserveEmptyParagraphs !==
+        currentDocumentMarkdownOptions.preserveEmptyParagraphs;
+
       core.setFrontmatterPrefix(pendingChange.nextFrontmatterPrefix);
       const frontmatterPatchedMarkdown = core.saveMarkdown();
 
-      if (
-        pendingChange.nextEffectiveLineBreakPolicy !==
-        currentEffectiveLineBreakPolicy
-      ) {
+      if (lineBreakPolicyChanged) {
         core.setLineBreakPolicy(pendingChange.nextEffectiveLineBreakPolicy);
-        core.applyLineBreakPolicyNow(pendingChange.nextEffectiveLineBreakPolicy);
+        core.applyLineBreakPolicyNow(
+          pendingChange.nextEffectiveLineBreakPolicy,
+          pendingChange.nextDocumentMarkdownOptions,
+        );
+      } else if (preserveEmptyParagraphsChanged) {
+        if (pendingChange.nextDocumentMarkdownOptions.preserveEmptyParagraphs) {
+          core.setDocumentMarkdownOptions(
+            pendingChange.nextDocumentMarkdownOptions,
+          );
+        } else {
+          core.applyLineBreakPolicyNow(
+            currentEffectiveLineBreakPolicy,
+            pendingChange.nextDocumentMarkdownOptions,
+          );
+        }
       }
 
       const nextMarkdown = core.saveMarkdown();
       ui.patchActiveTab({
         frontmatterFields: pendingChange.nextFrontmatterFields,
+        documentMarkdownOptions: pendingChange.nextDocumentMarkdownOptions,
         markdownSnapshot: nextMarkdown,
         characterCount: countDocumentBodyCharacters(nextMarkdown),
       });
       ui.recalcDirtyFromCore();
 
-      if (
-        pendingChange.nextEffectiveLineBreakPolicy ===
-        currentEffectiveLineBreakPolicy
-      ) {
+      if (!lineBreakPolicyChanged) {
         return;
       }
 
@@ -2047,6 +2132,8 @@ function App() {
   const handleDocumentSettingsChange = useCallback(
     (nextSettings: {
       documentType: DocumentType;
+      preserveEmptyParagraphs: boolean;
+      persistPreserveEmptyParagraphs?: boolean;
       title: string;
       author: string;
       translator: string;
@@ -2067,30 +2154,65 @@ function App() {
         return;
       }
 
+      const currentCanonicalDocumentMarkdownOptions =
+        resolveDocumentMarkdownOptions(ui.activeTab.frontmatterFields);
+      const currentEffectivePreserveEmptyParagraphs =
+        ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs;
+      const preserveToggleChanged =
+        nextSettings.preserveEmptyParagraphs !==
+        currentEffectivePreserveEmptyParagraphs;
+      const nextExplicitPreserveEmptyParagraphs =
+        nextSettings.documentType === "article" &&
+        (nextSettings.persistPreserveEmptyParagraphs === true
+          ? true
+          : preserveToggleChanged
+            ? nextSettings.preserveEmptyParagraphs
+            : currentCanonicalDocumentMarkdownOptions.preserveEmptyParagraphs);
       const nextFrontmatterPrefix = patchFrontmatterKnownScalars(
         split.frontmatterPrefix,
         {
           documentType: nextSettings.documentType,
+          nyozePreserveEmptyParagraphs:
+            nextExplicitPreserveEmptyParagraphs
+              ? true
+              : null,
           title: nextSettings.title,
           author: nextSettings.author,
           translator: nextSettings.translator,
         },
       );
-      if (nextFrontmatterPrefix === split.frontmatterPrefix) return;
-
       const nextFrontmatterFields = parseFrontmatterFields(nextFrontmatterPrefix);
       const nextDocumentType = resolveDocumentType(nextFrontmatterFields);
+      const nextDocumentMarkdownOptions = {
+        preserveEmptyParagraphs:
+          nextSettings.documentType === "article" &&
+          nextSettings.preserveEmptyParagraphs,
+      };
       const nextEffectiveLineBreakPolicy =
         resolveEffectiveLineBreakPolicyForDocumentSettings(
           nextFrontmatterFields,
           ui.activeTab.lineBreakPolicy,
         );
+      const currentDocumentMarkdownOptions = ui.activeTab.documentMarkdownOptions;
+      if (
+        nextFrontmatterPrefix === split.frontmatterPrefix &&
+        nextEffectiveLineBreakPolicy === ui.effectiveLineBreakPolicy &&
+        nextDocumentMarkdownOptions.preserveEmptyParagraphs ===
+          currentDocumentMarkdownOptions.preserveEmptyParagraphs
+      ) {
+        return;
+      }
       const pendingChange = {
         nextFrontmatterPrefix,
         nextFrontmatterFields,
         nextDocumentType,
         nextEffectiveLineBreakPolicy,
+        nextDocumentMarkdownOptions,
       };
+      const requiresImmediateNormalization =
+        nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy ||
+        (currentDocumentMarkdownOptions.preserveEmptyParagraphs &&
+          !nextDocumentMarkdownOptions.preserveEmptyParagraphs);
 
       if (
         nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy &&
@@ -2100,11 +2222,11 @@ function App() {
         return;
       }
 
-      // BETA-SP9: 実効ポリシーが変わる場合は大文書 guard
-      if (nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy) {
+      // BETA-SP9: 文書全体の再解釈が必要な変更では大文書 guard をかける
+      if (requiresImmediateNormalization) {
         largeDocGuard.requestGuardedAction(
           activeDocumentCharacterCount,
-          "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
+          "この変更は、大きな文書では全文の再解釈を伴うため数秒かかる場合があります。続行しますか。",
           () => applyDocumentSettingsChange(pendingChange),
         );
         return;
@@ -2120,10 +2242,40 @@ function App() {
     if (!core) return;
     core.setParagraphPlainMode(false);
     ui.setParagraphPlainModeActive(false);
-    ui.setFullPlainEditValue(core.saveMarkdown());
+    // Snapshot both raw editor-surface scroll (writing-mode toggle fallback)
+    // and a layout-independent viewport anchor (for Source Mode round-trip).
+    const anchor = core.captureViewportAnchor();
+    const markdown = core.saveMarkdown();
+    // Map the PM viewport anchor to an approximate Markdown body offset by
+    // ratio. Keep frontmatter as a raw prefix so the Source Mode scroller lands
+    // near the same body text instead of being shifted by metadata length.
+    let initialSourceOffset: number | null = null;
+    const markdownSplit = splitLeadingFrontmatter(markdown);
+    if (
+      anchor &&
+      anchor.textTotal > 0 &&
+      markdownSplit.body.length > 0 &&
+      anchor.textOffset > 0
+    ) {
+      const ratio = Math.max(
+        0,
+        Math.min(1, anchor.textOffset / anchor.textTotal),
+      );
+      initialSourceOffset =
+        markdownSplit.frontmatterPrefix.length +
+        Math.round(ratio * markdownSplit.body.length);
+    }
+    ui.patchActiveTab({
+      ...captureEditorScroll(),
+      viewportAnchorPmPos: anchor?.pmPos ?? null,
+      viewportAnchorTextOffset: anchor?.textOffset ?? null,
+      viewportAnchorTextTotal: anchor?.textTotal ?? null,
+      sourceModeTopOffset: initialSourceOffset,
+    });
+    ui.setFullPlainEditValue(markdown);
     ui.setFullPlainEditError("");
     ui.setFullPlainEditActive(true);
-  }, [ui]);
+  }, [captureEditorScroll, ui]);
 
   const applyFullPlainEdit = useCallback((): boolean => {
     const core = coreRef.current;
@@ -2149,12 +2301,64 @@ function App() {
   }, [sourceModeController, syncActiveTabFrontmatter, ui]);
 
   const closeFullPlainEdit = useCallback(() => {
+    // While Source Mode is active, WYSIWYG .editor-surface には is-hidden-for-plain
+    // で display:none が付いている。非表示のまま scroll を書いても 0 丸めされ得るため、
+    // 可視化してから (rAF×2) で復元する。
+    // Capture Source Mode's current viewport-center offset BEFORE tearing down
+    // the overlay so the centered PM restore does not introduce a half-screen
+    // jump. The legacy tab field name is kept for compatibility.
+    const sourceCenterOffset =
+      sourceModeController.captureViewportCenterOffset();
+    const sourceValue = sourceModeController.getValue();
+    let sourceBodyTextOffset: number | null = null;
+    let sourceRatio: number | null = null;
+    if (
+      typeof sourceValue === "string" &&
+      typeof sourceCenterOffset === "number"
+    ) {
+      const sourceSplit = splitLeadingFrontmatter(sourceValue);
+      sourceBodyTextOffset = Math.max(
+        0,
+        sourceCenterOffset - sourceSplit.frontmatterPrefix.length,
+      );
+      sourceRatio =
+        sourceSplit.body.length > 0
+          ? Math.max(
+              0,
+              Math.min(1, sourceBodyTextOffset / sourceSplit.body.length),
+            )
+          : null;
+    }
+    ui.patchActiveTab({ sourceModeTopOffset: sourceCenterOffset });
+
     ui.setFullPlainEditActive(false);
     ui.setFullPlainEditError("");
     // Full Plain editing may have set dirty based on Source Mode content.
     // After discarding, re-evaluate dirty from the core (unchanged) content.
     ui.recalcDirtyFromCore();
-  }, [ui]);
+
+    const { scrollTop, scrollLeft } = ui.activeTab;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const core = coreRef.current;
+        // Prefer PM text-offset restore. It is still approximate because
+        // Source Mode offset is Markdown text, but it avoids mapping a
+        // Markdown ratio directly onto PM structural docSize.
+        if (core && sourceBodyTextOffset !== null && sourceBodyTextOffset > 0) {
+          const restored =
+            core.scrollEditorSurfaceToTextOffset(sourceBodyTextOffset);
+          if (restored) return;
+        }
+        if (core && sourceRatio !== null && sourceRatio > 0) {
+          core.scrollEditorSurfaceToRatio(sourceRatio);
+          return;
+        }
+        // Fallback: raw pre-enter scroll (may reset to top for new layouts).
+        applyEditorScroll({ scrollTop, scrollLeft });
+      });
+    });
+  }, [applyEditorScroll, sourceModeController, ui]);
   // BETA-SP1: guardSourceModeDraft の遅延参照用 ref に closeFullPlainEdit を登録
   guardSourceModeDraftDepsRef.current.closeFullPlainEdit = closeFullPlainEdit;
 
@@ -2163,6 +2367,36 @@ function App() {
     const ok = applyFullPlainEdit();
     if (ok) closeFullPlainEdit();
   }, [applyFullPlainEdit, closeFullPlainEdit]);
+
+  const handleToggleWritingMode = useCallback(() => {
+    // Writing-mode toggle flips the scroll axis and changes layout entirely,
+    // so raw scrollTop/scrollLeft restore lands on the wrong spot (usually
+    // snapped to 0). Use a layout-independent PM viewport anchor instead:
+    // capture the PM pos nearest the visible center, toggle, then re-anchor
+    // via coordsAtPos against the new layout.
+    const core = coreRef.current;
+    const anchor = core?.captureViewportAnchor() ?? null;
+    const scrollPosition = captureEditorScroll();
+    ui.patchActiveTab({
+      ...scrollPosition,
+      viewportAnchorPmPos: anchor?.pmPos ?? null,
+      viewportAnchorTextOffset: anchor?.textOffset ?? null,
+      viewportAnchorTextTotal: anchor?.textTotal ?? null,
+    });
+    ui.toggleWritingMode();
+    // Defer restore until after the new writing-mode CSS has been applied by
+    // the browser. rAF×2 matches the existing closeFullPlainEdit pattern.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const currentCore = coreRef.current;
+        if (anchor && currentCore) {
+          currentCore.restoreViewportAnchor(anchor);
+        } else {
+          applyEditorScroll(scrollPosition);
+        }
+      });
+    });
+  }, [applyEditorScroll, captureEditorScroll, ui]);
 
   const toggleFullPlainEdit = useCallback(() => {
     if (ui.fullPlainEditActive) {
@@ -2182,6 +2416,7 @@ function App() {
     ui.fullPlainEditActive,
   ]);
 
+  const resolvedDocumentType = resolveDocumentType(ui.activeTab.frontmatterFields);
   const activeDocumentInfo: ActiveDocumentInfo = {
     characterCount: activeDocumentCharacterCount,
     createdAtText: ui.activeTab.filePath
@@ -2192,8 +2427,19 @@ function App() {
       : "—",
     pathText: ui.activeTab.filePath ?? "未保存",
     pathTitle: ui.activeTab.filePath ?? "未保存",
+    documentTypeLabel: formatDocumentTypeLabel(
+      resolvedDocumentType,
+      ui.uiLanguageMode,
+    ),
+    eolKind: ui.activeTab.eol,
   };
-  const resolvedDocumentType = resolveDocumentType(ui.activeTab.frontmatterFields);
+  const resolvedDocumentMarkdownOptions = resolveDocumentMarkdownOptions(
+    ui.activeTab.frontmatterFields,
+  );
+  const autoProtectedPreserveEmptyParagraphs =
+    resolvedDocumentType === "article" &&
+    ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs &&
+    !resolvedDocumentMarkdownOptions.preserveEmptyParagraphs;
 
   return (
     <main className="app-shell">
@@ -2206,6 +2452,7 @@ function App() {
         onWindowMinimize={handleWindowMinimize}
         onWindowClose={handleWindowClose}
         platform={ui.platform}
+        uiLanguageMode={ui.uiLanguageMode}
         toolbarVisible={ui.toolbarVisible}
         onToggleToolbarVisible={ui.toggleToolbarVisible}
         toolbarOffset={ui.toolbarOffset}
@@ -2241,7 +2488,7 @@ function App() {
             () => ui.setRubyVisible((v) => !v),
           );
         }}
-        onToggleWritingMode={ui.toggleWritingMode}
+        onToggleWritingMode={handleToggleWritingMode}
         documentType={resolvedDocumentType}
         hasDocumentBehaviorOverride={ui.lineBreakPolicyLockReason === "frontmatter"}
         onOpenDocumentSettings={handleOpenDocumentSettingsPane}
@@ -2262,6 +2509,7 @@ function App() {
         workspaceRef={workspaceRef}
         editorDivRef={editorDivRef}
         sourceModeController={sourceModeController}
+        uiLanguageMode={ui.uiLanguageMode}
         leftPaneOpen={leftPaneOpen}
         leftWidth={leftWidth}
         rightPaneOpen={rightPaneOpen}
@@ -2279,6 +2527,7 @@ function App() {
         fullPlainEditActive={ui.fullPlainEditActive}
         fullPlainEditValue={ui.fullPlainEditValue}
         fullPlainEditError={ui.fullPlainEditError}
+        fullPlainEditInitialScrollOffset={ui.activeTab.sourceModeTopOffset}
         rubyVisible={ui.rubyVisible}
         frontmatterVisible={ui.frontmatterVisible}
         frontmatterShowAuthors={ui.frontmatterShowAuthors}
@@ -2377,7 +2626,14 @@ function App() {
           <DocumentSettingsPanel
             canEdit={canEditDocumentSettings}
             fullPlainEditActive={ui.fullPlainEditActive}
+            uiLanguageMode={ui.uiLanguageMode}
             documentType={resolvedDocumentType}
+            preserveEmptyParagraphs={
+              ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs
+            }
+            preserveEmptyParagraphsAutoDetected={
+              autoProtectedPreserveEmptyParagraphs
+            }
             title={ui.activeTab.frontmatterFields.title ?? ""}
             author={ui.activeTab.frontmatterFields.author ?? ""}
             translator={ui.activeTab.frontmatterFields.translator ?? ""}
@@ -2397,6 +2653,7 @@ function App() {
         }
         themeStudioSlot={
           <ThemeStudioPanel
+            uiLanguageMode={ui.uiLanguageMode}
             uiThemePresets={ui.uiThemePresets}
             activeUiThemePresetId={ui.activeUiThemePresetId}
             currentUiTheme={ui.theme}
@@ -2441,12 +2698,14 @@ function App() {
         y={ctxMenu.y}
         availability={ctxMenu.availability}
         writingMode={ui.writingMode}
+        uiLanguageMode={ui.uiLanguageMode}
         menuRef={ctxMenuRef}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onCut={handleCut}
         onCopy={handleCopy}
         onPaste={handlePaste}
+        onPastePlain={handlePastePlain}
         onSelectAll={handleCtxSelectAll}
         onBold={() => coreRef.current?.execute("bold")}
         onItalic={() => coreRef.current?.execute("italic")}
@@ -2503,6 +2762,7 @@ function App() {
         open={ui.displaySettingsOpen}
         displaySettings={ui.displaySettings}
         writingMode={ui.writingMode}
+        uiLanguageMode={ui.uiLanguageMode}
         theme={ui.theme}
         uiThemePresets={ui.uiThemePresets}
         activeUiThemePresetId={ui.activeUiThemePresetId}
@@ -2518,6 +2778,8 @@ function App() {
         appTitleColor={ui.appTitleColor}
         appTitleFont={ui.appTitleFont}
         documentTheme={ui.documentTheme}
+        docThemePresets={ui.docThemePresets}
+        activeDocThemePresetId={ui.activeDocThemePresetId}
         docFontPreset={ui.docFontPreset}
         docHeadingFont={ui.docHeadingFont}
         docColorSettings={ui.docColorSettings}
@@ -2558,6 +2820,7 @@ function App() {
         onThemeChange={ui.setTheme}
         onSetActiveUiThemePresetId={ui.setActiveUiThemePresetId}
         onUiFontChange={ui.setUiFont}
+        onUiLanguageModeChange={ui.setUiLanguageMode}
         onUiTextPrimaryChange={ui.setUiTextPrimary}
         onUiFontScaleChange={ui.setUiFontScale}
         onToolbarIconColorChange={ui.setToolbarIconColor}
@@ -2569,6 +2832,7 @@ function App() {
         onAppTitleColorChange={ui.setAppTitleColor}
         onAppTitleFontChange={ui.setAppTitleFont}
         onDocumentThemeChange={handleDocumentThemeChange}
+        onSetActiveDocThemePresetId={ui.setActiveDocThemePresetId}
         onDocFontPresetChange={ui.setDocFontPreset}
         onDocHeadingFontChange={ui.setDocHeadingFont}
         onDocColorSettingsChange={ui.setDocColorSettings}

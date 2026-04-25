@@ -5,8 +5,12 @@ import type { WritingMode } from '../../settings/types'
 import type { SourceModeController } from './useSourceModeController'
 import {
   getPlainShortcutUnavailableMessage,
+  matchesLeftPaneToggleShortcut,
+  matchesOutlineShortcut,
   matchesParagraphPlainToggleShortcut,
   matchesPlainBlockedEditorShortcut,
+  matchesRightPaneToggleShortcut,
+  matchesRubyInsertShortcut,
   type PlainModeKind,
 } from '../utils/plainModeCommandGate'
 import {
@@ -23,8 +27,11 @@ type UseGlobalShortcutsOptions = {
   onOpenSearch: () => void
   onOpenSearchReplace: () => void
   onOpenLinkPrompt: () => void
+  onOpenRubyPrompt: () => void
   onShowEditorInlineHint: (message: string) => void
   onToggleParagraphPlainMode: () => void
+  onToggleLeftPane: () => void
+  onToggleRightPane: () => void
 }
 
 /**
@@ -46,8 +53,11 @@ export function useGlobalShortcuts({
   onOpenSearch,
   onOpenSearchReplace,
   onOpenLinkPrompt,
+  onOpenRubyPrompt,
   onShowEditorInlineHint,
   onToggleParagraphPlainMode,
+  onToggleLeftPane,
+  onToggleRightPane,
 }: UseGlobalShortcutsOptions) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -64,6 +74,42 @@ export function useGlobalShortcuts({
       if (mod && !shift && !alt && e.key === 'h') {
         e.preventDefault()
         onOpenSearchReplace()
+        return
+      }
+
+      // 左右 pane toggle は editor command ではないので、defaultPrevented 早期 return
+      // や plain mode guard より前に処理する。IME 中でも window.keydown は来ないため
+      // 特別扱いは不要だが、composition 中は念のため抜ける。
+      if (
+        matchesLeftPaneToggleShortcut({
+          code: e.code,
+          key: e.key,
+          mod,
+          alt,
+          shift,
+        })
+      ) {
+        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+          return
+        }
+        e.preventDefault()
+        onToggleLeftPane()
+        return
+      }
+      if (
+        matchesRightPaneToggleShortcut({
+          code: e.code,
+          key: e.key,
+          mod,
+          alt,
+          shift,
+        })
+      ) {
+        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+          return
+        }
+        e.preventDefault()
+        onToggleRightPane()
         return
       }
 
@@ -131,6 +177,7 @@ export function useGlobalShortcuts({
         if (
           matchesPlainBlockedEditorShortcut({
             key: e.key,
+            code: e.code,
             mod,
             shift,
             alt,
@@ -143,6 +190,27 @@ export function useGlobalShortcuts({
         return
       }
       if (!core) return
+
+      // Ruby 挿入 shortcut: Cmd/Ctrl+Alt+R
+      // IME 未確定中、defaultPrevented 済みのイベント (ProseMirror keymap 等) は既に
+      // 上で return されている。ここでは Source Mode / Paragraph Plain の後なので、
+      // 通常 WYSIWYG 編集時のみ発火する。
+      if (
+        matchesRubyInsertShortcut({
+          code: e.code,
+          key: e.key,
+          mod,
+          alt,
+          shift,
+        })
+      ) {
+        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+          return
+        }
+        e.preventDefault()
+        onOpenRubyPrompt()
+        return
+      }
 
       // --- Mark commands ---
       if (mod && !shift && !alt && key === 'b') {
@@ -239,22 +307,38 @@ export function useGlobalShortcuts({
       }
 
       // --- Outline navigation ---
-      // Previous heading: Mod+Shift+[
-      if (mod && shift && !alt && e.key === '[') {
-        e.preventDefault()
-        core.jumpToPreviousHeading()
-        return
-      }
-      // Next heading: Mod+Shift+]
-      if (mod && shift && !alt && e.key === ']') {
-        e.preventDefault()
-        core.jumpToNextHeading()
-        return
-      }
-      // Toggle current heading fold: Mod+Shift+.
-      if (mod && shift && !alt && e.key === '.') {
+      // event.code で判定し、レイアウト / Shift 合成で key が揺れても安定して
+      // 拾えるようにする。物理キーは `,` / `.` / `L` (Comma / Period / KeyL)。
+      // 縦書きでは視覚方向に合わせて `,` / `.` の意味を反転する (`comma` =
+      // next, `period` = previous)。`fold` は writingMode 非依存。
+      const outlineKind = matchesOutlineShortcut({
+        code: e.code,
+        key: e.key,
+        mod,
+        alt,
+        shift,
+      })
+      if (outlineKind === 'fold') {
         e.preventDefault()
         core.toggleCurrentHeadingFold()
+        return
+      }
+      if (outlineKind === 'comma') {
+        e.preventDefault()
+        if (writingMode === 'horizontal-tb') {
+          core.jumpToPreviousHeading()
+        } else {
+          core.jumpToNextHeading()
+        }
+        return
+      }
+      if (outlineKind === 'period') {
+        e.preventDefault()
+        if (writingMode === 'horizontal-tb') {
+          core.jumpToNextHeading()
+        } else {
+          core.jumpToPreviousHeading()
+        }
         return
       }
     }
@@ -268,8 +352,11 @@ export function useGlobalShortcuts({
     onOpenSearch,
     onOpenSearchReplace,
     onOpenLinkPrompt,
+    onOpenRubyPrompt,
     onShowEditorInlineHint,
     onToggleParagraphPlainMode,
+    onToggleLeftPane,
+    onToggleRightPane,
     sourceModeController,
   ])
 }

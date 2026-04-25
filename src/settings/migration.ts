@@ -32,6 +32,12 @@ import {
   validateDocThemePresets,
   validateUiThemePresets,
 } from './storage'
+import {
+  BUNDLED_DOC_THEME_PRESETS,
+  BUNDLED_UI_THEME_PRESETS,
+  isStandardDocThemePresetId,
+  isStandardUiThemePresetId,
+} from './theme-packs'
 import { UI_THEME_VALUES } from './themeUtils'
 // Note: loadUiFont, loadUiFontScale, loadDocFontPreset, loadDocHeadingFont are still
 // used for migrateToSettingsJson (individual settings persistence), not for presets.
@@ -85,12 +91,41 @@ function areUiPresetListsEquivalent(a: UiThemePreset[], b: UiThemePreset[]): boo
 
 function isSystemUiPreset(preset: UiThemePreset): boolean {
   if (preset.kind) return preset.kind === 'system'
-  return preset.id.startsWith('preset-ui-')
+  return preset.id.startsWith('preset-ui-') || preset.id.startsWith('curated-ui-')
 }
 
 function isSystemDocPreset(preset: DocThemePreset): boolean {
   if (preset.kind) return preset.kind === 'system'
-  return preset.id.startsWith('preset-doc-')
+  return preset.id.startsWith('preset-doc-') || preset.id.startsWith('curated-doc-')
+}
+
+function isSameDocPresetColors(a: DocThemePreset['colors'], b: DocThemePreset['colors']): boolean {
+  return (
+    a.pageColor === b.pageColor &&
+    a.textColor === b.textColor &&
+    a.headingColor === b.headingColor
+  )
+}
+
+function isSameDocPreset(a: DocThemePreset, b: DocThemePreset): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.kind === b.kind &&
+    a.baseDocTheme === b.baseDocTheme &&
+    isSameDocPresetColors(a.colors, b.colors)
+  )
+}
+
+function areDocPresetListsEquivalent(a: DocThemePreset[], b: DocThemePreset[]): boolean {
+  if (a.length !== b.length) return false
+  const byId = new Map(b.map((preset) => [preset.id, preset]))
+  for (const preset of a) {
+    const other = byId.get(preset.id)
+    if (!other) return false
+    if (!isSameDocPreset(preset, other)) return false
+  }
+  return true
 }
 
 function buildSystemUiPreset(theme: Theme, overrides?: Partial<UiThemePreset>): UiThemePreset {
@@ -223,10 +258,13 @@ export async function migrateToThemePresets(): Promise<void> {
     const loadedTheme = loadUiTheme()
     const baseTheme = isValidUiThemeValue(existing.uiTheme) ? existing.uiTheme : loadedTheme
 
-    const systemUiPresets = UI_THEME_VALUES.map((theme) =>
+    const activeUiPresetId = existing.activeUiThemePresetId ?? null
+    const shouldCarryBaseUiTextPrimary =
+      activeUiPresetId === null || isStandardUiThemePresetId(activeUiPresetId)
+    const standardUiPresets = UI_THEME_VALUES.map((theme) =>
       buildSystemUiPreset(
         theme,
-        theme === baseTheme
+        shouldCarryBaseUiTextPrimary && theme === baseTheme
           ? {
               colors: {
                 ...UI_THEME_MAIN_COLORS[theme],
@@ -236,14 +274,18 @@ export async function migrateToThemePresets(): Promise<void> {
           : undefined,
       ),
     )
+    const systemUiPresets = [...standardUiPresets, ...BUNDLED_UI_THEME_PRESETS]
 
     const baseDocTheme = existing.documentTheme ?? loadDocumentTheme()
     const docColorSettings = existing.docColorSettings ?? loadDocColorSettings()
-    const systemDocPresets = DOCUMENT_THEME_VALUES.map((docTheme) =>
+    const activeDocPresetId = existing.activeDocThemePresetId ?? null
+    const shouldCarryBaseDocColors =
+      activeDocPresetId === null || isStandardDocThemePresetId(activeDocPresetId)
+    const standardDocPresets = DOCUMENT_THEME_VALUES.map((docTheme) =>
       buildSystemDocPreset(
         docTheme,
         baseTheme,
-        docTheme === baseDocTheme
+        shouldCarryBaseDocColors && docTheme === baseDocTheme
           ? {
               colors: {
                 pageColor: docColorSettings.pageColor,
@@ -254,6 +296,7 @@ export async function migrateToThemePresets(): Promise<void> {
           : undefined,
       ),
     )
+    const systemDocPresets = [...standardDocPresets, ...BUNDLED_DOC_THEME_PRESETS]
 
     const patch: Partial<SettingsJson> = {}
     if (existing.themePresetSchemaVersion !== 1) {
@@ -264,38 +307,27 @@ export async function migrateToThemePresets(): Promise<void> {
     if (!hasUiPresets || !areUiPresetListsEquivalent(existingUiPresets, nextUiPresets)) {
       patch.uiThemePresets = nextUiPresets
     }
-    const activeUiPresetId = existing.activeUiThemePresetId ?? null
     if (
       activeUiPresetId === null ||
       !nextUiPresets.some((preset) => preset.id === activeUiPresetId)
     ) {
       patch.activeUiThemePresetId = `preset-ui-${baseTheme}`
     }
-    if (!hasDocPresets) {
-      patch.docThemePresets = systemDocPresets
+    const customDocPresets = existingDocPresets.filter((preset) => !isSystemDocPreset(preset))
+    const nextDocPresets = [...systemDocPresets, ...customDocPresets]
+    if (
+      !hasDocPresets ||
+      removedLegacyDefault ||
+      !areDocPresetListsEquivalent(existingDocPresets, nextDocPresets)
+    ) {
+      patch.docThemePresets = nextDocPresets
+    }
+    if (
+      activeDocPresetId === null ||
+      activeDocPresetId === 'preset-doc-default' ||
+      !nextDocPresets.some((preset) => preset.id === activeDocPresetId)
+    ) {
       patch.activeDocThemePresetId = `preset-doc-${baseDocTheme}`
-    } else {
-      const systemDocThemes = new Set(
-        existingDocPresets.filter(isSystemDocPreset).map((preset) => preset.baseDocTheme),
-      )
-      const missingSystemDocPresets = DOCUMENT_THEME_VALUES
-        .filter((docTheme) => !systemDocThemes.has(docTheme))
-        .map((docTheme) => buildSystemDocPreset(docTheme, baseTheme))
-      const nextDocPresets = [
-        ...existingDocPresets,
-        ...missingSystemDocPresets,
-      ]
-      if (removedLegacyDefault || missingSystemDocPresets.length > 0) {
-        patch.docThemePresets = nextDocPresets
-      }
-      const activeDocPresetId = existing.activeDocThemePresetId ?? null
-      if (
-        activeDocPresetId === null ||
-        activeDocPresetId === 'preset-doc-default' ||
-        (activeDocPresetId !== null && !nextDocPresets.some((preset) => preset.id === activeDocPresetId))
-      ) {
-        patch.activeDocThemePresetId = `preset-doc-${baseDocTheme}`
-      }
     }
 
     if (Object.keys(patch).length > 0) {

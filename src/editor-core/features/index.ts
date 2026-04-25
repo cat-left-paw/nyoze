@@ -51,12 +51,22 @@ export { createEditorPropsKeyDownHandler } from './editorPropsKeydown'
 export { isInListContext, handleListTabKey } from './listTabNavigation'
 export { resetHomeEndState, notifySelectionChanged, handleHomeEndKey, _getHomeEndState } from './homeEndNavigation'
 export { createEditorPropsPasteHandler } from './editorPropsPaste'
+export {
+  editorClipboardCopyCutDOMHandlers,
+  handleEditorClipboardCopyOrCut,
+} from './editorPropsClipboardCopy'
 export { createVerticalWheelScrollController } from './verticalWheelScroll'
 export { createCoreNotifiers } from './coreNotifiers'
 export { createLineBreakPolicyController } from './lineBreakPolicyController'
 export { createMarkdownIoController } from './markdownIoController'
 export { createListenerSubscriptions } from './listenerSubscriptions'
 export { createOutlineNavigationController } from './outlineNavigationController'
+export {
+  captureViewportAnchor,
+  restoreViewportAnchor,
+  scrollEditorSurfaceToTextOffset,
+  scrollEditorSurfaceToRatio,
+} from './viewportAnchor'
 export { createSearchController } from './searchController'
 export { createBasicCommandsController } from './basicCommandsController'
 export { createInlineAnnotationController } from './inlineAnnotationController'

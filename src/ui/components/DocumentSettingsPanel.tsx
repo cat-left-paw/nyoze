@@ -1,5 +1,6 @@
 import type { DocumentType } from "../../editor-core/io/frontmatterDocumentSettings";
-import type { WritingMode } from "../../settings/types";
+import type { UiLanguageMode, WritingMode } from "../../settings/types";
+import { createUiTextGetter } from "../i18n/uiText";
 import {
   formatDocumentTypeLabel,
   formatDocumentTypeOverrideHelp,
@@ -9,7 +10,10 @@ import {
 type DocumentSettingsPanelProps = {
   canEdit: boolean;
   fullPlainEditActive: boolean;
+  uiLanguageMode: UiLanguageMode;
   documentType: DocumentType;
+  preserveEmptyParagraphs: boolean;
+  preserveEmptyParagraphsAutoDetected: boolean;
   title: string;
   author: string;
   translator: string;
@@ -19,6 +23,8 @@ type DocumentSettingsPanelProps = {
   writingModeFollowsTypeRecommendation: boolean;
   onChangeSettings: (next: {
     documentType: DocumentType;
+    preserveEmptyParagraphs: boolean;
+    persistPreserveEmptyParagraphs?: boolean;
     title: string;
     author: string;
     translator: string;
@@ -26,16 +32,23 @@ type DocumentSettingsPanelProps = {
   onResetWritingModeToRecommendation: () => void;
 };
 
-function writingModeLabel(mode: WritingMode | null): string {
-  if (mode === "vertical-rl") return "縦書き";
-  if (mode === "horizontal-tb") return "横書き";
-  return "このタブの設定を使います";
+function writingModeLabel(
+  mode: WritingMode | null,
+  uiLanguageMode: UiLanguageMode,
+): string {
+  const t = createUiTextGetter(uiLanguageMode);
+  if (mode === "vertical-rl") return t("documentSettings.writingMode.vertical");
+  if (mode === "horizontal-tb") return t("documentSettings.writingMode.horizontal");
+  return t("documentSettings.writingMode.useTabSetting");
 }
 
 export function DocumentSettingsPanel({
   canEdit,
   fullPlainEditActive,
+  uiLanguageMode,
   documentType,
+  preserveEmptyParagraphs,
+  preserveEmptyParagraphsAutoDetected,
   title,
   author,
   translator,
@@ -46,21 +59,22 @@ export function DocumentSettingsPanel({
   onChangeSettings,
   onResetWritingModeToRecommendation,
 }: DocumentSettingsPanelProps) {
+  const t = createUiTextGetter(uiLanguageMode);
   const disableEditing = !canEdit;
   const readOnlyMessage = fullPlainEditActive
-    ? "Source Mode 編集中は Document Settings を編集できません。"
-    : "この frontmatter は安全に書き換えられないため、Document Settings では read-only です。複雑な frontmatter は Source Mode を使ってください。";
+    ? t("documentSettings.readOnly.sourceMode", "helper")
+    : t("documentSettings.readOnly.safePatch", "helper");
   const writingModeHelp =
     recommendedWritingMode === null
-      ? "このタブの設定を使います"
+      ? t("documentSettings.writingMode.useTabSetting", "helper")
       : writingModeFollowsTypeRecommendation
-        ? "Type の推奨に従っています"
-        : "Type の推奨をこのタブで上書きしています";
+        ? t("documentSettings.writingMode.following", "helper")
+        : t("documentSettings.writingMode.overridden", "helper");
 
   return (
     <section className="document-settings-panel">
       <div className="document-settings-panel-header">
-        <h2 className="document-settings-panel-title">Document Settings</h2>
+        <h2 className="document-settings-panel-title">{t("documentSettings.panelTitle")}</h2>
       </div>
 
       {disableEditing && (
@@ -69,13 +83,13 @@ export function DocumentSettingsPanel({
 
       {hasDocumentBehaviorOverride && (
         <p className="document-settings-panel-warning">
-          {formatDocumentTypeOverrideHelp()}
+          {formatDocumentTypeOverrideHelp(uiLanguageMode)}
         </p>
       )}
 
       <div className="document-settings-form">
         <label className="document-settings-field">
-          <span className="document-settings-label">Document Type</span>
+          <span className="document-settings-label">{t("documentSettings.documentType")}</span>
           <select
             value={documentType ?? ""}
             disabled={disableEditing}
@@ -85,29 +99,86 @@ export function DocumentSettingsPanel({
                   event.target.value === ""
                     ? null
                     : (event.target.value as Exclude<DocumentType, null>),
+                preserveEmptyParagraphs:
+                  event.target.value === "article" && preserveEmptyParagraphs,
                 title,
                 author,
                 translator,
               })
             }
           >
-            <option value="novel">Novel</option>
-            <option value="article">Article</option>
-            <option value="">未設定</option>
+            <option value="novel">{t("documentSettings.option.novel")}</option>
+            <option value="article">{t("documentSettings.option.article")}</option>
+            <option value="">{t("documentSettings.option.unset")}</option>
           </select>
           <span className="document-settings-meta">
-            {formatDocumentTypeSublabel(documentType)}
+            {formatDocumentTypeSublabel(documentType, uiLanguageMode)}
           </span>
           <span className="document-settings-type-hint">
-            Novel — テキストエディタに近い操作感。Enterで改行
+            {t("documentSettings.typeHint.novel", "helper")}
           </span>
           <span className="document-settings-type-hint">
-            Article — Markdownエディタの操作感。Enterで段落区切り / Shift+Enterで段落内改行
+            {t("documentSettings.typeHint.article", "helper")}
           </span>
         </label>
 
+        {documentType === "article" && (
+          <div className="document-settings-field document-settings-checkbox-field">
+            <span className="document-settings-label">{t("documentSettings.paragraphSpacing")}</span>
+            <label className="document-settings-checkbox-row">
+              <input
+                type="checkbox"
+                checked={preserveEmptyParagraphs}
+                disabled={disableEditing}
+                onChange={(event) =>
+                  onChangeSettings({
+                    documentType,
+                    preserveEmptyParagraphs: event.target.checked,
+                    title,
+                    author,
+                    translator,
+                  })
+                }
+              />
+              <span className="document-settings-checkbox-copy">
+                {t("documentSettings.preserveEmptyParagraphs")}
+              </span>
+            </label>
+            <span className="document-settings-meta">
+              {t("documentSettings.preserveEmptyParagraphs.meta", "helper")}
+            </span>
+            <span className="document-settings-type-hint">
+              {t("documentSettings.preserveEmptyParagraphs.singleLineBreak", "helper")}
+            </span>
+            {preserveEmptyParagraphsAutoDetected && (
+              <>
+                <span className="document-settings-type-hint">
+                  {t("documentSettings.preserveEmptyParagraphs.autoDetected", "helper")}
+                </span>
+                <button
+                  type="button"
+                  className="document-settings-reset-button"
+                  disabled={disableEditing}
+                  onClick={() =>
+                    onChangeSettings({
+                      documentType,
+                      preserveEmptyParagraphs: true,
+                      persistPreserveEmptyParagraphs: true,
+                      title,
+                      author,
+                      translator,
+                    })
+                  }
+                >
+                  {t("documentSettings.preserveEmptyParagraphs.saveAsSetting")}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         <label className="document-settings-field">
-          <span className="document-settings-label">Title</span>
+          <span className="document-settings-label">{t("documentSettings.titleField")}</span>
           <input
             type="text"
             value={title}
@@ -115,6 +186,7 @@ export function DocumentSettingsPanel({
             onChange={(event) =>
               onChangeSettings({
                 documentType,
+                preserveEmptyParagraphs,
                 title: event.target.value,
                 author,
                 translator,
@@ -124,7 +196,7 @@ export function DocumentSettingsPanel({
         </label>
 
         <label className="document-settings-field">
-          <span className="document-settings-label">Author</span>
+          <span className="document-settings-label">{t("documentSettings.authorField")}</span>
           <input
             type="text"
             value={author}
@@ -132,6 +204,7 @@ export function DocumentSettingsPanel({
             onChange={(event) =>
               onChangeSettings({
                 documentType,
+                preserveEmptyParagraphs,
                 title,
                 author: event.target.value,
                 translator,
@@ -141,7 +214,7 @@ export function DocumentSettingsPanel({
         </label>
 
         <label className="document-settings-field">
-          <span className="document-settings-label">Translator</span>
+          <span className="document-settings-label">{t("documentSettings.translatorField")}</span>
           <input
             type="text"
             value={translator}
@@ -149,6 +222,7 @@ export function DocumentSettingsPanel({
             onChange={(event) =>
               onChangeSettings({
                 documentType,
+                preserveEmptyParagraphs,
                 title,
                 author,
                 translator: event.target.value,
@@ -161,16 +235,16 @@ export function DocumentSettingsPanel({
       <div className="document-settings-summary">
         <div className="document-settings-summary-row">
           <span className="document-settings-summary-label">
-            Writing Mode Recommendation
+            {t("documentSettings.writingModeRecommendation")}
           </span>
           <span className="document-settings-summary-value">
-            {writingModeLabel(recommendedWritingMode)}
+            {writingModeLabel(recommendedWritingMode, uiLanguageMode)}
           </span>
           <span className="document-settings-summary-help">{writingModeHelp}</span>
           <span className="document-settings-summary-current">
-            現在の Document Type: {formatDocumentTypeLabel(documentType)}
+            {t("documentSettings.currentDocumentType")}: {formatDocumentTypeLabel(documentType, uiLanguageMode)}
             {" / "}
-            現在の表示: {writingModeLabel(writingMode)}
+            {t("documentSettings.currentDisplay")}: {writingModeLabel(writingMode, uiLanguageMode)}
           </span>
           <button
             type="button"
@@ -182,7 +256,7 @@ export function DocumentSettingsPanel({
             }
             onClick={onResetWritingModeToRecommendation}
           >
-            推奨に戻す
+            {t("documentSettings.resetToRecommendation")}
           </button>
         </div>
       </div>

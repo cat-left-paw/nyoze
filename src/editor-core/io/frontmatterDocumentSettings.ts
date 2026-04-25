@@ -1,4 +1,4 @@
-import type { LineBreakPolicy } from "../types";
+import type { LineBreakPolicy, MarkdownDocumentOptions } from "../types";
 import type { WritingMode } from "../../settings/types";
 import { splitLeadingFrontmatter, type FrontmatterFields } from "./frontmatter";
 
@@ -6,6 +6,7 @@ export type DocumentType = "novel" | "article" | null;
 
 export type FrontmatterKnownScalarPatch = {
   documentType?: DocumentType;
+  nyozePreserveEmptyParagraphs?: boolean | null;
   title?: string | null;
   author?: string | null;
   translator?: string | null;
@@ -38,7 +39,13 @@ type ParsedFrontmatter = {
   safeToPatch: boolean;
 };
 
-const EDITABLE_KEYS = new Set(["nyozeType", "title", "author", "translator"]);
+const EDITABLE_KEYS = new Set([
+  "nyozeType",
+  "nyozePreserveEmptyParagraphs",
+  "title",
+  "author",
+  "translator",
+]);
 
 function splitLinesPreserveEnding(value: string): FrontmatterLine[] {
   const lines: FrontmatterLine[] = [];
@@ -234,20 +241,37 @@ function formatYamlScalar(value: string): string {
   return canUsePlainScalar(value) ? value : JSON.stringify(value);
 }
 
+function formatManagedScalarValue(value: string | boolean): string {
+  return typeof value === "boolean" ? (value ? "true" : "false") : formatYamlScalar(value);
+}
+
 function normalizePatchValue(value: string | null | undefined): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   return value.trim().length === 0 ? null : value;
 }
 
+function normalizeBooleanPatchValue(
+  value: boolean | null | undefined,
+): boolean | null | undefined {
+  if (value === undefined) return undefined;
+  return value === true ? true : null;
+}
+
 function buildScalarLine(
-  key: "documentType" | "nyozeType" | "title" | "author" | "translator",
-  value: string,
+  key:
+    | "documentType"
+    | "nyozeType"
+    | "nyozePreserveEmptyParagraphs"
+    | "title"
+    | "author"
+    | "translator",
+  value: string | boolean,
   inlineComment: string,
   ending: string,
 ): string {
   const commentSuffix = inlineComment ? ` ${inlineComment}` : "";
-  return `${key}: ${formatYamlScalar(value)}${commentSuffix}${ending}`;
+  return `${key}: ${formatManagedScalarValue(value)}${commentSuffix}${ending}`;
 }
 
 function buildFrontmatterFromScratch(
@@ -255,7 +279,19 @@ function buildFrontmatterFromScratch(
   eol = "\n",
 ): string {
   const lines: string[] = [];
-  for (const key of ["documentType", "title", "author", "translator"] as const) {
+  const documentType = normalizePatchValue(patch.documentType);
+  if (documentType !== undefined && documentType !== null) {
+    lines.push(buildScalarLine("documentType", documentType, "", eol));
+  }
+
+  const preserveEmptyParagraphs = normalizeBooleanPatchValue(
+    patch.nyozePreserveEmptyParagraphs,
+  );
+  if (preserveEmptyParagraphs === true) {
+    lines.push(buildScalarLine("nyozePreserveEmptyParagraphs", true, "", eol));
+  }
+
+  for (const key of ["title", "author", "translator"] as const) {
     const value = normalizePatchValue(patch[key]);
     if (value === undefined || value === null) continue;
     lines.push(buildScalarLine(key, value, "", eol));
@@ -328,6 +364,31 @@ export function resolveTypeRecommendedWritingMode(
   if (type === "novel") return "vertical-rl";
   if (type === "article") return "horizontal-tb";
   return null;
+}
+
+function resolveManagedBooleanScalarValue(value: string | undefined): boolean {
+  return /^(?:true|yes|on|1)$/i.test(value?.trim() ?? "");
+}
+
+export function resolvePreserveEmptyParagraphs(
+  fields: Pick<
+    FrontmatterFields,
+    "documentType" | "nyozeType" | "type" | "nyozePreserveEmptyParagraphs"
+  >,
+): boolean {
+  if (resolveDocumentType(fields) !== "article") return false;
+  return resolveManagedBooleanScalarValue(fields.nyozePreserveEmptyParagraphs);
+}
+
+export function resolveDocumentMarkdownOptions(
+  fields: Pick<
+    FrontmatterFields,
+    "documentType" | "nyozeType" | "type" | "nyozePreserveEmptyParagraphs"
+  >,
+): MarkdownDocumentOptions {
+  return {
+    preserveEmptyParagraphs: resolvePreserveEmptyParagraphs(fields),
+  };
 }
 
 export function canSafelyPatchFrontmatter(frontmatterPrefix: string): boolean {
@@ -427,6 +488,40 @@ export function patchFrontmatterKnownScalars(
       });
     } else {
       insertions.push(buildScalarLine("nyozeType", nextDocumentType, "", eol));
+    }
+  }
+
+  const nextPreserveEmptyParagraphs = normalizeBooleanPatchValue(
+    patch.nyozePreserveEmptyParagraphs,
+  );
+  if (nextPreserveEmptyParagraphs !== undefined) {
+    const existingEntry =
+      parsed.entries.get("nyozePreserveEmptyParagraphs") ?? null;
+
+    if (nextPreserveEmptyParagraphs === null) {
+      if (existingEntry) {
+        mutations.push({
+          startIndex: existingEntry.startIndex,
+          endIndex: existingEntry.endIndex,
+          replacement: [],
+        });
+      }
+    } else if (existingEntry) {
+      const replacement = buildScalarLine(
+        "nyozePreserveEmptyParagraphs",
+        true,
+        existingEntry.inlineComment,
+        parsed.bodyLines[existingEntry.startIndex]?.ending || eol,
+      );
+      mutations.push({
+        startIndex: existingEntry.startIndex,
+        endIndex: existingEntry.endIndex,
+        replacement: [replacement],
+      });
+    } else {
+      insertions.push(
+        buildScalarLine("nyozePreserveEmptyParagraphs", true, "", eol),
+      );
     }
   }
 

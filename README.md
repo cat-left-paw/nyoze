@@ -144,8 +144,10 @@ beta 版で配布対象として扱うのは次の環境です。
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
   - Intel Mac 用 DMG（`x64`）
-- Windows: NSIS installer
-- Linux: beta 初回では公式パッケージなし
+- Windows: zip 配布（展開後に `README.txt` を確認し、`Nyoze.exe` を起動）
+- Linux: 現時点の beta では公式パッケージなし
+
+Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
 
 macOS 版は 2 種類あります。
 
@@ -154,7 +156,7 @@ macOS 版は 2 種類あります。
 
 間違った方を入れると、起動できない、または著しく遅くなることがあります。自分の Mac の種類に合ったものを使ってください。
 
-Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run build` を試せます。ただし実機検証は未実施で、公式サポート対象は macOS / Windows の配布物を優先します。Electron / Linux に慣れている場合は、必要に応じて `electron-builder` で Linux 向けパッケージを作成できますが、beta 初回では公式配布物としては提供しません。
+Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run build` を試せます。ただし実機検証は未実施で、公式サポート対象は macOS / Windows の配布物を優先します。Electron / Linux に慣れている場合は、必要に応じて `electron-builder` で Linux 向けパッケージを作成できますが、現時点の beta では公式配布物としては提供しません。
 
 ## ダウンロード
 
@@ -166,7 +168,33 @@ beta 版は **GitHub Releases の配布物をダウンロードして使う** �
 - macOS:
   - Apple Silicon Mac: `arm64` の DMG をダウンロードして起動
   - Intel Mac: `x64` の DMG をダウンロードして起動
-- Windows: Installer をダウンロードしてインストール
+- Windows: zip をダウンロードして展開し、同梱の `README.txt` を確認して `Nyoze.exe` を起動
+
+補足:
+
+- `0.1.0-beta.1` / `0.1.0-beta.2` の Windows 版は installer でしたが、`0.1.1-beta.1` は Smart App Control の影響により zip 配布へ切り替えています。
+- 旧 installer 版を入れている場合でも、この版は自動更新されません。新しく zip 版を展開して起動してください。
+- Windows 版は `x64` のみです。32bit Windows 向け配布物はありません。
+
+## アンインストールとユーザーデータ
+
+- macOS では `Applications` から `Nyoze.app` を削除すれば、アプリ本体は取り除けます。
+- Windows の zip 版は、展開したフォルダを削除すればアプリ本体は取り除けます。
+- `0.1.0-beta.1` / `0.1.0-beta.2` の旧 installer 版は、Windows の「設定 > アプリ」からアンインストールしてください。
+- ただし、どの方法でも設定ファイルやバックアップは自動では消えません。
+
+設定やバックアップの保存先:
+
+- macOS: `~/Library/Application Support/Nyoze/`
+- Windows: `%APPDATA%\Nyoze\`
+
+この中には、たとえば次が入ります。
+
+- `settings.json`
+- `backups/`
+- `workspace-state.json`
+
+完全に削除したい場合だけ、この `Nyoze` フォルダも手動で削除してください。設定やバックアップを引き継ぎたい場合は残してください。詳しい導入・アンインストール手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
 ## ソースコードから試す場合
 
@@ -210,7 +238,7 @@ npm run package:mac:arm64
 npm run package:mac:x64
 ```
 
-配布物は `release/<version>/` に出力されます。beta 初回の公式配布物は macOS DMG / Windows installer を対象とし、Linux 向け公式パッケージはまだ提供していません。`npm run package` は通常、その実行環境に対応する 1 つの macOS DMG を作ります。macOS DMG は arch を含む名前で出力されます。
+配布物は `release/<version>/` に出力されます。現時点の beta では公式配布物は macOS DMG と Windows zip を対象とし、Linux 向け公式パッケージはまだ提供していません。`npm run package` は通常、その実行環境に対応する 1 つの macOS DMG を作ります。macOS DMG は arch を含む名前で出力されます。
 
 - `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - `Nyoze-Mac-<version>-x64-Installer.dmg`
@@ -221,7 +249,7 @@ npm run package:mac:x64
 - drag and drop は未対応です
 - `Open With` は未対応です
 - `.md` の関連付けは未対応です
-- Linux 向け公式パッケージは beta 初回では提供していません
+- Linux 向け公式パッケージは現時点の beta では提供していません
 - frontmatter の一般編集 UI はありません
 - 複雑な YAML の編集は `Source Mode` での編集が前提です
 - 高度な競合解決やマージ UI はありません

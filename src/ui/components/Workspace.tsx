@@ -8,12 +8,14 @@ import type {
   DocumentFontPreset,
   DocumentHeadingFont,
   DocumentTheme,
+  UiLanguageMode,
   WritingMode,
 } from "../../settings/types";
 import { deriveDocThemeTokens } from "../../theme/deriveDocThemeTokens";
 import { deriveSyntaxThemeTokens } from "../../theme/deriveSyntaxThemeTokens";
 import type { FileExplorerVisibleEntry } from "../hooks/useFileExplorer";
 import type { EditorTab } from "../hooks/useAppUiState";
+import { createUiTextGetter } from "../i18n/uiText";
 import type { SourceModeController } from "../hooks/useSourceModeController";
 import { resolveVisibleOutlineItems } from "../utils/outlineVisibility";
 import { FileExplorerPane } from "./FileExplorerPane";
@@ -27,6 +29,8 @@ type ActiveDocumentInfo = {
   updatedAtText: string;
   pathText: string;
   pathTitle: string;
+  documentTypeLabel: string;
+  eolKind: "lf" | "crlf";
 };
 
 type OutlinePreviewMode = "context" | "hover";
@@ -47,6 +51,7 @@ type WorkspaceProps = {
   workspaceRef: RefObject<HTMLElement>;
   editorDivRef: RefObject<HTMLDivElement>;
   sourceModeController: SourceModeController;
+  uiLanguageMode: UiLanguageMode;
   leftPaneOpen: boolean;
   leftWidth: number;
   rightPaneOpen: boolean;
@@ -64,6 +69,8 @@ type WorkspaceProps = {
   fullPlainEditActive: boolean;
   fullPlainEditValue: string;
   fullPlainEditError: string;
+  /** Source Mode 起動時、CodeMirror を初期スクロールするドキュメントオフセット。 */
+  fullPlainEditInitialScrollOffset: number | null;
   rubyVisible: boolean;
   frontmatterVisible: boolean;
   frontmatterShowAuthors: boolean;
@@ -120,6 +127,7 @@ export function Workspace({
   workspaceRef,
   editorDivRef,
   sourceModeController,
+  uiLanguageMode,
   leftPaneOpen,
   leftWidth,
   rightPaneOpen,
@@ -137,6 +145,7 @@ export function Workspace({
   fullPlainEditActive,
   fullPlainEditValue,
   fullPlainEditError,
+  fullPlainEditInitialScrollOffset,
   rubyVisible,
   frontmatterVisible,
   frontmatterShowAuthors,
@@ -185,6 +194,7 @@ export function Workspace({
   documentSettingsSlot,
   themeStudioSlot,
 }: WorkspaceProps) {
+  const t = createUiTextGetter(uiLanguageMode);
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const openTabFilePaths = useMemo(
     () => tabs.map((t) => t.filePath).filter((p): p is string => p != null),
@@ -402,6 +412,7 @@ export function Workspace({
         style={{ width: leftPaneOpen ? leftWidth : 0 }}
       >
         <FileExplorerPane
+          uiLanguageMode={uiLanguageMode}
           fileExplorerDir={fileExplorerDir}
           rootDirLoaded={fileExplorerRootLoaded}
           visibleEntries={fileExplorerEntries}
@@ -534,6 +545,7 @@ export function Workspace({
               <SourceModeEditor
                 controller={sourceModeController}
                 initialValue={fullPlainEditValue}
+                initialScrollOffset={fullPlainEditInitialScrollOffset}
                 onChange={onFullPlainEditChange}
                 onApply={onApplyFullPlainEdit}
                 onClose={onCloseFullPlainEdit}
@@ -564,27 +576,27 @@ export function Workspace({
               className={`right-pane-tab${rightPaneTab === "outline" ? " active" : ""}`}
               onClick={() => onSetRightPaneTab("outline")}
             >
-              Outline
+              {t("pane.outline")}
             </button>
             <button
               type="button"
               className={`right-pane-tab${rightPaneTab === "document" ? " active" : ""}`}
               onClick={() => onSetRightPaneTab("document")}
             >
-              Document
+              {t("pane.document")}
             </button>
             <button
               type="button"
               className={`right-pane-tab${rightPaneTab === "theme" ? " active" : ""}`}
               onClick={() => onSetRightPaneTab("theme")}
             >
-              Theme
+              {t("pane.theme")}
             </button>
           </div>
           {rightPaneTab === "outline" ? (
             <div className="outline-list">
               {headings.length === 0 ? (
-                <p className="pane-placeholder">見出しがありません</p>
+                <p className="pane-placeholder">{t("workspace.outline.empty")}</p>
               ) : (
                 visibleOutlineItems.map(({ heading: h, originalIndex }) => {
                   const isFolded = foldedHeadingPositions.has(h.pos);
@@ -607,7 +619,7 @@ export function Workspace({
                         type="button"
                         disabled={fullPlainEditActive}
                         onClick={() => onToggleHeadingFold(h.pos)}
-                        title={isFolded ? "展開" : "折りたたみ"}
+                        title={isFolded ? t("workspace.outline.expand") : t("workspace.outline.collapse")}
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -643,7 +655,7 @@ export function Workspace({
                       <button
                         className="outline-preview-btn"
                         type="button"
-                        title="見出し内容プレビュー"
+                        title={t("workspace.outline.preview")}
                         onMouseEnter={(event) => {
                           event.stopPropagation();
                           openOutlineHoverPreviewFromEvent(h.pos, event);
@@ -678,15 +690,13 @@ export function Workspace({
             <div className="document-pane-content">
               {documentSettingsSlot ?? (
                 <p className="pane-placeholder">
-                  Document Settings を表示できません。
+                  {t("workspace.document.unavailable")}
                 </p>
               )}
             </div>
           ) : (
             <div className="theme-pane-content">
-              {themeStudioSlot ?? (
-                <p className="pane-placeholder">テーマ設定を表示できません。</p>
-              )}
+              {themeStudioSlot ?? <p className="pane-placeholder">{t("workspace.theme.unavailable")}</p>}
             </div>
           )}
         </div>

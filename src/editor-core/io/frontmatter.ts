@@ -7,6 +7,7 @@ export type FrontmatterFields = {
   translator?: string
   co_translators?: string[]
   nyozeLineBreakPolicy?: string
+  nyozePreserveEmptyParagraphs?: string
   documentType?: string
   nyozeType?: string
   type?: string
@@ -217,6 +218,7 @@ const SINGLE_FIELD_KEYS = new Set([
   'author',
   'translator',
   'nyozeLineBreakPolicy',
+  'nyozePreserveEmptyParagraphs',
   'documentType',
   'nyozeType',
   'type',
@@ -243,6 +245,7 @@ export function parseFrontmatterFields(frontmatterPrefix: string): FrontmatterFi
       else if (key === 'author') fields.author = value
       else if (key === 'translator') fields.translator = value
       else if (key === 'nyozeLineBreakPolicy') fields.nyozeLineBreakPolicy = value
+      else if (key === 'nyozePreserveEmptyParagraphs') fields.nyozePreserveEmptyParagraphs = value
       else if (key === 'documentType') fields.documentType = value
       else if (key === 'nyozeType') fields.nyozeType = value
       else if (key === 'type') fields.type = value

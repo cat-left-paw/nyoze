@@ -1,5 +1,6 @@
 export type DisplaySettingsSectionKey =
   | 'basic'
+  | 'tcy'
   | 'font'
   | 'ruby'
   | 'heading'
@@ -15,6 +16,7 @@ export type DisplaySettingsSectionOpenState = Record<DisplaySettingsSectionKey, 
 
 export const DEFAULT_DISPLAY_SETTINGS_SECTION_OPEN_STATE: DisplaySettingsSectionOpenState = {
   basic: false,
+  tcy: false,
   font: false,
   ruby: false,
   heading: false,

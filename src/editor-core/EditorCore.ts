@@ -1,9 +1,13 @@
 import { Editor } from '@tiptap/core'
 import { EditorState } from '@tiptap/pm/state'
-import type { Node as PMNode, Slice } from '@tiptap/pm/model'
 import { parseMarkdown } from './io/parseMarkdown'
 import { serializeMarkdown } from './io/serializeMarkdown'
-import { joinWithFrontmatter, splitLeadingFrontmatter } from './io/frontmatter'
+import { resolveEffectiveDocumentMarkdownOptionsForLoad } from './io/emptyParagraphPreservation'
+import {
+  joinWithFrontmatter,
+  parseFrontmatterFields,
+  splitLeadingFrontmatter,
+} from './io/frontmatter'
 import type {
   ClientRectSnapshot,
   CommandAvailability,
@@ -11,6 +15,7 @@ import type {
   HeadingUiSnapshot,
   LineBreakPolicy,
   LineBreakPolicyListener,
+  MarkdownDocumentOptions,
   ParagraphPlainModeListener,
   ParagraphSourceContext,
   RubyEditContext,
@@ -37,6 +42,7 @@ import {
   createEditorLifecycleCallbacks,
   createEditorPropsKeyDownHandler,
   createEditorPropsPasteHandler,
+  editorClipboardCopyCutDOMHandlers,
   createCompositionEventHandlers,
   createFoldTooltipController,
   createInlineAnnotationController,
@@ -56,6 +62,10 @@ import {
   MAX_DIFF_LOG_LENGTH,
   MAX_DIFF_LOG_OPS,
   measureCanonicalDiff,
+  captureViewportAnchor,
+  restoreViewportAnchor,
+  scrollEditorSurfaceToTextOffset,
+  scrollEditorSurfaceToRatio,
   selectHorizontalRuleAtEventTarget,
   parseSingleParagraphNode,
   resolveParagraphElement,
@@ -78,35 +88,9 @@ import {
 } from './extensions/headingFold'
 import { searchHighlightPluginKey } from './extensions/searchHighlight'
 import { replaceMatchInDoc, replaceAllMatchesInDoc } from './features'
+import { serializeClipboardSliceToPlainText } from './io/clipboardSlicePlainText'
 
 const TCY_VALID_PATTERN = /^[A-Za-z0-9!?]{2,4}$/
-
-function serializeClipboardLeafNode(node: PMNode): string {
-  switch (node.type.name) {
-    case 'aozoraRuby':
-      return node.textContent
-    case 'aozoraTcy':
-      return node.textContent
-    case 'html_inline_atom':
-      return (node.attrs.raw as string) ?? ''
-    case 'html_block_atom':
-      return (node.attrs.raw as string) ?? ''
-    case 'hardBreak':
-      return '\n'
-    default:
-      return node.textContent
-  }
-}
-
-function serializeClipboardPlainText(slice: Slice): string {
-  // Use a single newline as block separator so external paste doesn't expand into sparse paragraphs.
-  return slice.content.textBetween(
-    0,
-    slice.content.size,
-    '\n',
-    (leafNode) => serializeClipboardLeafNode(leafNode),
-  )
-}
 
 export interface CreateEditorCoreOptions {
   /** Required: the DOM element to mount the editor into */
@@ -138,6 +122,9 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   let autoTcyNumbersOnly = false
   let autoTcyDigitRange = resolveAutoTcyDigitRange()
   let documentLineBreakPolicy: LineBreakPolicy = options.lineBreakPolicy ?? 'obsidian-paragraph'
+  let documentMarkdownOptions: MarkdownDocumentOptions = {
+    preserveEmptyParagraphs: false,
+  }
 
   function getSearchStateSnapshot(): SearchState {
     const pluginState = searchHighlightPluginKey.getState(editor.state)
@@ -182,6 +169,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   const onEditorPropsPaste = createEditorPropsPasteHandler({
     getIsComposing: (viewComposing) => isComposing || viewComposing,
     getLineBreakPolicy: readLineBreakPolicy,
+    getDocumentMarkdownOptions: () => documentMarkdownOptions,
     pushLog,
   })
   const { onSelectionUpdate: baseOnSelectionUpdate, onUpdate: emitUpdate } = createEditorLifecycleCallbacks({
@@ -217,7 +205,8 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     editorProps: {
       handleKeyDown: onEditorPropsKeyDown,
       handlePaste: onEditorPropsPaste,
-      clipboardTextSerializer: (slice) => serializeClipboardPlainText(slice),
+      clipboardTextSerializer: (slice) => serializeClipboardSliceToPlainText(slice),
+      handleDOMEvents: editorClipboardCopyCutDOMHandlers,
     },
     onSelectionUpdate,
     onUpdate,
@@ -234,7 +223,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       paragraphPlainController.setMode(enabled)
     },
     parseMarkdownToJson: (markdownBody, lineBreakPolicy) =>
-      parseMarkdown(editor.schema, markdownBody, lineBreakPolicy, { enableRuby: enableRubyFlag }).toJSON(),
+      parseMarkdown(editor.schema, markdownBody, lineBreakPolicy, {
+        enableRuby: enableRubyFlag,
+        preserveEmptyParagraphs: documentMarkdownOptions.preserveEmptyParagraphs,
+      }).toJSON(),
     setEditorContent: (content) => {
       editor.commands.setContent(
         content as Parameters<typeof editor.commands.setContent>[0],
@@ -247,10 +239,26 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       })
       editor.view.updateState(freshState)
     },
-    serializeCurrentDoc: (lineBreakPolicy) => serializeMarkdown(editor.state.doc, lineBreakPolicy),
+    serializeCurrentDoc: (lineBreakPolicy) =>
+      serializeMarkdown(
+        editor.state.doc,
+        lineBreakPolicy,
+        documentMarkdownOptions,
+      ),
     defaultEditorContent: DEFAULT_EDITOR_CONTENT,
     splitLeadingFrontmatter,
     joinWithFrontmatter,
+    applyDocumentMarkdownOptionsForLoad: ({
+      frontmatterPrefix,
+      markdownBody,
+      lineBreakPolicy,
+    }) => {
+      documentMarkdownOptions = resolveEffectiveDocumentMarkdownOptionsForLoad(
+        parseFrontmatterFields(frontmatterPrefix),
+        markdownBody,
+        lineBreakPolicy,
+      )
+    },
     measureCanonicalDiff,
     shortenForLog,
     maxDiffLogOps: MAX_DIFF_LOG_OPS,
@@ -402,16 +410,32 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     onWheel,
   })
 
-  function applyLineBreakPolicyImmediately(nextPolicy: LineBreakPolicy): boolean {
+  function applyLineBreakPolicyImmediately(
+    nextPolicy: LineBreakPolicy,
+    nextOptions?: MarkdownDocumentOptions,
+  ): boolean {
     paragraphPlainController.setMode(false)
     const sourcePolicy = documentLineBreakPolicy
-    const normalizedMarkdown = serializeMarkdown(editor.state.doc, sourcePolicy)
-    const normalizedDoc = parseMarkdown(editor.schema, normalizedMarkdown, nextPolicy, { enableRuby: enableRubyFlag })
+    const sourceOptions = documentMarkdownOptions
+    const targetOptions: MarkdownDocumentOptions = {
+      preserveEmptyParagraphs:
+        nextOptions?.preserveEmptyParagraphs ?? sourceOptions.preserveEmptyParagraphs,
+    }
+    const normalizedMarkdown = serializeMarkdown(
+      editor.state.doc,
+      sourcePolicy,
+      sourceOptions,
+    )
+    const normalizedDoc = parseMarkdown(editor.schema, normalizedMarkdown, nextPolicy, {
+      enableRuby: enableRubyFlag,
+      preserveEmptyParagraphs: targetOptions.preserveEmptyParagraphs,
+    })
     if (editor.state.doc.eq(normalizedDoc)) {
       documentLineBreakPolicy = nextPolicy
+      documentMarkdownOptions = targetOptions
       pushLog(
         'lineBreakPolicyApplyNow',
-        `source=${sourcePolicy} target=${nextPolicy} changed=false`,
+        `source=${sourcePolicy} target=${nextPolicy} preserveEmptyParagraphs=${targetOptions.preserveEmptyParagraphs ? 'true' : 'false'} changed=false`,
       )
       return false
     }
@@ -422,9 +446,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     )
     editor.view.dispatch(tr)
     documentLineBreakPolicy = nextPolicy
+    documentMarkdownOptions = targetOptions
     pushLog(
       'lineBreakPolicyApplyNow',
-      `source=${sourcePolicy} target=${nextPolicy} changed=true`,
+      `source=${sourcePolicy} target=${nextPolicy} preserveEmptyParagraphs=${targetOptions.preserveEmptyParagraphs ? 'true' : 'false'} changed=true`,
     )
     return true
   }
@@ -615,8 +640,24 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       return applyLineBreakPolicy(nextPolicy)
     },
 
-    applyLineBreakPolicyNow(nextPolicy: LineBreakPolicy): boolean {
-      return applyLineBreakPolicyImmediately(nextPolicy)
+    setDocumentMarkdownOptions(
+      nextOptions: MarkdownDocumentOptions,
+    ): MarkdownDocumentOptions {
+      documentMarkdownOptions = {
+        preserveEmptyParagraphs: nextOptions.preserveEmptyParagraphs === true,
+      }
+      return documentMarkdownOptions
+    },
+
+    getDocumentMarkdownOptions(): MarkdownDocumentOptions {
+      return documentMarkdownOptions
+    },
+
+    applyLineBreakPolicyNow(
+      nextPolicy: LineBreakPolicy,
+      nextOptions?: MarkdownDocumentOptions,
+    ): boolean {
+      return applyLineBreakPolicyImmediately(nextPolicy, nextOptions)
     },
 
     onLineBreakPolicyChange(listener: LineBreakPolicyListener): () => void {
@@ -673,6 +714,22 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
     scrollToPos(pos: number) {
       outlineNavigationController.scrollToPos(pos)
+    },
+
+    captureViewportAnchor() {
+      return captureViewportAnchor(editor.view)
+    },
+
+    restoreViewportAnchor(anchor) {
+      restoreViewportAnchor(editor.view, anchor)
+    },
+
+    scrollEditorSurfaceToRatio(ratio: number) {
+      scrollEditorSurfaceToRatio(editor.view, ratio)
+    },
+
+    scrollEditorSurfaceToTextOffset(textOffset: number): boolean {
+      return scrollEditorSurfaceToTextOffset(editor.view, textOffset)
     },
 
     getHeadingPreview(pos: number): string {

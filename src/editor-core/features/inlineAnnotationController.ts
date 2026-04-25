@@ -103,28 +103,45 @@ export function createInlineAnnotationController({
     const selectionRange = range ?? editor.state.selection
     const context = resolveRubyEditContext(editor.state, selectionRange)
     if (!context) return
-    const { from, to } = context
+    const { from, to, text: displayText } = context
     if (from === to) return
-    const selectedText = editor.state.doc.textBetween(from, to, '')
-    if (!selectedText) return
+    if (!displayText) return
 
+    const { state, view } = editor
+    const { schema } = state
     const normalizedRuby = ruby.trim()
+
+    // T7: 挿入前の早期 focus（旧 chain）だと、モーダル直後の DOM キャレットが不整合なとき
+    // 先頭付近へスクロールしうる。replaceWith + 明示 TextSelection ののち view.focus。
+
     if (normalizedRuby === '') {
-      editor.chain().focus().deleteRange({ from, to }).insertContent(selectedText).run()
+      const textNode = schema.text(displayText)
+      const tr = state.tr.replaceWith(from, to, textNode)
+      const endPos = Math.min(from + textNode.nodeSize, tr.doc.content.size)
+      tr.setSelection(TextSelection.create(tr.doc, endPos))
+      view.dispatch(tr)
+      view.focus()
       pushLog('command', 'removeRuby')
       return
     }
 
-    editor
-      .chain()
-      .focus()
-      .deleteRange({ from, to })
-      .insertContent({
-        type: 'aozoraRuby',
-        attrs: { ruby: normalizedRuby, hasDelimiter: true },
-        content: [{ type: 'text', text: selectedText }],
-      })
-      .run()
+    const aozoraRuby = schema.nodes['aozoraRuby']
+    if (!aozoraRuby) {
+      pushLog('command', 'insertRuby rejected: aozoraRuby missing in schema')
+      return
+    }
+    const newNode = aozoraRuby.create(
+      {
+        ruby: normalizedRuby,
+        hasDelimiter: context.overlapsExistingRuby ? context.hasDelimiter : true,
+      },
+      [schema.text(displayText)],
+    )
+    const tr2 = state.tr.replaceWith(from, to, newNode)
+    const endPos2 = Math.min(from + newNode.nodeSize, tr2.doc.content.size)
+    tr2.setSelection(TextSelection.create(tr2.doc, endPos2))
+    view.dispatch(tr2)
+    view.focus()
     pushLog('command', `insertRuby ${normalizedRuby}`)
   }
 

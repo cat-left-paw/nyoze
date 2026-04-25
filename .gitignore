@@ -23,6 +23,8 @@
 !/build/
 !/build/icons/
 !/build/icons/**
+!/build/windows/
+!/build/windows/README.txt
 !/LICENSE
 !/NOTICE
 !/CHANGELOG.md

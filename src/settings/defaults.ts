@@ -16,6 +16,7 @@ import type {
   DocumentTheme,
   Theme,
   UiFont,
+  UiLanguageMode,
   UiThemePreset,
   WritingMode,
 } from './types'
@@ -111,8 +112,10 @@ export const TOOLBAR_OFFSET_STORAGE_KEY = 'nyoze.toolbarOffset'
 export const UI_THEME_STORAGE_KEY = 'nyoze.uiTheme'
 export const DOCUMENT_THEME_STORAGE_KEY = 'nyoze.documentTheme'
 export const UI_FONT_STORAGE_KEY = 'nyoze.uiFont'
+export const UI_LANGUAGE_MODE_STORAGE_KEY = 'nyoze.uiLanguageMode'
 
 export const DEFAULT_UI_FONT: UiFont = 'gothic'
+export const DEFAULT_UI_LANGUAGE_MODE: UiLanguageMode = 'mixed'
 
 export const UI_FONT_LABELS: Record<Exclude<UiFont, `custom:${string}`>, string> = {
   mincho: '明朝体',

@@ -41,6 +41,12 @@ import {
   type ConflictKind,
   type SavedFileStat,
 } from "../src/ui/utils/externalEditConflict";
+import { getUiText } from "../src/ui/i18n/uiText";
+import type { UiLanguageMode } from "../src/settings/types";
+import {
+  normalizeUiLanguageMode,
+  resolveDefaultUiLanguageMode,
+} from "../src/settings/uiLanguageMode";
 import { resolveUserDataPathSpec } from "./resolveUserDataPath";
 
 const require = createRequire(import.meta.url);
@@ -1255,6 +1261,7 @@ ipcMain.handle(
         JSON.stringify(sanitized, null, 2),
         "utf-8",
       );
+      rebuildApplicationMenu(resolveEffectiveUiLanguageMode(sanitized.uiLanguageMode));
       return true;
     } catch {
       return false;
@@ -1411,17 +1418,26 @@ function sendToRenderer(
   }
 }
 
-function buildAppMenuTemplate(): Electron.MenuItemConstructorOptions[] {
+function withEllipsis(label: string): string {
+  return `${label}…`;
+}
+
+function buildAppMenuTemplate(
+  uiLanguageMode: UiLanguageMode = "mixed",
+): Electron.MenuItemConstructorOptions[] {
+  const t = (
+    key: Parameters<typeof getUiText>[1],
+  ): string => getUiText(uiLanguageMode, key);
   const fileSubmenu: Electron.MenuItemConstructorOptions[] = [
     {
-      label: "New Document",
+      label: t("common.newDocument"),
       accelerator: "CmdOrCtrl+N",
       click: (_item, focusedWindow) => {
         sendToRenderer(focusedWindow, "menu:new-document");
       },
     },
     {
-      label: "Open…",
+      label: withEllipsis(t("common.open")),
       accelerator: "CmdOrCtrl+O",
       click: (_item, focusedWindow) => {
         sendToRenderer(focusedWindow, "menu:open");
@@ -1429,21 +1445,21 @@ function buildAppMenuTemplate(): Electron.MenuItemConstructorOptions[] {
     },
     { type: "separator" },
     {
-      label: "Save",
+      label: t("common.save"),
       accelerator: "CmdOrCtrl+S",
       click: (_item, focusedWindow) => {
         sendToRenderer(focusedWindow, "menu:save");
       },
     },
     {
-      label: "Save As…",
+      label: withEllipsis(t("common.saveAs")),
       accelerator: "CmdOrCtrl+Shift+S",
       click: (_item, focusedWindow) => {
         sendToRenderer(focusedWindow, "menu:save-as");
       },
     },
     {
-      label: "バックアップフォルダを開く",
+      label: t("menu.openBackupFolder"),
       click: (_item, focusedWindow) => {
         void openBackupFolder(focusedWindow);
       },
@@ -1451,7 +1467,10 @@ function buildAppMenuTemplate(): Electron.MenuItemConstructorOptions[] {
   ];
 
   if (!isMacPlatform) {
-    fileSubmenu.push({ type: "separator" }, { role: "quit" });
+    fileSubmenu.push(
+      { type: "separator" },
+      { label: t("common.quit"), role: "quit" },
+    );
   }
 
   const template: Electron.MenuItemConstructorOptions[] = [];
@@ -1460,81 +1479,84 @@ function buildAppMenuTemplate(): Electron.MenuItemConstructorOptions[] {
     template.push({
       label: APP_DISPLAY_NAME,
       submenu: [
-        { role: "about" },
+        { label: `${t("common.about")} ${APP_DISPLAY_NAME}`, role: "about" },
         { type: "separator" },
-        { role: "services" },
+        { label: t("common.services"), role: "services" },
         { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
+        { label: `${t("common.hide")} ${APP_DISPLAY_NAME}`, role: "hide" },
+        { label: t("common.hideOthers"), role: "hideOthers" },
+        { label: t("common.showAll"), role: "unhide" },
         { type: "separator" },
-        { role: "quit" },
+        { label: `${t("common.quit")} ${APP_DISPLAY_NAME}`, role: "quit" },
       ],
     });
   }
 
   template.push(
     {
-      label: "File",
+      label: t("menu.file"),
       submenu: fileSubmenu,
     },
     {
-      label: "Edit",
+      label: t("menu.edit"),
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
+        { label: t("common.undo"), role: "undo" },
+        { label: t("common.redo"), role: "redo" },
         { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
+        { label: t("common.cut"), role: "cut" },
+        { label: t("common.copy"), role: "copy" },
+        { label: t("common.paste"), role: "paste" },
+        { label: t("common.selectAll"), role: "selectAll" },
       ],
     },
     {
-      label: "View",
+      label: t("menu.view"),
       submenu: [
         {
-          label: "View Settings…",
+          label: withEllipsis(t("menu.viewSettings")),
           click: (_item, focusedWindow) => {
             sendToRenderer(focusedWindow, "menu:view-settings");
           },
         },
         { type: "separator" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
+        { label: t("menu.resetZoom"), role: "resetZoom" },
+        { label: t("menu.zoomIn"), role: "zoomIn" },
+        { label: t("menu.zoomOut"), role: "zoomOut" },
         { type: "separator" },
-        { role: "togglefullscreen" },
+        { label: t("menu.toggleFullscreen"), role: "togglefullscreen" },
       ],
     },
   );
 
   if (isMacPlatform) {
     template.push({
-      label: "Window",
+      label: t("menu.window"),
       submenu: [
-        { role: "minimize" },
-        { role: "zoom" },
+        { label: t("common.minimize"), role: "minimize" },
+        { label: t("common.zoom"), role: "zoom" },
         { type: "separator" },
-        { role: "front" },
+        { label: t("menu.bringAllToFront"), role: "front" },
       ],
     });
   } else {
     template.push({
-      label: "Window",
-      submenu: [{ role: "minimize" }, { role: "close" }],
+      label: t("menu.window"),
+      submenu: [
+        { label: t("common.minimize"), role: "minimize" },
+        { label: t("common.close"), role: "close" },
+      ],
     });
   }
 
   const helpSubmenu: Electron.MenuItemConstructorOptions[] = [
     {
-      label: "不具合を報告",
+      label: t("displaySettings.support.reportBug"),
       click: (_item, focusedWindow) => {
         sendToRenderer(focusedWindow, "menu:bug-report");
       },
     },
     {
-      label: "フィードバックを送る",
+      label: t("displaySettings.support.sendFeedback"),
       click: (_item, focusedWindow) => {
         sendToRenderer(focusedWindow, "menu:feedback");
       },
@@ -1545,7 +1567,7 @@ function buildAppMenuTemplate(): Electron.MenuItemConstructorOptions[] {
     helpSubmenu.push(
       { type: "separator" },
       {
-        label: `About ${APP_DISPLAY_NAME}`,
+        label: `${t("common.about")} ${APP_DISPLAY_NAME}`,
         click: (_item, focusedWindow) => {
           const aboutWin = focusedWindow ?? win;
           if (!aboutWin || aboutWin.isDestroyed()) return;
@@ -1561,28 +1583,48 @@ function buildAppMenuTemplate(): Electron.MenuItemConstructorOptions[] {
   }
 
   template.push({
-    label: "Help",
+    label: t("menu.help"),
     submenu: helpSubmenu,
   });
 
   return template;
 }
 
-// Win/Linux: popup menu triggered from hamburger button in renderer.
-// Build once and reuse (rebuilt only if needed).
-let popupMenuInstance: Electron.Menu | null = null;
-
-function getPopupMenu(): Electron.Menu {
-  if (!popupMenuInstance) {
-    popupMenuInstance = Menu.buildFromTemplate(buildAppMenuTemplate());
-  }
-  return popupMenuInstance;
+function resolveSystemDefaultUiLanguageMode(): UiLanguageMode {
+  const preferredLanguages =
+    typeof app.getPreferredSystemLanguages === "function"
+      ? app.getPreferredSystemLanguages()
+      : typeof app.getLocale === "function"
+        ? [app.getLocale()]
+        : null;
+  return resolveDefaultUiLanguageMode(preferredLanguages);
 }
 
-ipcMain.handle("menu:openAppMenu", (event) => {
+let currentMenuUiLanguageMode: UiLanguageMode = resolveSystemDefaultUiLanguageMode();
+
+function resolveEffectiveUiLanguageMode(value: unknown): UiLanguageMode {
+  return normalizeUiLanguageMode(value) ?? resolveSystemDefaultUiLanguageMode();
+}
+
+function rebuildApplicationMenu(uiLanguageMode: UiLanguageMode): void {
+  currentMenuUiLanguageMode = uiLanguageMode;
+  const appMenu = Menu.buildFromTemplate(buildAppMenuTemplate(uiLanguageMode));
+  Menu.setApplicationMenu(appMenu);
+}
+
+async function loadMenuUiLanguageModeFromSettings(): Promise<UiLanguageMode> {
+  const settings = await readSettingsJson();
+  return resolveEffectiveUiLanguageMode(settings?.uiLanguageMode);
+}
+
+ipcMain.handle("menu:openAppMenu", (event, uiLanguageMode: unknown) => {
   const targetWindow = resolveTargetWindow(event);
   if (!targetWindow || targetWindow.isDestroyed()) return;
-  const menu = getPopupMenu();
+  const menu = Menu.buildFromTemplate(
+    buildAppMenuTemplate(
+      normalizeUiLanguageMode(uiLanguageMode) ?? currentMenuUiLanguageMode,
+    ),
+  );
   menu.popup({ window: targetWindow });
 });
 
@@ -1672,11 +1714,10 @@ app.whenReady().then(async () => {
     });
   });
 
-  createWindow();
+  const initialMenuUiLanguageMode = await loadMenuUiLanguageModeFromSettings();
+  rebuildApplicationMenu(initialMenuUiLanguageMode);
 
-  // Set application menu (visible on macOS menu bar, hidden on Win/Linux).
-  const appMenu = Menu.buildFromTemplate(buildAppMenuTemplate());
-  Menu.setApplicationMenu(appMenu);
+  createWindow();
 
   // Register global shortcuts for DevTools in development, or when explicitly
   // enabled in settings.json debug flag.

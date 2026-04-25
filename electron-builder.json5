@@ -22,13 +22,19 @@
     "icon": "build/icons/icon.ico",
     "target": [
       {
-        "target": "nsis",
+        "target": "zip",
         "arch": [
           "x64"
         ]
       }
     ],
-    "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
+    "artifactName": "${productName}-Windows-${version}-${arch}.${ext}",
+    "extraFiles": [
+      {
+        "from": "build/windows/README.txt",
+        "to": "."
+      }
+    ]
   },
   "nsis": {
     "oneClick": false,

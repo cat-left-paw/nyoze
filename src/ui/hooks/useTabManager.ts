@@ -1,6 +1,9 @@
 import { useCallback, useRef } from "react";
 import type { RefObject } from "react";
-import type { EditorCoreHandle } from "../../editor-core/types";
+import type {
+  EditorCoreHandle,
+  MarkdownDocumentOptions,
+} from "../../editor-core/types";
 import type { FrontmatterFields } from "../../editor-core/io/frontmatter";
 import {
   parseFrontmatterFields,
@@ -49,11 +52,18 @@ export type TabManagerDeps = {
     markdown: string,
     frontmatterFields: FrontmatterFields,
     characterCount: number,
+    documentMarkdownOptions: MarkdownDocumentOptions,
   ) => void;
   /** SEC-5: Notify main of the active file path before loading a document. */
   notifyActiveDocumentPath?: (filePath: string | null) => void;
-  /** BETA-Q1: Reset editor scroll to document start after loading. */
+  /** Capture the current editor surface scroll before leaving the active tab. */
+  captureEditorScroll: () => Pick<EditorTab, "scrollTop" | "scrollLeft">;
+  /** BETA-Q1: Reset editor scroll to document start after loading a new document. */
   resetEditorScroll: () => void;
+  /** Restore saved editor scroll when returning to the same tab/document. */
+  restoreEditorScroll: (
+    position: Pick<EditorTab, "scrollTop" | "scrollLeft">,
+  ) => void;
   /** New-tab default writing mode from app settings. */
   defaultWritingMode: WritingMode;
   /** New-tab default line break policy from app settings. */
@@ -100,12 +110,19 @@ function makeEmptyTab(
     markdownSnapshot: "",
     cleanMarkdownSnapshot: "",
     frontmatterFields: {},
+    documentMarkdownOptions: { preserveEmptyParagraphs: false },
     characterCount: 0,
     savedStat: null,
     writingMode: defaultWritingMode,
     writingModeFollowsTypeRecommendation: true,
     lineBreakPolicy: defaultLineBreakPolicy,
     eol: "lf",
+    scrollTop: 0,
+    scrollLeft: 0,
+    viewportAnchorPmPos: null,
+    viewportAnchorTextOffset: null,
+    viewportAnchorTextTotal: null,
+    sourceModeTopOffset: null,
   };
 }
 
@@ -158,12 +175,15 @@ export function useTabManager(deps: TabManagerDeps) {
     const paragraphPlainState =
       commitParagraphPlainBeforeLeavingCurrentDocument();
     if (!paragraphPlainState) return null;
+    const scrollPosition = d.captureEditorScroll();
     return {
       ...d.activeTab,
       dirty: paragraphPlainState.dirty,
       markdownSnapshot: paragraphPlainState.markdown,
       frontmatterFields: paragraphPlainState.frontmatterFields,
       characterCount: paragraphPlainState.characterCount,
+      scrollTop: scrollPosition.scrollTop,
+      scrollLeft: scrollPosition.scrollLeft,
     };
   }, [commitParagraphPlainBeforeLeavingCurrentDocument]);
 
@@ -180,6 +200,8 @@ export function useTabManager(deps: TabManagerDeps) {
       markdownSnapshot: snapshot.markdownSnapshot,
       frontmatterFields: snapshot.frontmatterFields,
       characterCount: snapshot.characterCount,
+      scrollTop: snapshot.scrollTop,
+      scrollLeft: snapshot.scrollLeft,
     });
     return true;
   }, [captureActiveTabSnapshot]);
@@ -206,8 +228,12 @@ export function useTabManager(deps: TabManagerDeps) {
       tab.markdownSnapshot,
       tab.frontmatterFields,
       tab.characterCount,
+      core.getDocumentMarkdownOptions(),
     );
-    d.resetEditorScroll();
+    d.restoreEditorScroll({
+      scrollTop: tab.scrollTop,
+      scrollLeft: tab.scrollLeft,
+    });
   }, []);
 
   /**
@@ -268,6 +294,7 @@ export function useTabManager(deps: TabManagerDeps) {
           newTab.markdownSnapshot,
           newTab.frontmatterFields,
           newTab.characterCount,
+          core.getDocumentMarkdownOptions(),
         );
         d.resetEditorScroll();
         window.setTimeout(() => {
@@ -343,6 +370,8 @@ export function useTabManager(deps: TabManagerDeps) {
             markdownSnapshot: previousActiveTabSnapshot.markdownSnapshot,
             frontmatterFields: previousActiveTabSnapshot.frontmatterFields,
             characterCount: previousActiveTabSnapshot.characterCount,
+            scrollTop: previousActiveTabSnapshot.scrollTop,
+            scrollLeft: previousActiveTabSnapshot.scrollLeft,
           });
           d.setActiveTabId(tabId);
           restoreTab(tabToClose);
@@ -434,12 +463,19 @@ export function useTabManager(deps: TabManagerDeps) {
         markdownSnapshot: content,
         cleanMarkdownSnapshot: content,
         frontmatterFields: fields,
+        documentMarkdownOptions: { preserveEmptyParagraphs: false },
         characterCount: charCount,
         savedStat: savedStat ?? null,
         writingMode: d.defaultWritingMode,
         writingModeFollowsTypeRecommendation: true,
         lineBreakPolicy: d.defaultLineBreakPolicy,
         eol,
+        scrollTop: 0,
+        scrollLeft: 0,
+        viewportAnchorPmPos: null,
+        viewportAnchorTextOffset: null,
+        viewportAnchorTextTotal: null,
+        sourceModeTopOffset: null,
       };
 
       d.addTab(newTab);
@@ -457,7 +493,12 @@ export function useTabManager(deps: TabManagerDeps) {
         core.clearHistory();
         d.closePlainEditModes();
         d.refreshHeadings();
-        d.onTabContentLoaded(content, fields, charCount);
+        d.onTabContentLoaded(
+          content,
+          fields,
+          charCount,
+          core.getDocumentMarkdownOptions(),
+        );
         d.resetEditorScroll();
       }
       return "added";
@@ -527,10 +568,17 @@ export function useTabManager(deps: TabManagerDeps) {
         markdownSnapshot: content,
         cleanMarkdownSnapshot: content,
         frontmatterFields: fields,
+        documentMarkdownOptions: { preserveEmptyParagraphs: false },
         characterCount: charCount,
         savedStat: savedStat ?? null,
         writingModeFollowsTypeRecommendation: true,
         eol,
+        scrollTop: 0,
+        scrollLeft: 0,
+        viewportAnchorPmPos: null,
+        viewportAnchorTextOffset: null,
+        viewportAnchorTextTotal: null,
+        sourceModeTopOffset: null,
       });
 
       // Load into editor
@@ -549,7 +597,12 @@ export function useTabManager(deps: TabManagerDeps) {
         core.clearHistory();
         d.closePlainEditModes();
         d.refreshHeadings();
-        d.onTabContentLoaded(content, fields, charCount);
+        d.onTabContentLoaded(
+          content,
+          fields,
+          charCount,
+          core.getDocumentMarkdownOptions(),
+        );
         d.resetEditorScroll();
       }
       return "loaded";

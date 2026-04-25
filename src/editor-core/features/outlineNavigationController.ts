@@ -131,24 +131,32 @@ export function createOutlineNavigationController({
   }
 
   function jumpToPreviousHeading(): boolean {
-    const headings = getHeadings()
+    // キャレットが所属する「現在見出し」を起点にし、その 1 つ手前を previous とする。
+    // selection.from が heading.pos ちょうどでも、heading.pos + 1 以降にあっても
+    // `resolveActiveHeadingIndex` が正しく所属見出しを返すので、境界条件で
+    // 1 つ飛ばしてしまう旧バグ (cursorPos との大小比較のみに頼る実装) を避けられる。
+    const snapshot = getHeadingSnapshot()
+    const { headings, activeHeadingIndex } = snapshot
     if (headings.length === 0) return false
-    const currentPos = editor.state.selection.from
-    for (let i = headings.length - 1; i >= 0; i--) {
-      if (headings[i].pos >= currentPos) continue
-      scrollToPos(headings[i].pos)
+    if (activeHeadingIndex > 0) {
+      scrollToPos(headings[activeHeadingIndex - 1].pos)
+      return true
+    }
+    // キャレットが最初の見出しより前にあるときだけ、そこから最初の見出しに寄せる。
+    if (activeHeadingIndex === -1) {
+      scrollToPos(headings[0].pos)
       return true
     }
     return false
   }
 
   function jumpToNextHeading(): boolean {
-    const headings = getHeadings()
+    const snapshot = getHeadingSnapshot()
+    const { headings, activeHeadingIndex } = snapshot
     if (headings.length === 0) return false
-    const currentPos = editor.state.selection.from
-    for (let i = 0; i < headings.length; i++) {
-      if (headings[i].pos <= currentPos) continue
-      scrollToPos(headings[i].pos)
+    const nextIndex = activeHeadingIndex + 1
+    if (nextIndex < headings.length) {
+      scrollToPos(headings[nextIndex].pos)
       return true
     }
     return false

@@ -28,29 +28,36 @@ import type {
   DocumentTheme,
   Theme,
   UiFont,
+  UiLanguageMode,
   UiThemePreset,
 } from "../../settings/types";
 import {
-  DOC_FONT_PRESET_LABELS,
-  DOC_HEADING_FONT_LABELS,
   DOCUMENT_THEME_LABELS,
   THEME_LABELS,
   UI_THEME_MAIN_COLORS,
-  UI_FONT_LABELS,
 } from "../../settings/defaults";
+import {
+  isBundledDocThemePreset,
+  isBundledUiThemePreset,
+  isStandardDocThemePresetId,
+  isStandardUiThemePresetId,
+} from "../../settings/theme-packs";
 import { UI_THEME_VALUES } from "../../settings/themeUtils";
+import { createUiTextGetter } from "../i18n/uiText";
 import {
   isDocPresetDirty,
   isSameDocPresetColors,
   isSameUiPresetColors,
   isUiPresetDirty,
 } from "../themePresetPolicy";
+import { buildBundledUiPresetGroups } from "../utils/themePresetGrouping";
 import { DisplayNumberSlider } from "./DisplayNumberSlider";
 
 type StudioTab = "ui" | "doc";
 type PresetSort = "newest" | "oldest" | "name";
 
 type ThemeStudioPanelProps = {
+  uiLanguageMode: UiLanguageMode;
   uiThemePresets: UiThemePreset[];
   activeUiThemePresetId: string | null;
   currentUiTheme: Theme;
@@ -232,6 +239,7 @@ function resolveCurrentUiColors(
 }
 
 export function ThemeStudioPanel({
+  uiLanguageMode,
   uiThemePresets,
   activeUiThemePresetId,
   currentUiTheme,
@@ -267,6 +275,16 @@ export function ThemeStudioPanel({
   onSetDocHeadingFont,
   onSetDisplayNumber,
 }: ThemeStudioPanelProps) {
+  const t = createUiTextGetter(uiLanguageMode);
+  const uiFontLabels = {
+    mincho: t("font.mincho"),
+    gothic: t("font.gothic"),
+  } as const;
+  const docHeadingFontLabels = {
+    "same-as-body": t("font.sameAsBody"),
+    mincho: uiFontLabels.mincho,
+    gothic: uiFontLabels.gothic,
+  } as const;
   const [tab, setTab] = useState<StudioTab>("ui");
   const [uiSearch, setUiSearch] = useState("");
   const [docSearch, setDocSearch] = useState("");
@@ -320,6 +338,18 @@ export function ThemeStudioPanel({
     () => uiThemePresets.filter((p) => getUiPresetKind(p) === "system"),
     [uiThemePresets],
   );
+  const uiStandardPresets = useMemo(
+    () => uiSystemPresets.filter((p) => isStandardUiThemePresetId(p.id)),
+    [uiSystemPresets],
+  );
+  const uiBundledPresets = useMemo(
+    () => uiSystemPresets.filter((p) => isBundledUiThemePreset(p)),
+    [uiSystemPresets],
+  );
+  const uiBundledPresetGroups = useMemo(
+    () => buildBundledUiPresetGroups(uiBundledPresets, t("common.curated")),
+    [uiBundledPresets, t],
+  );
   const uiCustomPresets = useMemo(
     () => uiThemePresets.filter((p) => getUiPresetKind(p) === "custom"),
     [uiThemePresets],
@@ -327,6 +357,14 @@ export function ThemeStudioPanel({
   const docSystemPresets = useMemo(
     () => docThemePresets.filter((p) => getDocPresetKind(p) === "system"),
     [docThemePresets],
+  );
+  const docStandardPresets = useMemo(
+    () => docSystemPresets.filter((p) => isStandardDocThemePresetId(p.id)),
+    [docSystemPresets],
+  );
+  const docBundledPresets = useMemo(
+    () => docSystemPresets.filter((p) => isBundledDocThemePreset(p)),
+    [docSystemPresets],
   );
   const docCustomPresets = useMemo(
     () => docThemePresets.filter((p) => getDocPresetKind(p) === "custom"),
@@ -598,7 +636,7 @@ export function ThemeStudioPanel({
   }, [activeDocPreset, onDeleteDocThemePreset]);
 
   if (!activeUiPreset || !activeDocPreset) {
-    return <p className="pane-placeholder">テーマプリセットを準備中です。</p>;
+    return <p className="pane-placeholder">{t("themeStudio.preparing")}</p>;
   }
 
   const uiCustomFonts = registeredFonts;
@@ -614,8 +652,8 @@ export function ThemeStudioPanel({
     : DOC_DETACHED_PRESET_VALUE;
   const detachedDocPresetLabel =
     currentDocTheme === "ui-linked"
-      ? "現在の設定（未保存カスタム）"
-      : "現在の設定（プリセット未選択）";
+      ? t("themeStudio.currentUnsavedCustom")
+      : t("themeStudio.currentNoPreset");
   const ensureActiveDocPresetForDraft = () => {
     if (activeDocThemePresetId !== null) return;
     // Keep ui-linked edits detached so they can become an unsaved custom draft.
@@ -658,12 +696,13 @@ export function ThemeStudioPanel({
     activeUiThemePresetId !== null &&
     isUiPresetDirty(activeUiPreset, uiBaseTheme, uiColors);
   const uiPresetBaseLabel = (preset: UiThemePreset): string =>
-    getUiPresetKind(preset) === "system"
+    getUiPresetKind(preset) === "system" &&
+    isStandardUiThemePresetId(preset.id)
       ? THEME_LABELS[preset.baseTheme]
       : preset.name;
   const renderUiPresetLabel = (preset: UiThemePreset): string =>
     hasActiveUiPreset && preset.id === activeUiPreset.id && uiPresetDirty
-      ? `${uiPresetBaseLabel(preset)} (未保存)`
+      ? `${uiPresetBaseLabel(preset)} (${t("themeStudio.unsaved")})`
       : uiPresetBaseLabel(preset);
   const autoPaneBg = resolveAutoPaneBg(uiColors.baseBg, uiColors.textPrimary);
   const effectivePaneBg = uiColors.paneBg ?? autoPaneBg;
@@ -675,32 +714,34 @@ export function ThemeStudioPanel({
   const renderDocPresetLabel = (preset: DocThemePreset): string =>
     hasActiveDocPreset && preset.id === activeDocPreset.id && docPresetDirty
       ? `${
-          getDocPresetKind(preset) === "system"
+          getDocPresetKind(preset) === "system" &&
+          isStandardDocThemePresetId(preset.id)
             ? DOCUMENT_THEME_LABELS[preset.baseDocTheme]
             : preset.name
-        } (未保存)`
-      : getDocPresetKind(preset) === "system"
+        } (${t("themeStudio.unsaved")})`
+      : getDocPresetKind(preset) === "system" &&
+          isStandardDocThemePresetId(preset.id)
         ? DOCUMENT_THEME_LABELS[preset.baseDocTheme]
         : preset.name;
 
   return (
     <section className="theme-studio-panel">
       <div className="theme-studio-header">
-        <h2 className="theme-studio-title">テーマ管理</h2>
+        <h2 className="theme-studio-title">{t("themeStudio.title")}</h2>
         <div className="theme-studio-tabs">
           <button
             type="button"
             className={`theme-studio-tab${tab === "ui" ? " theme-studio-tab--active" : ""}`}
             onClick={() => setTab("ui")}
           >
-            UIテーマ
+            {t("themeStudio.tab.ui")}
           </button>
           <button
             type="button"
             className={`theme-studio-tab${tab === "doc" ? " theme-studio-tab--active" : ""}`}
             onClick={() => setTab("doc")}
           >
-            文書テーマ
+            {t("themeStudio.tab.doc")}
           </button>
         </div>
       </div>
@@ -710,7 +751,9 @@ export function ThemeStudioPanel({
           <div className="theme-studio-pane">
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">プリセット</div>
+                <div className="setting-item-name">
+                  {t("themeStudio.preset")}
+                </div>
               </div>
               <div className="setting-item-control">
                 <select
@@ -723,20 +766,29 @@ export function ThemeStudioPanel({
                 >
                   {!hasActiveUiPreset && (
                     <option value={UI_DETACHED_PRESET_VALUE}>
-                      現在の設定（プリセット未選択）
+                      {t("themeStudio.currentNoPreset")}
                     </option>
                   )}
-                  {uiSystemPresets.length > 0 && (
-                    <optgroup label="標準">
-                      {uiSystemPresets.map((p) => (
+                  {uiStandardPresets.length > 0 && (
+                    <optgroup label={t("common.standard")}>
+                      {uiStandardPresets.map((p) => (
                         <option key={p.id} value={p.id}>
                           {renderUiPresetLabel(p)}
                         </option>
                       ))}
                     </optgroup>
                   )}
+                  {uiBundledPresetGroups.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.presets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {renderUiPresetLabel(p)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
                   {uiCustomPresets.length > 0 && (
-                    <optgroup label="カスタム">
+                    <optgroup label={t("common.custom")}>
                       {sortUiPresets(uiCustomPresets, "name").map((p) => (
                         <option key={p.id} value={p.id}>
                           {renderUiPresetLabel(p)}
@@ -750,7 +802,7 @@ export function ThemeStudioPanel({
 
             <div className="theme-preset-actions">
               <ActionIconChipButton
-                label="複製"
+                label={t("themeStudio.duplicate")}
                 icon={
                   <IconCopy
                     size={ACTION_ICON_SIZE}
@@ -761,7 +813,7 @@ export function ThemeStudioPanel({
                 disabled={!hasActiveUiPreset}
               />
               <ActionIconChipButton
-                label="削除"
+                label={t("common.delete")}
                 icon={
                   <IconTrash
                     size={ACTION_ICON_SIZE}
@@ -778,7 +830,7 @@ export function ThemeStudioPanel({
               <input
                 type="text"
                 className="setting-text-input"
-                placeholder="カスタムを検索"
+                placeholder={t("themeStudio.searchCustom")}
                 value={uiSearch}
                 onChange={(e) => setUiSearch(e.target.value)}
               />
@@ -787,15 +839,15 @@ export function ThemeStudioPanel({
                 value={uiSort}
                 onChange={(e) => setUiSort(e.target.value as PresetSort)}
               >
-                <option value="newest">新しい順</option>
-                <option value="oldest">古い順</option>
-                <option value="name">名前順</option>
+                <option value="newest">{t("themeStudio.sort.newest")}</option>
+                <option value="oldest">{t("themeStudio.sort.oldest")}</option>
+                <option value="name">{t("themeStudio.sort.name")}</option>
               </select>
             </div>
             <div className="theme-preset-list">
               {filteredUiCustomPresets.length === 0 && (
                 <div className="theme-preset-empty">
-                  該当するカスタムテーマはありません。
+                  {t("themeStudio.emptyCustom")}
                 </div>
               )}
               {filteredUiCustomPresets.map((p) => {
@@ -817,15 +869,17 @@ export function ThemeStudioPanel({
                           {p.name}
                         </span>
                         {isDirty && (
-                          <span className="theme-preset-dirty-tag">未保存</span>
+                          <span className="theme-preset-dirty-tag">
+                            {t("themeStudio.unsaved")}
+                          </span>
                         )}
                       </button>
                       <button
                         type="button"
                         className="theme-preset-item-rename"
                         onClick={() => openRenameDialog("ui", p.id, p.name)}
-                        aria-label="テーマ名を変更"
-                        title="テーマ名を変更"
+                        aria-label={t("themeStudio.renameTheme")}
+                        title={t("themeStudio.renameTheme")}
                       >
                         <IconPencil
                           className="theme-preset-item-rename-icon"
@@ -841,10 +895,12 @@ export function ThemeStudioPanel({
 
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">ベーステーマ</div>
+                <div className="setting-item-name">
+                  {t("themeStudio.baseTheme")}
+                </div>
                 {hasActiveUiPreset && activeUiKind === "system" && (
                   <div className="setting-item-desc">
-                    標準プリセットでは固定です
+                    {t("themeStudio.fixedInSystemPreset")}
                   </div>
                 )}
               </div>
@@ -872,41 +928,43 @@ export function ThemeStudioPanel({
             </div>
 
             <div className="settings-section">
-              <h4 className="settings-subsection-heading">主要色</h4>
+              <h4 className="settings-subsection-heading">
+                {t("themeStudio.mainColors")}
+              </h4>
               <ColorRow
-                label="パネル背景"
+                label={t("themeStudio.color.panelBg")}
                 value={uiColors.baseBg}
                 onChange={(v) => setUiColors((c) => ({ ...c, baseBg: v }))}
               />
               <ColorRow
-                label="サーフェス背景"
+                label={t("themeStudio.color.surfaceBg")}
                 value={uiColors.surfaceBg}
                 onChange={(v) => setUiColors((c) => ({ ...c, surfaceBg: v }))}
               />
               <ColorRow
-                label="テキスト"
+                label={t("themeStudio.color.text")}
                 value={uiColors.textPrimary}
                 onChange={(v) => setUiColors((c) => ({ ...c, textPrimary: v }))}
               />
               <ColorRow
-                label="アクセント"
+                label={t("themeStudio.color.accent")}
                 value={uiColors.accent}
                 onChange={(v) => setUiColors((c) => ({ ...c, accent: v }))}
               />
               <ColorRow
-                label="ボーダー"
+                label={t("themeStudio.color.border")}
                 value={uiColors.border}
                 onChange={(v) => setUiColors((c) => ({ ...c, border: v }))}
               />
               <ColorRow
-                label="トップバー/スプリッタ"
+                label={t("themeStudio.color.paneBorder")}
                 value={uiColors.paneBorder}
                 onChange={(v) => setUiColors((c) => ({ ...c, paneBorder: v }))}
               />
               <div className="setting-item">
                 <div className="setting-item-info">
                   <div className="setting-item-name">
-                    左右パネル背景（任意）
+                    {t("themeStudio.color.paneBgOptional")}
                   </div>
                 </div>
                 <div className="setting-item-control">
@@ -928,12 +986,12 @@ export function ThemeStudioPanel({
                     }
                     disabled={uiColors.paneBg === undefined}
                   >
-                    自動に戻す
+                    {t("themeStudio.resetToAuto")}
                   </button>
                 </div>
               </div>
               <ColorRow
-                label="スクロールバー"
+                label={t("themeStudio.color.scrollbar")}
                 value={uiColors.scrollbarBase}
                 onChange={(v) =>
                   setUiColors((c) => ({ ...c, scrollbarBase: v }))
@@ -943,7 +1001,7 @@ export function ThemeStudioPanel({
 
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">UIフォント</div>
+                <div className="setting-item-name">{t("themeStudio.uiFont")}</div>
               </div>
               <div className="setting-item-control">
                 <select
@@ -951,8 +1009,8 @@ export function ThemeStudioPanel({
                   value={currentUiFont}
                   onChange={(e) => onSetUiFont(e.target.value as UiFont)}
                 >
-                  <option value="mincho">{UI_FONT_LABELS.mincho}</option>
-                  <option value="gothic">{UI_FONT_LABELS.gothic}</option>
+                  <option value="mincho">{uiFontLabels.mincho}</option>
+                  <option value="gothic">{uiFontLabels.gothic}</option>
                   {uiCustomFonts.map((f) => (
                     <option key={f} value={`custom:${f}`}>
                       {f}
@@ -964,7 +1022,7 @@ export function ThemeStudioPanel({
 
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">UI文字サイズ倍率</div>
+                <div className="setting-item-name">{t("themeStudio.uiScale")}</div>
               </div>
               <div className="setting-item-control">
                 <div className="slider-control">
@@ -985,7 +1043,7 @@ export function ThemeStudioPanel({
 
             <div className="theme-studio-save-row">
               <ActionIconChipButton
-                label="変更を取り消す"
+                label={t("themeStudio.discardChanges")}
                 icon={
                   <IconArrowBackUp
                     size={ACTION_ICON_SIZE}
@@ -996,13 +1054,13 @@ export function ThemeStudioPanel({
                 disabled={!uiPresetDirty}
               />
               <ActionIconChipButton
-                label="新規保存"
+                label={t("themeStudio.saveNew")}
                 icon={<NewSaveTablerIcon />}
                 onClick={() => openNewSaveDialog("ui")}
                 tone="accent"
               />
               <ActionIconChipButton
-                label="上書き保存"
+                label={t("themeStudio.saveOverwrite")}
                 icon={
                   <IconDeviceFloppy
                     size={ACTION_ICON_SIZE}
@@ -1017,7 +1075,11 @@ export function ThemeStudioPanel({
 
             <div className="theme-preview-toggle-row">
               <ActionIconChipButton
-                label={uiPreviewOpen ? "サンプル非表示" : "サンプル表示"}
+                label={
+                  uiPreviewOpen
+                    ? t("themeStudio.hideSample")
+                    : t("themeStudio.showSample")
+                }
                 icon={
                   uiPreviewOpen ? (
                     <IconEyeOff
@@ -1041,7 +1103,9 @@ export function ThemeStudioPanel({
           <div className="theme-studio-pane">
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">プリセット</div>
+                <div className="setting-item-name">
+                  {t("themeStudio.preset")}
+                </div>
               </div>
               <div className="setting-item-control">
                 <select
@@ -1057,9 +1121,18 @@ export function ThemeStudioPanel({
                       {detachedDocPresetLabel}
                     </option>
                   )}
-                  {docSystemPresets.length > 0 && (
-                    <optgroup label="標準">
-                      {docSystemPresets.map((p) => (
+                  {docStandardPresets.length > 0 && (
+                    <optgroup label={t("common.standard")}>
+                      {docStandardPresets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {renderDocPresetLabel(p)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {docBundledPresets.length > 0 && (
+                    <optgroup label={t("common.curated")}>
+                      {docBundledPresets.map((p) => (
                         <option key={p.id} value={p.id}>
                           {renderDocPresetLabel(p)}
                         </option>
@@ -1067,7 +1140,7 @@ export function ThemeStudioPanel({
                     </optgroup>
                   )}
                   {docCustomPresets.length > 0 && (
-                    <optgroup label="カスタム">
+                    <optgroup label={t("common.custom")}>
                       {sortDocPresets(docCustomPresets, "name").map((p) => (
                         <option key={p.id} value={p.id}>
                           {renderDocPresetLabel(p)}
@@ -1081,7 +1154,7 @@ export function ThemeStudioPanel({
 
             <div className="theme-preset-actions">
               <ActionIconChipButton
-                label="複製"
+                label={t("themeStudio.duplicate")}
                 icon={
                   <IconCopy
                     size={ACTION_ICON_SIZE}
@@ -1092,7 +1165,7 @@ export function ThemeStudioPanel({
                 disabled={!hasActiveDocPreset}
               />
               <ActionIconChipButton
-                label="削除"
+                label={t("common.delete")}
                 icon={
                   <IconTrash
                     size={ACTION_ICON_SIZE}
@@ -1109,7 +1182,7 @@ export function ThemeStudioPanel({
               <input
                 type="text"
                 className="setting-text-input"
-                placeholder="カスタムを検索"
+                placeholder={t("themeStudio.searchCustom")}
                 value={docSearch}
                 onChange={(e) => setDocSearch(e.target.value)}
               />
@@ -1118,15 +1191,15 @@ export function ThemeStudioPanel({
                 value={docSort}
                 onChange={(e) => setDocSort(e.target.value as PresetSort)}
               >
-                <option value="newest">新しい順</option>
-                <option value="oldest">古い順</option>
-                <option value="name">名前順</option>
+                <option value="newest">{t("themeStudio.sort.newest")}</option>
+                <option value="oldest">{t("themeStudio.sort.oldest")}</option>
+                <option value="name">{t("themeStudio.sort.name")}</option>
               </select>
             </div>
             <div className="theme-preset-list">
               {filteredDocCustomPresets.length === 0 && (
                 <div className="theme-preset-empty">
-                  該当するカスタムテーマはありません。
+                  {t("themeStudio.emptyCustom")}
                 </div>
               )}
               {filteredDocCustomPresets.map((p) => {
@@ -1148,15 +1221,17 @@ export function ThemeStudioPanel({
                           {p.name}
                         </span>
                         {isDirty && (
-                          <span className="theme-preset-dirty-tag">未保存</span>
+                          <span className="theme-preset-dirty-tag">
+                            {t("themeStudio.unsaved")}
+                          </span>
                         )}
                       </button>
                       <button
                         type="button"
                         className="theme-preset-item-rename"
                         onClick={() => openRenameDialog("doc", p.id, p.name)}
-                        aria-label="テーマ名を変更"
-                        title="テーマ名を変更"
+                        aria-label={t("themeStudio.renameTheme")}
+                        title={t("themeStudio.renameTheme")}
                       >
                         <IconPencil
                           className="theme-preset-item-rename-icon"
@@ -1171,9 +1246,11 @@ export function ThemeStudioPanel({
             </div>
 
             <div className="settings-section">
-              <h4 className="settings-subsection-heading">主要色</h4>
+              <h4 className="settings-subsection-heading">
+                {t("themeStudio.mainColors")}
+              </h4>
               <ColorRow
-                label="ページ背景"
+                label={t("themeStudio.color.pageBg")}
                 value={docColors.pageColor}
                 onChange={(v) => {
                   detachUiLinkedSystemPresetForDocDraft();
@@ -1182,7 +1259,7 @@ export function ThemeStudioPanel({
                 }}
               />
               <ColorRow
-                label="本文テキスト"
+                label={t("themeStudio.color.bodyText")}
                 value={docColors.textColor}
                 onChange={(v) => {
                   detachUiLinkedSystemPresetForDocDraft();
@@ -1191,7 +1268,7 @@ export function ThemeStudioPanel({
                 }}
               />
               <ColorRow
-                label="見出しテキスト"
+                label={t("themeStudio.color.headingText")}
                 value={docColors.headingColor}
                 onChange={(v) => {
                   detachUiLinkedSystemPresetForDocDraft();
@@ -1203,7 +1280,9 @@ export function ThemeStudioPanel({
 
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">文書フォント</div>
+                <div className="setting-item-name">
+                  {t("themeStudio.documentFont")}
+                </div>
               </div>
               <div className="setting-item-control">
                 <select
@@ -1216,7 +1295,7 @@ export function ThemeStudioPanel({
                 >
                   {(["mincho", "gothic"] as const).map((v) => (
                     <option key={v} value={v}>
-                      {DOC_FONT_PRESET_LABELS[v]}
+                      {uiFontLabels[v]}
                     </option>
                   ))}
                   {registeredFonts.map((font) => (
@@ -1235,7 +1314,9 @@ export function ThemeStudioPanel({
 
             <div className="setting-item">
               <div className="setting-item-info">
-                <div className="setting-item-name">見出しフォント</div>
+                <div className="setting-item-name">
+                  {t("themeStudio.headingFont")}
+                </div>
               </div>
               <div className="setting-item-control">
                 <select
@@ -1248,7 +1329,7 @@ export function ThemeStudioPanel({
                 >
                   {(["same-as-body", "mincho", "gothic"] as const).map((v) => (
                     <option key={v} value={v}>
-                      {DOC_HEADING_FONT_LABELS[v]}
+                      {docHeadingFontLabels[v]}
                     </option>
                   ))}
                   {registeredFonts.map((font) => (
@@ -1269,7 +1350,7 @@ export function ThemeStudioPanel({
             </div>
 
             <DisplayNumberSlider
-              label="フォントサイズ"
+              label={t("displaySettings.fontSize")}
               min={14}
               max={36}
               step={1}
@@ -1281,7 +1362,7 @@ export function ThemeStudioPanel({
             />
 
             <DisplayNumberSlider
-              label="行間"
+              label={t("displaySettings.lineHeight")}
               min={1.2}
               max={2.8}
               step={0.05}
@@ -1293,13 +1374,12 @@ export function ThemeStudioPanel({
             />
 
             <p className="setting-item-note">
-              フォント・フォントサイズ・行間は表示設定です。テーマ preset
-              には保存されません。
+              {t("themeStudio.displaySettingsNote")}
             </p>
 
             <div className="theme-studio-save-row">
               <ActionIconChipButton
-                label="変更を取り消す"
+                label={t("themeStudio.discardChanges")}
                 icon={
                   <IconArrowBackUp
                     size={ACTION_ICON_SIZE}
@@ -1310,13 +1390,13 @@ export function ThemeStudioPanel({
                 disabled={!docPresetDirty}
               />
               <ActionIconChipButton
-                label="新規保存"
+                label={t("themeStudio.saveNew")}
                 icon={<NewSaveTablerIcon />}
                 onClick={() => openNewSaveDialog("doc")}
                 tone="accent"
               />
               <ActionIconChipButton
-                label="上書き保存"
+                label={t("themeStudio.saveOverwrite")}
                 icon={
                   <IconDeviceFloppy
                     size={ACTION_ICON_SIZE}
@@ -1344,14 +1424,14 @@ export function ThemeStudioPanel({
           >
             <div className="prompt-title">
               {newSaveDialog.kind === "ui"
-                ? "UIテーマを新規保存"
-                : "文書テーマを新規保存"}
+                ? t("themeStudio.newSave.uiTitle")
+                : t("themeStudio.newSave.docTitle")}
             </div>
             <label
               className="theme-name-dialog-label"
               htmlFor="theme-name-input"
             >
-              テーマ名
+              {t("themeStudio.themeName")}
             </label>
             <input
               id="theme-name-input"
@@ -1372,7 +1452,7 @@ export function ThemeStudioPanel({
                 className="font-register-btn"
                 onClick={closeNewSaveDialog}
               >
-                キャンセル
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -1380,7 +1460,7 @@ export function ThemeStudioPanel({
                 onClick={handleConfirmNewSave}
                 disabled={newSaveDialog.name.trim().length === 0}
               >
-                保存
+                {t("common.save")}
               </button>
             </div>
           </section>
@@ -1399,14 +1479,14 @@ export function ThemeStudioPanel({
           >
             <div className="prompt-title">
               {renameDialog.kind === "ui"
-                ? "UIテーマ名を変更"
-                : "文書テーマ名を変更"}
+                ? t("themeStudio.rename.uiTitle")
+                : t("themeStudio.rename.docTitle")}
             </div>
             <label
               className="theme-name-dialog-label"
               htmlFor="theme-rename-input"
             >
-              テーマ名
+              {t("themeStudio.themeName")}
             </label>
             <input
               id="theme-rename-input"
@@ -1427,7 +1507,7 @@ export function ThemeStudioPanel({
                 className="font-register-btn"
                 onClick={closeRenameDialog}
               >
-                キャンセル
+                {t("common.cancel")}
               </button>
               <button
                 type="button"
@@ -1435,7 +1515,7 @@ export function ThemeStudioPanel({
                 onClick={handleConfirmRename}
                 disabled={renameDialog.name.trim().length === 0}
               >
-                保存
+                {t("common.save")}
               </button>
             </div>
           </section>

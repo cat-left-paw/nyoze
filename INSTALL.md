@@ -7,9 +7,10 @@
 
 - macOS (Apple Silicon): `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - macOS (Intel): `Nyoze-Mac-<version>-x64-Installer.dmg`
-- Windows: `Nyoze-Windows-<version>-Setup.exe`
+- Windows: `Nyoze-Windows-<version>-x64.zip`
 
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
+Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
 ## macOS
 
@@ -64,8 +65,79 @@ xattr -dr com.apple.quarantine "/Applications/Nyoze.app"
 
 ## Windows
 
-1. GitHub Releases から `Nyoze-Windows-<version>-Setup.exe` をダウンロードします。
-2. Installer を起動して案内に従います。
+`0.1.1-beta.1` の Windows 配布物は installer ではなく zip です。
+
+`0.1.0-beta.1` / `0.1.0-beta.2` では installer を配布していましたが、`0.1.1-beta.1` では一部の Windows 環境で Smart App Control により installer や単一 exe がブロックされたため、zip 形式へ切り替えています。
+
+Windows 版は `x64` 専用です。32bit Windows では起動できません。
+
+1. GitHub Releases から `Nyoze-Windows-<version>-x64.zip` をダウンロードします。
+2. zip を任意のフォルダへ展開します。
+3. 展開したフォルダ内の `README.txt` を必要に応じて確認します。
+4. 展開したフォルダ内の `Nyoze.exe` を起動します。
+5. 必要ならショートカットを自分で作成してください。
+
+### 旧 installer 版を使っている人へ
+
+- `0.1.0-beta.1` / `0.1.0-beta.2` を installer で入れている場合でも、`0.1.1-beta.1` は自動で上書き更新されません。
+- `0.1.1-beta.1` を使うには、新しく zip 版をダウンロードして展開し、その中の `README.txt` と `Nyoze.exe` を使ってください。
+- 旧 installer 版を残したまま zip 版を試しても構いませんが、混乱を避けるため同時起動はしないでください。
+- 旧 installer 版が不要になった場合は、Windows のアプリ設定からアンインストールしてください。
+
+### Smart App Control について
+
+今回確認できた範囲では、zip を展開した中の `Nyoze.exe` は起動できましたが、installer や単一 exe 形式は Smart App Control によってブロックされることがありました。
+
+- `0.1.1-beta.1` の Windows 版は zip 展開後の `Nyoze.exe` を使ってください。
+- 以前の installer 版を使っている環境でも、`0.1.1-beta.1` へ更新するときは zip 版へ切り替えてください。
+
+## アンインストール
+
+### macOS
+
+- `Applications` から `Nyoze.app` を削除します。
+- ただし、設定ファイルやバックアップは自動では消えません。
+- 完全に削除したい場合は、後述の「ユーザーデータ保存先」にある `Nyoze` フォルダも手動で削除してください。
+
+### Windows
+
+- zip 版はインストール型ではないため、展開したフォルダを削除すればアプリ本体は取り除けます。
+- `0.1.0-beta.1` / `0.1.0-beta.2` の旧 installer 版を使っていた場合は、Windows の「設定 > アプリ」からアンインストールしてください。
+- ただし、設定ファイルやバックアップは自動では消えません。
+- 完全に削除したい場合は、後述の「ユーザーデータ保存先」にある `Nyoze` フォルダも手動で削除してください。
+
+## ユーザーデータ保存先
+
+Nyoze の設定、バックアップ、ワークスペース状態は、アプリ本体とは別にユーザーデータフォルダへ保存されます。zip 版でも DMG 版でも、この保存先は同じです。
+
+代表的な保存内容:
+
+- `settings.json`
+  - 表示設定、テーマ、UI 言語、登録フォントなど
+- `backups/`
+  - 保存前バックアップ
+- `workspace-state.json`
+  - 最近のワークスペース状態
+
+場所:
+
+- macOS:
+  - `~/Library/Application Support/Nyoze/`
+- Windows:
+  - `%APPDATA%\Nyoze\`
+
+開き方の例:
+
+- macOS:
+  - Finder で `移動 > フォルダへ移動...` を開き、`~/Library/Application Support/Nyoze/` を入力します。
+- Windows:
+  - エクスプローラーのアドレス欄に `%APPDATA%\Nyoze\` と入力します。
+
+注意:
+
+- アプリ本体を削除しても、このフォルダは自動では消えません。
+- 設定やバックアップを引き継ぎたい場合は残してください。
+- 完全削除したい場合だけ、内容を確認した上で手動削除してください。
 
 ## 原稿を開く前に
 

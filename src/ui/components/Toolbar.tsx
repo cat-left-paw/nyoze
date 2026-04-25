@@ -40,7 +40,8 @@ import {
 import { useEffect, useRef, useState } from "react";
 import type { MouseEventHandler } from "react";
 import type { CommandAvailability } from "../../editor-core/types";
-import type { WritingMode } from "../../settings/types";
+import type { UiLanguageMode, WritingMode } from "../../settings/types";
+import { createUiTextGetter } from "../i18n/uiText";
 import {
   getPlainFormattingUnavailableMessage,
   resolvePlainModeKind,
@@ -52,6 +53,7 @@ const TOOLBAR_ICON_STROKE = 1.1;
 type ToolbarProps = {
   rubyVisible: boolean;
   writingMode: WritingMode;
+  uiLanguageMode: UiLanguageMode;
   availability: CommandAvailability;
   paragraphPlainModeActive: boolean;
   fullPlainEditActive: boolean;
@@ -87,6 +89,7 @@ type ToolbarProps = {
 export function Toolbar({
   rubyVisible,
   writingMode,
+  uiLanguageMode,
   availability,
   paragraphPlainModeActive,
   fullPlainEditActive,
@@ -116,16 +119,17 @@ export function Toolbar({
   onLoad,
   onSave,
 }: ToolbarProps) {
+  const t = createUiTextGetter(uiLanguageMode);
   const isVertical = writingMode === "vertical-rl";
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false);
   const headingMenuRef = useRef<HTMLDivElement | null>(null);
   const headingItems = [
-    { id: "h1", label: "見出し１", level: 1, icon: IconH1 },
-    { id: "h2", label: "見出し２", level: 2, icon: IconH2 },
-    { id: "h3", label: "見出し３", level: 3, icon: IconH3 },
-    { id: "h4", label: "見出し４", level: 4, icon: IconH4 },
-    { id: "h5", label: "見出し５", level: 5, icon: IconH5 },
-    { id: "h6", label: "見出し６", level: 6, icon: IconH6 },
+    { id: "h1", label: t("editor.heading.level1"), level: 1, icon: IconH1 },
+    { id: "h2", label: t("editor.heading.level2"), level: 2, icon: IconH2 },
+    { id: "h3", label: t("editor.heading.level3"), level: 3, icon: IconH3 },
+    { id: "h4", label: t("editor.heading.level4"), level: 4, icon: IconH4 },
+    { id: "h5", label: t("editor.heading.level5"), level: 5, icon: IconH5 },
+    { id: "h6", label: t("editor.heading.level6"), level: 6, icon: IconH6 },
   ] as const;
   const plainModeKind = resolvePlainModeKind({
     paragraphPlainModeActive,
@@ -185,8 +189,8 @@ export function Toolbar({
         onClick={onUndo}
         disabled={!availability.canUndo}
         type="button"
-        data-tooltip="Undo"
-        aria-label="Undo"
+        data-tooltip={t("common.undo")}
+        aria-label={t("common.undo")}
       >
         <IconArrowBackUp
           size={TOOLBAR_ICON_SIZE}
@@ -198,8 +202,8 @@ export function Toolbar({
         onClick={onRedo}
         disabled={!availability.canRedo}
         type="button"
-        data-tooltip="Redo"
-        aria-label="Redo"
+        data-tooltip={t("common.redo")}
+        aria-label={t("common.redo")}
       >
         <IconArrowForwardUp
           size={TOOLBAR_ICON_SIZE}
@@ -212,8 +216,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(() => onRunMarkCommand("bold"))}
         disabled={!plainFormattingBlocked && !availability.canBold}
         type="button"
-        aria-label="Bold"
-        {...getFormattingButtonProps("Bold")}
+        aria-label={t("editor.bold")}
+        {...getFormattingButtonProps(t("editor.bold"))}
       >
         <IconBold size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -222,8 +226,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(() => onRunMarkCommand("italic"))}
         disabled={!plainFormattingBlocked && !availability.canItalic}
         type="button"
-        aria-label="Italic"
-        {...getFormattingButtonProps("Italic")}
+        aria-label={t("editor.italic")}
+        {...getFormattingButtonProps(t("editor.italic"))}
       >
         <IconItalic size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -232,8 +236,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(() => onRunMarkCommand("strike"))}
         disabled={!plainFormattingBlocked && !availability.canStrike}
         type="button"
-        aria-label="Strike"
-        {...getFormattingButtonProps("Strike")}
+        aria-label={t("editor.strike")}
+        {...getFormattingButtonProps(t("editor.strike"))}
       >
         <IconStrikethrough
           size={TOOLBAR_ICON_SIZE}
@@ -245,8 +249,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(() => onRunMarkCommand("highlight"))}
         disabled={!plainFormattingBlocked && !availability.canHighlight}
         type="button"
-        aria-label="Highlight"
-        {...getFormattingButtonProps("Highlight")}
+        aria-label={t("editor.highlight")}
+        {...getFormattingButtonProps(t("editor.highlight"))}
       >
         <IconHighlight size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -255,8 +259,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleInlineCode)}
         disabled={!plainFormattingBlocked && !availability.canInlineCode}
         type="button"
-        aria-label="Inline Code"
-        {...getFormattingButtonProps("Inline Code")}
+        aria-label={t("editor.inlineCode")}
+        {...getFormattingButtonProps(t("editor.inlineCode"))}
       >
         <IconCode size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -265,8 +269,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onClearFormat)}
         disabled={!plainFormattingBlocked && !availability.canClearFormat}
         type="button"
-        aria-label="Clear Format"
-        {...getFormattingButtonProps("Clear Format")}
+        aria-label={t("editor.clearFormat")}
+        {...getFormattingButtonProps(t("editor.clearFormat"))}
       >
         <IconEraser size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -275,8 +279,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onInsertHorizontalRule)}
         disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
         type="button"
-        aria-label="Horizontal Rule"
-        {...getFormattingButtonProps("Horizontal Rule")}
+        aria-label={t("editor.horizontalRule")}
+        {...getFormattingButtonProps(t("editor.horizontalRule"))}
       >
         {isVertical ? (
           <IconSeparatorVertical
@@ -298,10 +302,10 @@ export function Toolbar({
           )}
           disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
           type="button"
-          aria-label="Heading"
+          aria-label={t("editor.heading")}
           aria-haspopup="menu"
           aria-expanded={headingMenuOpen}
-          {...getFormattingButtonProps("Heading")}
+          {...getFormattingButtonProps(t("editor.heading"))}
         >
           <IconHeading size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
           <IconChevronDown size={12} stroke={TOOLBAR_ICON_STROKE} />
@@ -310,7 +314,7 @@ export function Toolbar({
           <div
             className="toolbar-heading-menu"
             role="menu"
-            aria-label="Heading Menu"
+            aria-label={t("editor.headingMenu")}
           >
             {headingItems.map((item) => {
               const Icon = item.icon;
@@ -342,7 +346,7 @@ export function Toolbar({
               })}
             >
               <IconHeadingOff size={16} stroke={TOOLBAR_ICON_STROKE} />
-              <span>見出し解除</span>
+              <span>{t("editor.heading.clear")}</span>
             </button>
           </div>
         )}
@@ -352,8 +356,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleBulletList)}
         disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
         type="button"
-        aria-label="Bullet List"
-        {...getFormattingButtonProps("Bullet List")}
+        aria-label={t("editor.bulletList")}
+        {...getFormattingButtonProps(t("editor.bulletList"))}
       >
         <IconList size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -362,8 +366,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleOrderedList)}
         disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
         type="button"
-        aria-label="Ordered List"
-        {...getFormattingButtonProps("Ordered List")}
+        aria-label={t("editor.orderedList")}
+        {...getFormattingButtonProps(t("editor.orderedList"))}
       >
         <IconListNumbers
           size={TOOLBAR_ICON_SIZE}
@@ -375,8 +379,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleChecklist)}
         disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
         type="button"
-        aria-label="Checklist"
-        {...getFormattingButtonProps("Checklist")}
+        aria-label={t("editor.checklist")}
+        {...getFormattingButtonProps(t("editor.checklist"))}
       >
         <IconSquareCheck
           size={TOOLBAR_ICON_SIZE}
@@ -388,8 +392,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleBlockquote)}
         disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
         type="button"
-        aria-label="Blockquote"
-        {...getFormattingButtonProps("Blockquote")}
+        aria-label={t("editor.blockquote")}
+        {...getFormattingButtonProps(t("editor.blockquote"))}
       >
         <IconBlockquote size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -398,8 +402,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleCodeBlock)}
         disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
         type="button"
-        aria-label="Code Block"
-        {...getFormattingButtonProps("Code Block")}
+        aria-label={t("editor.codeBlock")}
+        {...getFormattingButtonProps(t("editor.codeBlock"))}
       >
         <IconCodeDots size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -408,8 +412,8 @@ export function Toolbar({
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={withPlainFormattingGuard(onSetOrUnsetLink)}
         type="button"
-        aria-label="Link"
-        {...getFormattingButtonProps("Link")}
+        aria-label={t("editor.link")}
+        {...getFormattingButtonProps(t("editor.link"))}
       >
         <IconLink size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -417,8 +421,8 @@ export function Toolbar({
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={withPlainFormattingGuard(onInsertImage)}
         type="button"
-        aria-label="Image"
-        {...getFormattingButtonProps("Image")}
+        aria-label={t("editor.image")}
+        {...getFormattingButtonProps(t("editor.image"))}
       >
         <IconPhoto size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -427,8 +431,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onInsertRubyBouten)}
         type="button"
         disabled={!plainFormattingBlocked && !availability.canInsertRuby}
-        aria-label="Ruby"
-        {...getFormattingButtonProps("Ruby")}
+        aria-label={t("editor.insertRuby")}
+        {...getFormattingButtonProps(t("editor.insertRuby"))}
       >
         <IconDiamond size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -437,8 +441,8 @@ export function Toolbar({
         onClick={withPlainFormattingGuard(onToggleTcy)}
         disabled={!plainFormattingBlocked && !availability.canToggleTcy}
         type="button"
-        aria-label="TCY"
-        {...getFormattingButtonProps("TCY")}
+        aria-label={t("editor.tcy")}
+        {...getFormattingButtonProps(t("editor.tcy"))}
       >
         <IconNumber123 size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -446,8 +450,8 @@ export function Toolbar({
         className={`toolbar-btn-iconized toolbar-btn-icon-only${rubyVisible ? " toggle-active" : ""}`}
         onClick={onToggleRubyVisible}
         type="button"
-        data-tooltip="Ruby View"
-        aria-label="Ruby View"
+        data-tooltip={t("editor.rubyView")}
+        aria-label={t("editor.rubyView")}
         aria-pressed={rubyVisible}
       >
         {rubyVisible ? (
@@ -460,8 +464,8 @@ export function Toolbar({
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={onToggleWritingMode}
         type="button"
-        data-tooltip={isVertical ? "Switch Horizontal" : "Switch Vertical"}
-        aria-label={isVertical ? "Switch Horizontal" : "Switch Vertical"}
+        data-tooltip={isVertical ? t("editor.switchHorizontal") : t("editor.switchVertical")}
+        aria-label={isVertical ? t("editor.switchHorizontal") : t("editor.switchVertical")}
       >
         {isVertical ? (
           <IconSwitchVertical
@@ -485,8 +489,8 @@ export function Toolbar({
           (!availability.canParagraphPlain && !paragraphPlainModeActive)
         }
         type="button"
-        data-tooltip="Paragraph Plain"
-        aria-label="Paragraph Plain"
+        data-tooltip={t("editor.paragraphPlain")}
+        aria-label={t("editor.paragraphPlain")}
         aria-pressed={paragraphPlainModeActive}
       >
         <IconPilcrow size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
@@ -496,8 +500,8 @@ export function Toolbar({
         onClick={onToggleFullPlainEdit}
         disabled={paragraphPlainModeActive}
         type="button"
-        data-tooltip="Source Mode"
-        aria-label="Source Mode"
+        data-tooltip={t("editor.sourceMode")}
+        aria-label={t("editor.sourceMode")}
         aria-pressed={fullPlainEditActive}
       >
         <IconFileCode size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
@@ -506,8 +510,8 @@ export function Toolbar({
         className={`toolbar-btn-iconized toolbar-btn-icon-only${displaySettingsOpen ? " toggle-active" : ""}`}
         onClick={onOpenDisplaySettings}
         type="button"
-        data-tooltip="View Settings"
-        aria-label="View Settings"
+        data-tooltip={t("editor.viewSettings")}
+        aria-label={t("editor.viewSettings")}
         aria-pressed={displaySettingsOpen}
       >
         <IconSettings size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
@@ -517,8 +521,8 @@ export function Toolbar({
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={onLoad}
         type="button"
-        data-tooltip="Load"
-        aria-label="Load"
+        data-tooltip={t("common.load")}
+        aria-label={t("common.load")}
       >
         <IconFolderOpen size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
@@ -526,8 +530,8 @@ export function Toolbar({
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={onSave}
         type="button"
-        data-tooltip="Save"
-        aria-label="Save"
+        data-tooltip={t("common.save")}
+        aria-label={t("common.save")}
       >
         <IconDeviceFloppy
           size={TOOLBAR_ICON_SIZE}

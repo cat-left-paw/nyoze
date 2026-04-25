@@ -14,6 +14,8 @@ import {
   IconScissors,
   IconTrash,
 } from "@tabler/icons-react";
+import type { UiLanguageMode } from "../../settings/types";
+import { createUiTextGetter } from "../i18n/uiText";
 import { getPathBaseName } from "../utils/path";
 import {
   getExplorerFileIconKind,
@@ -22,6 +24,7 @@ import {
 } from "../hooks/useFileExplorer";
 
 type FileExplorerPaneProps = {
+  uiLanguageMode: UiLanguageMode;
   fileExplorerDir: string | null;
   rootDirLoaded: boolean;
   visibleEntries: FileExplorerVisibleEntry[];
@@ -34,6 +37,8 @@ type FileExplorerPaneProps = {
     updatedAtText: string;
     pathText: string;
     pathTitle: string;
+    documentTypeLabel: string;
+    eolKind: "lf" | "crlf";
   };
   canPaste: boolean;
   openTabFilePaths: string[];
@@ -103,6 +108,7 @@ function ExplorerActionIconButton({
 }
 
 export function FileExplorerPane({
+  uiLanguageMode,
   fileExplorerDir,
   rootDirLoaded,
   visibleEntries,
@@ -127,6 +133,7 @@ export function FileExplorerPane({
   onPasteIntoSelection,
   onDismissError,
 }: FileExplorerPaneProps) {
+  const t = createUiTextGetter(uiLanguageMode);
   const [contextMenu, setContextMenu] =
     useState<ExplorerContextMenuState>(EMPTY_MENU_STATE);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
@@ -146,7 +153,7 @@ export function FileExplorerPane({
   );
   const explorerTitle = fileExplorerDir
     ? getPathBaseName(fileExplorerDir)
-    : "フォルダ未選択";
+    : t("explorer.loadFolder");
   const contextTargetEntry = contextMenu.entry;
   const effectiveTargetEntry = contextTargetEntry ?? selectedEntry;
   const canContextCutCopy = Boolean(
@@ -163,10 +170,10 @@ export function FileExplorerPane({
   const platform = window.nyozeBridge?.platform;
   const revealLabel =
     platform === "darwin"
-      ? "Reveal in Finder"
+      ? t("explorer.revealInFinder")
       : platform === "win32"
-        ? "Reveal in Explorer"
-        : "Reveal in File Manager";
+        ? t("explorer.revealInExplorer")
+        : t("explorer.revealInFileManager");
 
   const closeContextMenu = useCallback(() => {
     setContextMenu((prev) => {
@@ -345,7 +352,7 @@ export function FileExplorerPane({
         </span>
         <div className="pane-header-actions file-explorer-actions">
           <ExplorerActionIconButton
-            label="New Document"
+            label={t("explorer.newDocument")}
             icon={
               <IconFilePlus
                 size={EXPLORER_ACTION_ICON_SIZE}
@@ -356,7 +363,7 @@ export function FileExplorerPane({
             disabled={!fileExplorerDir || !rootDirLoaded}
           />
           <ExplorerActionIconButton
-            label="New Folder"
+            label={t("explorer.newFolder")}
             icon={
               <IconFolderPlus
                 size={EXPLORER_ACTION_ICON_SIZE}
@@ -455,13 +462,13 @@ export function FileExplorerPane({
 
             {visibleEntries.length === 0 && (
               <p className="pane-placeholder">
-                {rootDirLoaded ? "ファイルがありません" : "読み込み中…"}
+                {rootDirLoaded ? t("explorer.empty") : t("explorer.loading")}
               </p>
             )}
           </>
         ) : (
           <p className="pane-placeholder">
-            ツールバーの「Load」でフォルダを開いてください
+            {t("explorer.loadFolder", "helper")}
           </p>
         )}
       </div>
@@ -504,6 +511,24 @@ export function FileExplorerPane({
               </span>
             </div>
             <div className="file-explorer-doc-info-row">
+              <span className="file-explorer-doc-info-label">
+                {t("explorer.docInfo.type")}
+              </span>
+              <span className="file-explorer-doc-info-value">
+                {activeDocumentInfo.documentTypeLabel}
+              </span>
+            </div>
+            <div className="file-explorer-doc-info-row">
+              <span className="file-explorer-doc-info-label">
+                {t("explorer.docInfo.eol")}
+              </span>
+              <span className="file-explorer-doc-info-value">
+                {activeDocumentInfo.eolKind === "crlf"
+                  ? t("explorer.eol.crlf")
+                  : t("explorer.eol.lf")}
+              </span>
+            </div>
+            <div className="file-explorer-doc-info-row">
               <span className="file-explorer-doc-info-label">パス</span>
               <span
                 className="file-explorer-doc-info-value file-explorer-doc-info-path"
@@ -522,7 +547,7 @@ export function FileExplorerPane({
           className="file-explorer-context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           role="menu"
-          aria-label="File Explorer Menu"
+          aria-label={t("explorer.fileExplorerMenu")}
         >
           <button
             type="button"
@@ -531,7 +556,7 @@ export function FileExplorerPane({
             onClick={handleContextCreateNote}
           >
             <IconFilePlus size={14} stroke={2} />
-            New Document
+            {t("explorer.newDocument")}
           </button>
           <button
             type="button"
@@ -540,7 +565,7 @@ export function FileExplorerPane({
             onClick={handleContextCreateFolder}
           >
             <IconFolderPlus size={14} stroke={2} />
-            New Folder
+            {t("explorer.newFolder")}
           </button>
           <button
             type="button"
@@ -550,7 +575,7 @@ export function FileExplorerPane({
             disabled={!canContextOpenInNewTab}
           >
             <IconFileSymlink size={14} stroke={2} />
-            Open in New Tab
+            {t("common.openInNewTab")}
           </button>
           <div
             className="file-explorer-context-menu-separator"
@@ -564,7 +589,7 @@ export function FileExplorerPane({
             disabled={!canContextRename}
           >
             <IconPencil size={14} stroke={2} />
-            Rename
+            {t("common.rename")}
           </button>
           <button
             type="button"
@@ -574,7 +599,7 @@ export function FileExplorerPane({
             disabled={!canContextDelete}
           >
             <IconTrash size={14} stroke={2} />
-            Delete
+            {t("common.delete")}
           </button>
           <button
             type="button"
@@ -598,7 +623,7 @@ export function FileExplorerPane({
             disabled={!canContextCutCopy}
           >
             <IconScissors size={14} stroke={2} />
-            Cut
+            {t("common.cut")}
           </button>
           <button
             type="button"
@@ -608,7 +633,7 @@ export function FileExplorerPane({
             disabled={!canContextCutCopy}
           >
             <IconCopy size={14} stroke={2} />
-            Copy
+            {t("common.copy")}
           </button>
           <button
             type="button"
@@ -618,7 +643,7 @@ export function FileExplorerPane({
             disabled={!canPaste}
           >
             <IconClipboard size={14} stroke={2} />
-            Paste
+            {t("common.paste")}
           </button>
         </div>
       )}

@@ -102,6 +102,7 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 | Cut                   | 切り取り                      | 選択なし、IME中など             |
 | Copy                  | コピー                        | 選択なし、IME中など             |
 | Paste                 | 貼り付け                      | IME中など                       |
+| Paste as Plain Text   | `text/plain` のみで貼り付け（HTML を無視） | Paste と同じ（IME中など）       |
 | Select All            | 全選択                        | 文書空、IME中など               |
 | Bold                  | 選択範囲を太字にトグル        | 選択なし or IME中               |
 | Italic                | 選択範囲を斜体にトグル        | 選択なし or IME中               |
@@ -118,6 +119,9 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 | Clear Format          | 選択範囲の全マークを解除      | 選択なし or IME中               |
 
 **閉じ方**: Escape / メニュー外クリック / スクロール / リサイズ
+
+- **Paste**: クリップボードに意味のある rich HTML があるときはそのまま貼り付け、ブラウザ等が付与するだけの薄い HTML ラッパーのみのときは、プレーン文字列を Markdown として解釈する経路に寄せます（`Article` / `commonmark-strict` では単改行が段落分割されにくくなります）。
+- **Paste as Plain Text**: 常に `text/plain` だけを使います（`text/html` は無視）。Markdown 記法（例: `**太字**`）は従来どおり解釈されます。コードブロック内では Markdown 経路に入らないため、同じプレーンテキストを直接挿入します。クリップボードの読み取りに失敗した場合はインライン通知が表示されます。
 
 > Paragraph Plain / Source Mode 中は右クリックメニューは表示されません。
 
@@ -146,15 +150,16 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 
 #### 装飾・編集
 
-| キー                   | 機能                                           |
-| ---------------------- | ---------------------------------------------- |
-| `Cmd/Ctrl + B`         | 太字                                           |
-| `Cmd/Ctrl + I`         | 斜体                                           |
-| `Cmd/Ctrl + Shift + X` | 取り消し線                                     |
-| `Cmd/Ctrl + K`         | リンク設定                                     |
-| `Cmd/Ctrl + Shift + C` | 書式クリア（選択範囲の全インライン装飾を解除） |
-| `Cmd/Ctrl + Z`         | Undo                                           |
-| `Cmd/Ctrl + Shift + Z` | Redo                                           |
+| キー                        | 機能                                           |
+| --------------------------- | ---------------------------------------------- |
+| `Cmd/Ctrl + B`              | 太字                                           |
+| `Cmd/Ctrl + I`              | 斜体                                           |
+| `Cmd/Ctrl + Shift + X`      | 取り消し線                                     |
+| `Cmd/Ctrl + K`              | リンク設定                                     |
+| `Cmd/Ctrl + Alt/Option + R` | ルビ / 傍点ダイアログを開く                    |
+| `Cmd/Ctrl + Shift + C`      | 書式クリア（選択範囲の全インライン装飾を解除） |
+| `Cmd/Ctrl + Z`              | Undo                                           |
+| `Cmd/Ctrl + Shift + Z`      | Redo                                           |
 
 #### 見出し
 
@@ -173,11 +178,22 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 
 #### アウトライン・折りたたみ
 
-| キー                   | 機能                                    |
-| ---------------------- | --------------------------------------- |
-| `Cmd/Ctrl + Shift + [` | 前の見出しへジャンプ                    |
-| `Cmd/Ctrl + Shift + ]` | 次の見出しへジャンプ                    |
-| `Cmd/Ctrl + Shift + .` | 現在の見出しを折りたたみ/展開（トグル） |
+| キー                   | 機能                                                       |
+| ---------------------- | ---------------------------------------------------------- |
+| `Cmd/Ctrl + Shift + ,` | 横書き: 前の見出し／縦書き: 次の見出し（視覚方向に合わせる） |
+| `Cmd/Ctrl + Shift + .` | 横書き: 次の見出し／縦書き: 前の見出し（視覚方向に合わせる） |
+| `Cmd/Ctrl + Shift + L` | 現在の見出しを折りたたみ/展開（トグル）                     |
+
+> **注**: 縦書きでは `,` / `.` の視覚的な向きに合わせて `前` / `次` の意味が入れ替わります。キー判定は `event.code` ベース（`Comma` / `Period` / `KeyL`）なので、日本語配列や Shift 合成で `<` / `>` に化ける環境でも安定します。fold に `L` を当てているのは、以前採用していた `Cmd/Ctrl+Shift+/` が macOS の Help 検索と衝突して実用にならなかったためです。
+
+#### ペイン開閉
+
+| キー                        | 機能                                  |
+| --------------------------- | ------------------------------------- |
+| `Cmd/Ctrl + Alt/Option + ,` | 左ペイン（File Explorer）の開閉       |
+| `Cmd/Ctrl + Alt/Option + .` | 右ペイン（Outline / Document 等）の開閉 |
+
+> **注**: ペイン開閉は編集コマンドではないので、`Paragraph Plain` / `Source Mode` 中でも利用できます。判定は `event.code` ベース（`Comma` / `Period`）です。`,` / `.` は見出しナビ（`Cmd/Ctrl+Shift+,` / `.`）とも近いため、ペイン開閉は `Alt/Option` 併用で区別します（Shift を押さないで `Alt/Option` だけ押す）。以前採用していた `Cmd/Ctrl+Alt+[` / `]` は、日本語配列で実機 `Cmd+Alt+[` が成立しないケースが多かったため廃止しました。
 
 #### リスト移動
 
@@ -328,6 +344,67 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 - Source Mode は `writingMode` に関わらず **横書き固定** です。
 - Source Mode 有効中は、ツールバーの **`Paragraph Plain`** ボタンは無効（グレーアウト）になります。
 
+### Source Mode で空行が意味を変える場面
+
+Source Mode は raw Markdown を直接編集するため、WYSIWYG では自動的に保たれる block 境界も、自分で Markdown ルールどおりに書く必要があります。
+特に次のケースでは、空行の有無で構造が変わります。
+
+#### 1. 通常段落を次の通常段落へ分ける
+
+空行がないと、次の行は同じ paragraph の続きです。
+
+```md
+1段落目
+
+2段落目
+```
+
+#### 2. リストの外に戻って通常段落を続ける
+
+空行がないと、次の行は「リストの次の段落」ではなく、同じ list item の continuation として解釈されます。
+
+```md
+- 箇条書き項目
+
+通常段落
+```
+
+#### 3. 同じ list item の中で段落を分ける
+
+同じ list item の中で 2 段落にしたい場合は、空行に加えて継続段落としてのインデントが必要です。
+
+```md
+- 1段落目
+
+  2段落目
+```
+
+#### 4. blockquote の外に戻って通常段落を続ける
+
+空行がないと、次の行は blockquote の lazy continuation として解釈されることがあります。
+
+```md
+> 引用です。
+
+通常段落です。
+```
+
+#### 5. 同じ blockquote の中で段落を分ける
+
+blockquote 内で段落を分けるときは、空行を入れつつ `>` を維持します。
+
+```md
+> 1段落目
+>
+> 2段落目
+```
+
+#### 実用上の目安
+
+- major block（通常段落 / list / blockquote）を切り替えるときは、迷ったら 1 行空けるのが安全です。
+- Source Mode では CommonMark の解釈がそのまま効くため、空行を削ると見た目どおりの block 構造にならないことがあります。
+- 特に `list -> 通常 paragraph` と `blockquote -> 通常 paragraph` は、空行なしだと意図と違う構造になりやすい代表例です。
+
 ---
 
 ## マウスホイール・スクロール
@@ -352,14 +429,19 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 
 ### 基本設定
 
-| 設定項目          | 説明                                                     | 既定値      |
-| ----------------- | -------------------------------------------------------- | ----------- |
-| フォントサイズ    | 本文の文字サイズ                                         | `20px`      |
-| 行間              | 本文の行間                                               | `1.9`       |
-| `auto TCY`        | 縦書き通常編集で、短い英数字を表示上だけ縦中横にする     | `OFF`       |
-| `auto TCY 対象`   | 英字混じりを除外し、数字だけを自動 TCY 対象にする        | `OFF`       |
-| 最小桁数          | 自動 TCY の対象にする最小桁数                            | `2`         |
-| 最大桁数          | 自動 TCY の対象にする最大桁数                            | `4`         |
+| 設定項目       | 説明             | 既定値 |
+| -------------- | ---------------- | ------ |
+| フォントサイズ | 本文の文字サイズ | `20px` |
+| 行間           | 本文の行間       | `1.9`  |
+
+### TCY
+
+| 設定項目        | 説明                                                 | 既定値 |
+| --------------- | ---------------------------------------------------- | ------ |
+| `auto TCY`      | 縦書き通常編集で、短い英数字を表示上だけ縦中横にする | `OFF`  |
+| `auto TCY 対象` | 英字混じりを除外し、数字だけを自動 TCY 対象にする    | `OFF`  |
+| 最小桁数        | 自動 TCY の対象にする最小桁数                        | `2`    |
+| 最大桁数        | 自動 TCY の対象にする最大桁数                        | `4`    |
 
 ### フォント
 
@@ -406,13 +488,16 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 
 ### UIテーマ
 
-| 設定項目       | 説明                                                     | 既定値     |
-| -------------- | -------------------------------------------------------- | ---------- |
-| 選択           | アプリ全体の配色テーマを切り替える                       | `Greige`   |
-| UIフォント     | UI の書体を切り替える                                    | `ゴシック体` |
-| UI文字色       | UI 文字色をテーマ色から個別に上書きできる               | テーマ色    |
-| UI文字サイズ倍率 | UI 全体の文字サイズ倍率                                | `1.00x`    |
-| テーマ管理     | UI テーマプリセットの作成・編集画面を開く               | —          |
+| 設定項目         | 説明                                                       | 既定値       |
+| ---------------- | ---------------------------------------------------------- | ------------ |
+| UI言語           | `ja` / `en` / `mixed` の表示モードを切り替える            | `mixed`      |
+| 選択             | アプリ全体の配色テーマを切り替える                         | `Greige`     |
+| UIフォント       | UI の書体を切り替える                                      | `ゴシック体` |
+| UI文字色         | UI 文字色をテーマ色から個別に上書きできる                 | テーマ色     |
+| UI文字サイズ倍率 | UI 全体の文字サイズ倍率                                    | `1.00x`      |
+| テーマ管理       | UI テーマプリセットの作成・編集画面を開く                 | —            |
+
+`mixed` は short label や tooltip を英語、helper や説明文を日本語へ寄せる stage1 モードです。現時点では主要 visible label を中心に適用しています。
 
 ### ツールバー
 
@@ -468,6 +553,10 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 | `未設定`      | 標準の執筆設定を使います                                |
 
 Document Settings で Document Type を保存すると、通常は frontmatter に `documentType: novel` または `documentType: article` が書かれます。`未設定` は Nyoze 管理の Document Type key なしが canonical です。
+
+`Article` では既定で `commonmark-strict` の canonical 動作を使います。連続空行を空段落として保持したい場合は、**Document Settings** の **Paragraph Spacing → Preserve empty paragraphs** を ON にすると、frontmatter に `nyozePreserveEmptyParagraphs: true` が保存されます。OFF は key なしが canonical です。
+
+既存の Article 文書に frontmatter key がなくても、source 上に今回の初期スコープで保持対象となる追加空行があれば、load 時に自動保護されます。これは runtime 上の effective 状態であり、frontmatter へは勝手に書き込みません。Document Settings ではチェック済みで表示され、必要なら OFF で strict canonical へ戻すか、**Save as document setting** で explicit ON にできます。
 
 既存文書に `nyozeType: novel` / `nyozeType: article` がある場合は読み取り互換として扱い、明示保存時には可能な範囲で `documentType` へ寄せます。`documentType` が配列・object・複数行 scalar・未定義の独自値などユーザー管理の値として使われている場合は、その値を保持したまま Nyoze 用 fallback として `nyozeType` を使います。`type` は scalar の `novel` / `article` / `note` だけを既存互換として読み、Document Settings から新規書き込み・上書き・削除はしません。
 
@@ -670,7 +759,7 @@ co_authors:
 
 - フロントマターが存在しない場合、または上記フィールドがすべて空の場合は何も表示されません。
 - フロントマターはエディタの SoT（ProseMirror ドキュメント）とは独立して保存され、保存 / 読み込み時も改変されません。
-- beta ではフロントマターの一般編集 UI はありません。ただし右ペイン **Document Settings** から `Document Type` / `title` / `author` / `translator` の限定編集だけができます。
+- beta ではフロントマターの一般編集 UI はありません。ただし右ペイン **Document Settings** から `Document Type` / `title` / `author` / `translator` と、Article 用の `nyozePreserveEmptyParagraphs` の限定編集だけができます。
 - 上記以外のフロントマターフィールドは表示には使われません。
 
 ### Document Settings（限定編集UI）
@@ -678,11 +767,16 @@ co_authors:
 右ペインの **Document** タブには **Document Settings** があり、次の項目だけを GUI で編集できます。
 
 - `Document Type`（`Novel` / `Article` / `未設定`）
+- `Paragraph Spacing > Preserve empty paragraphs`（Article のときだけ）
 - `title`
 - `author`
 - `translator`
 
 Document Type は通常 `documentType` に保存されます。`未設定` は Nyoze 管理 key なしが canonical です。既存文書に `documentType: note` / `nyozeType: note` / `type: note` があっても、UI 上は `未設定` として扱われます。
+
+`Paragraph Spacing > Preserve empty paragraphs` は `Document Type = Article` のときだけ表示されます。ON では `nyozePreserveEmptyParagraphs: true` が保存され、top-level の通常段落 / 見出し間の追加空行を空段落として保持します。単改行の意味は変わらず、list / blockquote / code block 周辺や leading / trailing blank lines の完全保持は beta の初期スコープ外です。
+
+frontmatter key がない既存 Article 文書でも、source 内容から追加空行保持が必要と判定された場合は、自動保護として同じチェックが ON で表示されます。これは frontmatter の explicit ON とは別で、開いただけ / そのまま保存しただけでは空段落を落とさないための保護です。必要なら OFF で即時 canonical 化でき、明示的に保持設定を残したい場合は **Save as document setting** を使います。
 
 `documentType` が配列・object・複数行 scalar・独自 scalar として使われている場合、Nyoze はその値をユーザー管理値として扱い、Document Settings の保存では `documentType` を触らず `nyozeType` に fallback します。`type` は既存互換の scalar 読み取りだけで、保存時にも削除しません。
 
@@ -767,6 +861,10 @@ beta で完全保持しない代表例:
 - softbreak / hardbreak / `<br>` / two-space hardbreak の表記差分
 - mixed EOL、BOM、複数 encoding
 
+日本語の引用符つき強調については、`**「文学的な気分」**や**「情緒」**` のような単一装飾の隣接ペアは beta.1 時点で reopen / round-trip が安定するよう改善されています。
+
+ただし、`***「文学的な気分」***や***「情緒」***` や `**~~A~~**や**~~B~~**` のように複合装飾が隣接するケースは、beta ではまだ delimiter の移動や正規化崩れが起きることがあります。こうした原稿は、保存前にバックアップを取るか、beta では読み取り確認に留めるのが安全です。
+
 これらを含む文書では、保存前に別途バックアップを取るか、Nyoze beta では読み取り確認に留めてください。未対応構文をそのまま保持する仕組み、Source Mode の raw save、mixed EOL / BOM / 複数 encoding の完全な保存往復は post-beta 対象です。
 
 ### 保存前バックアップ
@@ -841,10 +939,11 @@ beta で完全保持しない代表例:
 ## beta 版の既知制限
 
 - 正式なファイル / フォルダ読み込み導線は `Load` です。drag and drop、`Open With`、`.md` の OS 全体関連付けは未対応です。
-- Linux 向け公式パッケージは beta 初回では提供していません。公開ソースからの `npm install` / `npm run dev` / `npm run build` は試せますが、実機検証は未実施です。
-- frontmatter の一般編集 UI はありません。GUI で編集できるのは Document Settings の `Document Type` / `title` / `author` / `translator` だけです。
+- Linux 向け公式パッケージは現時点の beta では提供していません。公開ソースからの `npm install` / `npm run dev` / `npm run build` は試せますが、実機検証は未実施です。
+- frontmatter の一般編集 UI はありません。GUI で編集できるのは Document Settings の `Document Type` / `Paragraph Spacing > Preserve empty paragraphs`（Article のときだけ）/ `title` / `author` / `translator` だけです。
 - `Source Mode` は beta では raw save 専用導線ではありません。Apply / Save 時に Nyoze の Markdown 表現へ正規化される場合があります。
 - 開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。GFM table、reference-style link、footnote、definition list、複雑な list / blockquote / code fence 表記などは保存時に正規化される場合があります。詳しくは [Markdown 保存時の正規化](#markdown-保存時の正規化) を参照してください。
+- 日本語引用符つき強調のうち、`**A**や**B**` / `*A*や*B*` / `~~A~~や~~B~~` のような単一装飾の隣接は改善済みですが、`***A***や***B***` や `**~~A~~**や**~~B~~**` のような複合装飾が隣接する場合は、beta では reopen / 保存後に表記が崩れることがあります。
 - WYSIWYG の code block シンタックスハイライトは表示のみです。言語未指定・未対応言語では自動判定せずプレーン表示になります。
 - 通常編集上の文書内リンクは `Cmd/Ctrl + Click` で外部ブラウザに開けます。通常クリックでは開きません。開けるのは `https://` の認証情報なし絶対 URL のみです。
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります。

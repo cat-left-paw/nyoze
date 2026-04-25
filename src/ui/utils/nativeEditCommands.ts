@@ -26,9 +26,16 @@ function resolvePasteTarget(): HTMLElement | null {
   return anchor.parentElement
 }
 
-function dispatchSyntheticPaste(payload: ClipboardPayload): boolean {
+type SyntheticPasteDispatch = {
+  /** Event reached a target and was dispatched (no throw). */
+  dispatched: boolean
+  /** True when a listener called `preventDefault()` (paste was consumed). */
+  defaultWasPrevented: boolean
+}
+
+function dispatchSyntheticPasteEvent(payload: ClipboardPayload): SyntheticPasteDispatch {
   const target = resolvePasteTarget()
-  if (!target) return false
+  if (!target) return { dispatched: false, defaultWasPrevented: false }
   try {
     const data = new DataTransfer()
     if (payload.html) {
@@ -42,11 +49,16 @@ function dispatchSyntheticPaste(payload: ClipboardPayload): boolean {
       cancelable: true,
       clipboardData: data,
     })
-    target.dispatchEvent(event)
-    return true
+    // false === preventDefault was invoked (event was cancelled / handled)
+    const defaultActionAllowed = target.dispatchEvent(event)
+    return { dispatched: true, defaultWasPrevented: !defaultActionAllowed }
   } catch {
-    return false
+    return { dispatched: false, defaultWasPrevented: false }
   }
+}
+
+function dispatchSyntheticPaste(payload: ClipboardPayload): boolean {
+  return dispatchSyntheticPasteEvent(payload).dispatched
 }
 
 async function readClipboardPayload(): Promise<ClipboardPayload | null> {
@@ -108,4 +120,21 @@ export async function pasteFromClipboard(): Promise<void> {
   if (payload.text) {
     runExecCommand('insertText', normalizeClipboardText(payload.text))
   }
+}
+
+export type PastePlainOnlyResult =
+  | { ok: true }
+  | { ok: false; reason: 'clipboard_unavailable' | 'empty_text' }
+
+/** Paste using `text/plain` only so the editor Markdown/plain path runs (no `text/html`). */
+export async function pasteFromClipboardPlainOnly(): Promise<PastePlainOnlyResult> {
+  const payload = await readClipboardPayload()
+  if (!payload) return { ok: false, reason: 'clipboard_unavailable' }
+  if (!payload.text) return { ok: false, reason: 'empty_text' }
+  const plain = normalizeClipboardText(payload.text)
+  const { defaultWasPrevented } = dispatchSyntheticPasteEvent({ html: null, text: plain })
+  if (!defaultWasPrevented) {
+    runExecCommand('insertText', plain)
+  }
+  return { ok: true }
 }
