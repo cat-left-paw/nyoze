@@ -1,6 +1,7 @@
 # Nyoze Beta
 
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
+Published by Left Paw Studio.
 
 - 小説やエッセイを縦書きでそのまま書けます
 - Markdown 形式で保存されますが、普通のテキストとして扱えます
@@ -51,7 +52,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - 青空文庫形式のルビ、傍点への対応
 - ルビ表示 / 非表示の切り替え
 - WYSIWYG コードブロックの表示専用シンタックスハイライト、言語ラベル、本文コピー
-- `Paragraph Plain` による段落単位の Markdown ソース編集（その段落だけをテキストとして直接編集できます）
+- `Paragraph Plain` による段落単位の Markdown ソース編集（その段落だけをテキストとして直接編集できます。単一ブロックなら見出し・リスト・引用などの Markdown 記法も通常表示へ反映されます）
 - `Source Mode` による全文 Markdown ソース編集（文書全体をテキストとして編集できます）
 - 検索 / 置換
 - ローカル画像参照付き Markdown の表示
@@ -67,7 +68,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - アウトラインパネル上での見出しプレビュー
 - リスト（箇条書きリスト、番号付きリスト、チェックリスト）のアウトライナー的な操作
 - 豊富なテーマ切り替え
-- GUI での簡単なテーマ編集と表示設定の調整
+- GUI での簡単なテーマ編集と表示設定の調整（テーマ選択メニューには色の目安となる 2 色プレビューが表示されます）
 - ファイル保存、再読込、外部編集競合の最小保護
 
 ## 今後対応予定のもの
@@ -77,6 +78,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - OS からの drag and drop による文書読み込み
 - frontmatter の一般編集 UI
 - epub / pdf / 印刷 などへの出力
+- Windows の Microsoft Store / MSIX 配布
 - テーブルや数式への対応
 - ページレイアウト編集
 - 書籍モード
@@ -144,10 +146,11 @@ beta 版で配布対象として扱うのは次の環境です。
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
   - Intel Mac 用 DMG（`x64`）
-- Windows: zip 配布（展開後に `README.txt` を確認し、`Nyoze.exe` を起動）
+- Windows: 現行 beta では GitHub Releases の zip 配布（展開後に `README.txt` を確認し、`Nyoze.exe` を起動）
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
+Windows は `0.2.0-beta` 以降で Microsoft Store / MSIX を推奨導線にする準備中です。Store 版が公開されるまでは GitHub Releases の zip を使ってください。Store 版の公開後も、GitHub zip は代替配布として残す方針です。
 
 macOS 版は 2 種類あります。
 
@@ -160,7 +163,7 @@ Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run
 
 ## ダウンロード
 
-beta 版は **GitHub Releases の配布物をダウンロードして使う** 想定です。  
+現行 beta 版は **GitHub Releases の配布物をダウンロードして使う** 想定です。
 通常の利用では、ソースコードからのビルドは不要です。
 
 想定している導線:
@@ -168,7 +171,9 @@ beta 版は **GitHub Releases の配布物をダウンロードして使う** �
 - macOS:
   - Apple Silicon Mac: `arm64` の DMG をダウンロードして起動
   - Intel Mac: `x64` の DMG をダウンロードして起動
-- Windows: zip をダウンロードして展開し、同梱の `README.txt` を確認して `Nyoze.exe` を起動
+- Windows: 現時点では zip をダウンロードして展開し、同梱の `README.txt` を確認して `Nyoze.exe` を起動
+
+Windows では、今後 Microsoft Store 版が公開された場合は Store 版を推奨導線にします。GitHub zip は、Store を使えない環境や検証用の代替配布として継続する予定です。
 
 補足:
 
@@ -238,10 +243,17 @@ npm run package:mac:arm64
 npm run package:mac:x64
 ```
 
-配布物は `release/<version>/` に出力されます。現時点の beta では公式配布物は macOS DMG と Windows zip を対象とし、Linux 向け公式パッケージはまだ提供していません。`npm run package` は通常、その実行環境に対応する 1 つの macOS DMG を作ります。macOS DMG は arch を含む名前で出力されます。
+Windows の `x64` zip を明示的に作る場合:
+
+```bash
+npm run package:win:x64
+```
+
+配布物は `release/<version>/` に出力されます。現時点の beta では公式配布物は macOS DMG と Windows zip を対象とし、Linux 向け公式パッケージはまだ提供していません。`npm run package` は通常、その実行環境に対応する 1 つの配布物を作ります。macOS DMG は arch を含む名前で出力されます。Windows zip は、展開時にファイルが散らからないよう `Nyoze-Windows-<version>-x64/` フォルダを含む形で作成します。
 
 - `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - `Nyoze-Mac-<version>-x64-Installer.dmg`
+- `Nyoze-Windows-<version>-x64.zip`
 
 ## 既知の制限
 
@@ -256,6 +268,8 @@ npm run package:mac:x64
 - コードブロックのシンタックスハイライトは WYSIWYG 表示のみです。言語未指定・未対応言語では自動判定せず、プレーン表示になります
 - 文書内リンクは `Cmd/Ctrl + Click` で外部ページへ移動できます。通常クリックでは開きません
 - `Cmd/Ctrl + Click` で開ける文書内リンクは、`https://` の認証情報なし絶対 URL のみです。`http://`、`mailto:`、`tel:`、相対リンク、文書内アンカーは通常編集上の外部オープン対象ではありません
+- ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目で入力が進まない状態になることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
+- 縦書きでルビ直後に句読点が続き、行頭 / 行末の境界にかかる場合、Chromium 系では句読点が行頭側に表示されることがあります
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
 - 重く感じたときは、まずルビ表示をオフにする、`Paragraph Plain` を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
 - beta 版では、開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります
@@ -268,6 +282,7 @@ npm run package:mac:x64
 
 - 操作マニュアル: [MANUAL.md](./MANUAL.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
+- プライバシーポリシー: [PRIVACY.md](./PRIVACY.md)
 - 更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - beta リリースノート: [RELEASE_NOTES.md](./RELEASE_NOTES.md)
 

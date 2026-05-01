@@ -78,7 +78,9 @@ const APP_DISPLAY_NAME = "Nyoze";
 const APP_DESCRIPTION = "Vertical writing Markdown editor for Japanese writing";
 const APP_AUTHOR = "Nyoze Project";
 const APP_COPYRIGHT = `Copyright © ${new Date().getFullYear()} ${APP_AUTHOR}`;
+const APP_ID = "com.nyoze.editor";
 const APP_ICON_PNG_PATH = path.join(process.env.APP_ROOT, "build", "icons", "icon.png");
+const APP_ICON_ICO_PATH = path.join(process.env.APP_ROOT, "build", "icons", "icon.ico");
 
 // userData パスを app.getPath("userData") より先に確定させる。
 // 非パッケージ実行では app.getName() が "Electron" のままになるため、
@@ -104,6 +106,9 @@ const userDataPath = app.getPath("userData");
 
 // アプリ表示名を設定する (macOS メニューバー等に反映)。
 app.setName(APP_DISPLAY_NAME);
+if (process.platform === "win32") {
+  app.setAppUserModelId(APP_ID);
+}
 
 const UPDATE_CHECK_URL =
   "https://raw.githubusercontent.com/cat-left-paw/nyoze/main/latest.json";
@@ -151,6 +156,9 @@ let win: InstanceType<typeof BrowserWindow> | null;
 // Set via IPC from the renderer before each loadMarkdown call.
 // Used by the nyoze-img:// protocol handler instead of trusting renderer-provided dir.
 let activeDocumentDir: string | undefined;
+// Validated absolute path of the currently active file (null when unsaved/untitled).
+// Used to locate the per-file backup directory from the File menu.
+let activeDocumentFilePath: string | null = null;
 const dirtyStateByWebContentsId = new Map<number, boolean>();
 const forceCloseWindowIds = new Set<number>();
 const pendingSaveBeforeCloseRequests = new Map<number, (ok: boolean) => void>();
@@ -268,6 +276,10 @@ function createWindow() {
   const isMac = process.platform === "darwin";
   const usesOverlayNativeControls =
     process.platform === "win32" || process.platform === "linux";
+  const windowIconPath =
+    process.platform === "win32"
+      ? APP_ICON_ICO_PATH
+      : APP_ICON_PNG_PATH;
 
   const currentWindow = new BrowserWindow({
     width: 1400,
@@ -294,7 +306,7 @@ function createWindow() {
         : { frame: false }),
     minimizable: true,
     closable: true,
-    icon: path.join(process.env.VITE_PUBLIC, "nyoze-icon.png"),
+    icon: windowIconPath,
     backgroundColor: "#f4f1e7",
     title: APP_DISPLAY_NAME,
     webPreferences: {
@@ -557,6 +569,63 @@ async function openBackupFolder(
   }
 }
 
+function updateFileBackupMenuItemEnabled(enabled: boolean): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById("open-file-backup");
+  if (item) item.enabled = enabled;
+}
+
+async function openFileBackupFolder(
+  targetWindow?: Electron.BaseWindow | null,
+): Promise<void> {
+  const filePath = activeDocumentFilePath;
+  if (!filePath) return;
+
+  const backupDirPath = getBackupDirectoryPathForFile(filePath);
+  // SEC-8: verify backup directory stays within the backups root.
+  if (!isWithinDirectory(backupDirPath, backupsRootPath)) return;
+
+  let dirExists: boolean;
+  try {
+    const stat = await fs.promises.stat(backupDirPath);
+    dirExists = stat.isDirectory();
+  } catch {
+    dirExists = false;
+  }
+
+  if (!dirExists) {
+    const options: Electron.MessageBoxOptions = {
+      type: "info",
+      title: "バックアップなし",
+      message: "このファイルのバックアップはまだありません。",
+      detail: "このファイルへの上書き保存が行われると、バックアップが自動作成されます。",
+    };
+    const dialogWindow = resolveDialogWindow(targetWindow);
+    if (dialogWindow) {
+      await dialog.showMessageBox(dialogWindow, options);
+    } else {
+      await dialog.showMessageBox(options);
+    }
+    return;
+  }
+
+  const openError = await shell.openPath(backupDirPath);
+  if (!openError) return;
+  // SEC-8: openError may contain absolute paths from the OS; log only a generic notice.
+  console.warn("[Nyoze] failed to open file backup folder (shell.openPath returned error)");
+  const errOptions: Electron.MessageBoxOptions = {
+    type: "warning",
+    title: "バックアップフォルダを開けませんでした",
+    message: "このファイルのバックアップフォルダを開けませんでした。",
+    detail: openError,
+  };
+  const dialogWindow = resolveDialogWindow(targetWindow);
+  if (dialogWindow) {
+    await dialog.showMessageBox(dialogWindow, errOptions);
+  } else {
+    await dialog.showMessageBox(errOptions);
+  }
+}
+
 function requestSaveBeforeClose(
   targetWindow: InstanceType<typeof BrowserWindow>,
 ): Promise<boolean> {
@@ -598,11 +667,15 @@ ipcMain.on("document:setActiveFilePath", (event, rawPath: unknown): void => {
   const filePath = typeof rawPath === "string" ? validatePathArg(rawPath) : null;
   if (!filePath) {
     activeDocumentDir = undefined;
+    activeDocumentFilePath = null;
+    updateFileBackupMenuItemEnabled(false);
     return;
   }
   activeDocumentDir =
     resolveActiveDocumentDir(filePath, activeWorkspaceRoot, allowedDocumentPaths) ??
     undefined;
+  activeDocumentFilePath = filePath;
+  updateFileBackupMenuItemEnabled(true);
 });
 
 ipcMain.on(
@@ -1464,6 +1537,14 @@ function buildAppMenuTemplate(
         void openBackupFolder(focusedWindow);
       },
     },
+    {
+      id: "open-file-backup",
+      label: t("menu.openFileBackupFolder"),
+      enabled: activeDocumentFilePath !== null,
+      click: (_item, focusedWindow) => {
+        void openFileBackupFolder(focusedWindow);
+      },
+    },
   ];
 
   if (!isMacPlatform) {
@@ -1627,6 +1708,20 @@ ipcMain.handle("menu:openAppMenu", (event, uiLanguageMode: unknown) => {
   );
   menu.popup({ window: targetWindow });
 });
+
+// Single-instance lock: if another Nyoze process is already running, bring it
+// to the front and exit this new process. This runs before whenReady() so the
+// second process never creates a window.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

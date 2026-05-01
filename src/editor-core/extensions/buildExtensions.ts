@@ -14,6 +14,7 @@ import { NyozeImage } from '../schema/nyozeImage'
 import { AutoTcyDecoration } from './autoTcyDecoration'
 import { HeadingFold } from './headingFold'
 import { SearchHighlight } from './searchHighlight'
+import { SpecialInlineBoundarySentinel } from './specialInlineBoundarySentinel'
 
 export const DEFAULT_EDITOR_CONTENT = `
   <p></p>
@@ -105,6 +106,7 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
     HtmlBlockAtom,
     AozoraRuby,
     AozoraTcy,
+    SpecialInlineBoundarySentinel,
     options?.autoTcy ? AutoTcyDecoration.configure(options.autoTcy) : AutoTcyDecoration,
     HeadingFold,
     SearchHighlight,

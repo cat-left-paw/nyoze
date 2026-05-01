@@ -1,5 +1,5 @@
 import { Editor } from '@tiptap/core'
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
+import { Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state'
 import type { EditorState } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view'
@@ -11,6 +11,7 @@ import type {
 import {
   findActiveBlockPos,
   isParagraphPlainTargetType,
+  parseParagraphPlainExitReplacementContent,
   parseReplacementNode,
   resolveBlockElementAtPos,
   serializeBlockNode,
@@ -67,6 +68,7 @@ type ResolveSplitBeforeNodeParams = {
   currentNode: PMNode
   beforeText: string
   lineBreakPolicy: LineBreakPolicy
+  allowMarkdownBlockReparse?: boolean
 }
 
 export function computeOverlayReservedBlockSize(params: {
@@ -170,9 +172,20 @@ export function resolveParagraphPlainSplitBeforeNode({
   currentNode,
   beforeText,
   lineBreakPolicy,
+  allowMarkdownBlockReparse = false,
 }: ResolveSplitBeforeNodeParams): PMNode | null {
   const paragraphType = state.schema.nodes.paragraph
   if (!paragraphType) return null
+
+  if (allowMarkdownBlockReparse) {
+    const reparsed = parseParagraphPlainExitReplacementContent(
+      state,
+      beforeText,
+      typeName,
+      lineBreakPolicy,
+    )
+    if (reparsed) return reparsed
+  }
 
   const beforeDoc = parseMarkdown(state.schema, beforeText, lineBreakPolicy)
   if (beforeDoc.childCount === 1 && beforeDoc.child(0).type.name === typeName) {
@@ -771,14 +784,21 @@ export function createParagraphPlainModeController(
   function replaceBlockNodeInternal(
     markdown: string,
     context: ParagraphPlainContext,
-    options?: { preserveSelection?: boolean },
+    options?: { preserveSelection?: boolean; allowMarkdownBlockReparse?: boolean },
   ): boolean {
-    const nextNode = parseReplacementNode(
-      editor.state,
-      markdown,
-      context.typeName,
-      getLineBreakPolicy(),
-    )
+    const nextNode = options?.allowMarkdownBlockReparse
+      ? parseParagraphPlainExitReplacementContent(
+          editor.state,
+          markdown,
+          context.typeName,
+          getLineBreakPolicy(),
+        )
+      : parseReplacementNode(
+          editor.state,
+          markdown,
+          context.typeName,
+          getLineBreakPolicy(),
+        )
     if (!nextNode) {
       pushLog('sourceEdit', `replaceBlock rejected: parse failed for ${context.typeName}`)
       return false
@@ -790,9 +810,13 @@ export function createParagraphPlainModeController(
 
     const tr = editor.state.tr.replaceWith(from, to, nextNode)
     if (!options?.preserveSelection) {
+      // 置換結果が paragraph / heading とは限らない（list / blockquote / hr 等）。
+      // mappedFrom + 1 を生 TextSelection に渡すと bulletList などの非 textblock
+      // コンテナ内に endpoint が落ちて ProseMirror の invariant 違反になるため、
+      // Selection.near で最寄りの有効な selection に寄せる。
       const mappedFrom = tr.mapping.map(from)
-      const nextCursor = Math.max(1, Math.min(tr.doc.content.size, mappedFrom + 1))
-      tr.setSelection(TextSelection.create(tr.doc, nextCursor))
+      const safePos = Math.max(0, Math.min(tr.doc.content.size, mappedFrom + 1))
+      tr.setSelection(Selection.near(tr.doc.resolve(safePos), 1))
     }
     editor.view.dispatch(tr)
     pushLog('sourceEdit', `replaceBlock applied (${context.typeName})`)
@@ -801,7 +825,7 @@ export function createParagraphPlainModeController(
 
   function commitCurrentParagraphPlain(
     save: boolean,
-    options?: { preserveSelection?: boolean },
+    options?: { preserveSelection?: boolean; allowMarkdownBlockReparse?: boolean },
   ): boolean {
     if (!paragraphPlainCurrent) {
       paragraphPlainActivePos = null
@@ -924,7 +948,12 @@ export function createParagraphPlainModeController(
       return true
     }
 
-    const committed = commitCurrentParagraphPlain(true)
+    // Moving out of the current Paragraph Plain block should finalize that
+    // block the same way explicit disable does, so block Markdown markers do
+    // not remain literal when the overlay moves to the adjacent block.
+    const committed = commitCurrentParagraphPlain(true, {
+      allowMarkdownBlockReparse: true,
+    })
     if (!committed) return false
 
     const state = editor.state
@@ -975,6 +1004,7 @@ export function createParagraphPlainModeController(
       currentNode: node,
       beforeText,
       lineBreakPolicy: getLineBreakPolicy(),
+      allowMarkdownBlockReparse: true,
     })
     if (!beforeNode) return
 
@@ -1182,7 +1212,12 @@ export function createParagraphPlainModeController(
       return true
     }
 
-    const committed = commitCurrentParagraphPlain(true)
+    // Paragraph Plain 解除時は overlay の Markdown を block 記法として再解釈する。
+    // 通常 commit / 隣接 block 移動 / click target preserve からは
+    // allowMarkdownBlockReparse を渡さないので影響しない。
+    const committed = commitCurrentParagraphPlain(true, {
+      allowMarkdownBlockReparse: true,
+    })
     if (!committed) {
       // Never trap the editor in Paragraph Plain. If the current block markdown
       // is no longer representable, discard the in-overlay edits and exit.

@@ -28,13 +28,7 @@
         ]
       }
     ],
-    "artifactName": "${productName}-Windows-${version}-${arch}.${ext}",
-    "extraFiles": [
-      {
-        "from": "build/windows/README.txt",
-        "to": "."
-      }
-    ]
+    "artifactName": "${productName}-Windows-${version}-${arch}.${ext}"
   },
   "nsis": {
     "oneClick": false,

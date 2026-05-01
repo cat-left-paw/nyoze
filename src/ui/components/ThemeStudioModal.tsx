@@ -50,8 +50,15 @@ import {
   isSameUiPresetColors,
   isUiPresetDirty,
 } from "../themePresetPolicy";
-import { buildBundledUiPresetGroups } from "../utils/themePresetGrouping";
 import { DisplayNumberSlider } from "./DisplayNumberSlider";
+import { formatNativeSelectOptionLabel } from "../utils/nativeSelectOptionLabel";
+import { ThemeSwatchSelect } from "./ThemeSwatchSelect";
+import {
+  getDocumentPresetSwatches,
+  getDocumentThemeSwatches,
+  getUiPresetSwatches,
+} from "../utils/themeSwatchOptions";
+import type { ThemeSwatchOption } from "../utils/themeSwatchOptions";
 
 type StudioTab = "ui" | "doc";
 type PresetSort = "newest" | "oldest" | "name";
@@ -72,6 +79,8 @@ type ThemeStudioPanelProps = {
   currentDocHeadingFont: DocumentHeadingFont;
   displaySettings: DisplaySettings;
   registeredFonts: string[];
+  /** process.platform と同じ値（Electron） */
+  platform: string;
   onSetActiveUiThemePresetId: (id: string) => void;
   onSetActiveDocThemePresetId: (id: string) => void;
   onDetachActiveDocThemePreset: () => void;
@@ -254,6 +263,7 @@ export function ThemeStudioPanel({
   currentDocHeadingFont,
   displaySettings,
   registeredFonts,
+  platform,
   onSetActiveUiThemePresetId,
   onSetActiveDocThemePresetId,
   onDetachActiveDocThemePreset,
@@ -346,9 +356,9 @@ export function ThemeStudioPanel({
     () => uiSystemPresets.filter((p) => isBundledUiThemePreset(p)),
     [uiSystemPresets],
   );
-  const uiBundledPresetGroups = useMemo(
-    () => buildBundledUiPresetGroups(uiBundledPresets, t("common.curated")),
-    [uiBundledPresets, t],
+  const uiFlatSystemPresets = useMemo(
+    () => [...uiStandardPresets, ...uiBundledPresets],
+    [uiStandardPresets, uiBundledPresets],
   );
   const uiCustomPresets = useMemo(
     () => uiThemePresets.filter((p) => getUiPresetKind(p) === "custom"),
@@ -708,7 +718,13 @@ export function ThemeStudioPanel({
   const effectivePaneBg = uiColors.paneBg ?? autoPaneBg;
   const docPresetDirty =
     activeDocThemePresetId !== null &&
+    !(activeDocKind === "system" && activeDocPreset.baseDocTheme === "ui-linked") &&
     isDocPresetDirty(activeDocPreset, docColors);
+  const getDocPresetSelectSwatches = (preset: DocThemePreset): string[] =>
+    getDocPresetKind(preset) === "system" &&
+    preset.baseDocTheme === "ui-linked"
+      ? getDocumentThemeSwatches("ui-linked", currentUiTheme, activeUiPreset)
+      : getDocumentPresetSwatches(preset);
   const displayedDocFontPreset: DocumentFontPreset =
     currentDocFontPreset === "ui-linked" ? "mincho" : currentDocFontPreset;
   const renderDocPresetLabel = (preset: DocThemePreset): string =>
@@ -756,47 +772,51 @@ export function ThemeStudioPanel({
                 </div>
               </div>
               <div className="setting-item-control">
-                <select
-                  className="setting-select"
+                <ThemeSwatchSelect
+                  ariaLabel={t("themeStudio.preset")}
                   value={uiPresetSelectValue}
-                  onChange={(e) => {
-                    if (e.target.value === UI_DETACHED_PRESET_VALUE) return;
-                    onSetActiveUiThemePresetId(e.target.value);
+                  onChange={(next) => {
+                    if (next === UI_DETACHED_PRESET_VALUE) return;
+                    onSetActiveUiThemePresetId(next);
                   }}
-                >
-                  {!hasActiveUiPreset && (
-                    <option value={UI_DETACHED_PRESET_VALUE}>
-                      {t("themeStudio.currentNoPreset")}
-                    </option>
-                  )}
-                  {uiStandardPresets.length > 0 && (
-                    <optgroup label={t("common.standard")}>
-                      {uiStandardPresets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {renderUiPresetLabel(p)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {uiBundledPresetGroups.map((group) => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.presets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {renderUiPresetLabel(p)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                  {uiCustomPresets.length > 0 && (
-                    <optgroup label={t("common.custom")}>
-                      {sortUiPresets(uiCustomPresets, "name").map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {renderUiPresetLabel(p)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                  options={[
+                    ...(!hasActiveUiPreset
+                      ? [
+                          {
+                            value: UI_DETACHED_PRESET_VALUE,
+                            label: t("themeStudio.currentNoPreset"),
+                            swatches: [],
+                            kind: "system" as const,
+                          },
+                        ]
+                      : []),
+                    ...uiFlatSystemPresets.map(
+                      (p): ThemeSwatchOption => ({
+                        value: p.id,
+                        label: renderUiPresetLabel(p),
+                        swatches: getUiPresetSwatches(p),
+                        kind: "system",
+                      }),
+                    ),
+                  ]}
+                  groups={
+                    uiCustomPresets.length > 0
+                      ? [
+                          {
+                            label: t("common.custom"),
+                            options: sortUiPresets(uiCustomPresets, "name").map(
+                              (p): ThemeSwatchOption => ({
+                                value: p.id,
+                                label: renderUiPresetLabel(p),
+                                swatches: getUiPresetSwatches(p),
+                                kind: "custom",
+                              }),
+                            ),
+                          },
+                        ]
+                      : undefined
+                  }
+                />
               </div>
             </div>
 
@@ -919,7 +939,11 @@ export function ThemeStudioPanel({
                   >
                     {UI_THEME_VALUES.map((v) => (
                       <option key={v} value={v}>
-                        {THEME_LABELS[v]}
+                        {formatNativeSelectOptionLabel(
+                          THEME_LABELS[v],
+                          uiBaseTheme === v,
+                          platform,
+                        )}
                       </option>
                     ))}
                   </select>
@@ -1009,11 +1033,27 @@ export function ThemeStudioPanel({
                   value={currentUiFont}
                   onChange={(e) => onSetUiFont(e.target.value as UiFont)}
                 >
-                  <option value="mincho">{uiFontLabels.mincho}</option>
-                  <option value="gothic">{uiFontLabels.gothic}</option>
+                  <option value="mincho">
+                    {formatNativeSelectOptionLabel(
+                      uiFontLabels.mincho,
+                      currentUiFont === "mincho",
+                      platform,
+                    )}
+                  </option>
+                  <option value="gothic">
+                    {formatNativeSelectOptionLabel(
+                      uiFontLabels.gothic,
+                      currentUiFont === "gothic",
+                      platform,
+                    )}
+                  </option>
                   {uiCustomFonts.map((f) => (
                     <option key={f} value={`custom:${f}`}>
-                      {f}
+                      {formatNativeSelectOptionLabel(
+                        f,
+                        currentUiFont === `custom:${f}`,
+                        platform,
+                      )}
                     </option>
                   ))}
                 </select>
@@ -1108,47 +1148,54 @@ export function ThemeStudioPanel({
                 </div>
               </div>
               <div className="setting-item-control">
-                <select
-                  className="setting-select"
+                <ThemeSwatchSelect
+                  ariaLabel={t("themeStudio.preset")}
                   value={docPresetSelectValue}
-                  onChange={(e) => {
-                    if (e.target.value === DOC_DETACHED_PRESET_VALUE) return;
-                    onSetActiveDocThemePresetId(e.target.value);
+                  onChange={(next) => {
+                    if (next === DOC_DETACHED_PRESET_VALUE) return;
+                    onSetActiveDocThemePresetId(next);
                   }}
-                >
-                  {!hasActiveDocPreset && (
-                    <option value={DOC_DETACHED_PRESET_VALUE}>
-                      {detachedDocPresetLabel}
-                    </option>
-                  )}
-                  {docStandardPresets.length > 0 && (
-                    <optgroup label={t("common.standard")}>
-                      {docStandardPresets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {renderDocPresetLabel(p)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {docBundledPresets.length > 0 && (
-                    <optgroup label={t("common.curated")}>
-                      {docBundledPresets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {renderDocPresetLabel(p)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {docCustomPresets.length > 0 && (
-                    <optgroup label={t("common.custom")}>
-                      {sortDocPresets(docCustomPresets, "name").map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {renderDocPresetLabel(p)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                  options={[
+                    ...(!hasActiveDocPreset
+                      ? [
+                          {
+                            value: DOC_DETACHED_PRESET_VALUE,
+                            label: detachedDocPresetLabel,
+                            swatches: [],
+                            kind: "system" as const,
+                          },
+                        ]
+                      : []),
+                    ...[...docStandardPresets, ...docBundledPresets].map(
+                      (p): ThemeSwatchOption => ({
+                        value: p.id,
+                        label: renderDocPresetLabel(p),
+                        swatches: getDocPresetSelectSwatches(p),
+                        kind: "system",
+                      }),
+                    ),
+                  ]}
+                  groups={
+                    docCustomPresets.length > 0
+                      ? [
+                          {
+                            label: t("common.custom"),
+                            options: sortDocPresets(
+                              docCustomPresets,
+                              "name",
+                            ).map(
+                              (p): ThemeSwatchOption => ({
+                                value: p.id,
+                                label: renderDocPresetLabel(p),
+                                swatches: getDocPresetSelectSwatches(p),
+                                kind: "custom",
+                              }),
+                            ),
+                          },
+                        ]
+                      : undefined
+                  }
+                />
               </div>
             </div>
 
@@ -1295,17 +1342,33 @@ export function ThemeStudioPanel({
                 >
                   {(["mincho", "gothic"] as const).map((v) => (
                     <option key={v} value={v}>
-                      {uiFontLabels[v]}
+                      {formatNativeSelectOptionLabel(
+                        uiFontLabels[v],
+                        displayedDocFontPreset === v,
+                        platform,
+                      )}
                     </option>
                   ))}
                   {registeredFonts.map((font) => (
                     <option key={`doc-font-${font}`} value={`custom:${font}`}>
-                      {font}
+                      {formatNativeSelectOptionLabel(
+                        font,
+                        displayedDocFontPreset === `custom:${font}`,
+                        platform,
+                      )}
                     </option>
                   ))}
                   {!hasDocBodyCustomOption && docBodyCustomFontName && (
                     <option value={currentDocFontPreset}>
-                      {docBodyCustomFontName}
+                      {formatNativeSelectOptionLabel(
+                        docBodyCustomFontName,
+                        Boolean(
+                          docBodyCustomFontName !== null &&
+                            !hasDocBodyCustomOption &&
+                            currentDocFontPreset.startsWith("custom:"),
+                        ),
+                        platform,
+                      )}
                     </option>
                   )}
                 </select>
@@ -1329,7 +1392,11 @@ export function ThemeStudioPanel({
                 >
                   {(["same-as-body", "mincho", "gothic"] as const).map((v) => (
                     <option key={v} value={v}>
-                      {docHeadingFontLabels[v]}
+                      {formatNativeSelectOptionLabel(
+                        docHeadingFontLabels[v],
+                        currentDocHeadingFont === v,
+                        platform,
+                      )}
                     </option>
                   ))}
                   {registeredFonts.map((font) => (
@@ -1337,12 +1404,24 @@ export function ThemeStudioPanel({
                       key={`doc-heading-font-${font}`}
                       value={`custom:${font}`}
                     >
-                      {font}
+                      {formatNativeSelectOptionLabel(
+                        font,
+                        currentDocHeadingFont === `custom:${font}`,
+                        platform,
+                      )}
                     </option>
                   ))}
                   {!hasDocHeadingCustomOption && docHeadingCustomFontName && (
                     <option value={currentDocHeadingFont}>
-                      {docHeadingCustomFontName}
+                      {formatNativeSelectOptionLabel(
+                        docHeadingCustomFontName,
+                        Boolean(
+                          docHeadingCustomFontName !== null &&
+                            !hasDocHeadingCustomOption &&
+                            currentDocHeadingFont.startsWith("custom:"),
+                        ),
+                        platform,
+                      )}
                     </option>
                   )}
                 </select>

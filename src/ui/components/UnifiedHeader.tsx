@@ -51,7 +51,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { MouseEventHandler, ReactNode } from 'react'
+import type { MouseEventHandler, ReactNode, WheelEventHandler } from 'react'
 import type { CommandAvailability } from '../../editor-core/types'
 import type { DocumentType } from '../../editor-core/io/frontmatterDocumentSettings'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
@@ -65,6 +65,7 @@ import {
   formatDocumentTypeHeaderTooltip,
   formatDocumentTypeLabel,
 } from '../utils/documentTypePresentation'
+import { useWindowControlsOverlayReservation } from '../hooks/useWindowControlsOverlayReservation'
 
 const ICON_SIZE = 18
 const ICON_STROKE = 1.1
@@ -221,6 +222,11 @@ export function UnifiedHeader({
   const dragRef = useRef<{ startX: number; startOffset: number } | null>(null)
   const offsetRef = useRef(toolbarOffset)
   offsetRef.current = toolbarOffset
+  const windowControlsReservedWidth = useWindowControlsOverlayReservation({
+    headerRef,
+    platform,
+    usesNativeWindowControls,
+  })
   const plainModeKind = resolvePlainModeKind({
     paragraphPlainModeActive,
     fullPlainEditActive,
@@ -268,9 +274,14 @@ export function UnifiedHeader({
     const cur = offsetRef.current
     const wrapperLeftAt0 = wrapperRect.left - cur
     const wrapperRightAt0 = wrapperRect.right - cur
-    const min = leftBound - wrapperLeftAt0
-    const max = rightBound - wrapperRightAt0
-    return min <= max ? { min, max } : { min: 0, max: 0 }
+    const rawMinOffset = leftBound - wrapperLeftAt0
+    const rawMaxOffset = rightBound - wrapperRightAt0
+    // When the toolbar is wider than the gap, rawMinOffset > rawMaxOffset. Clamp range must still
+    // span panning from one alignment extreme to the other (swap so bounds.min <= bounds.max).
+    if (rawMinOffset <= rawMaxOffset) {
+      return { min: rawMinOffset, max: rawMaxOffset }
+    }
+    return { min: rawMaxOffset, max: rawMinOffset }
   }, [])
 
   const clampToolbarOffset = useCallback(() => {
@@ -316,7 +327,24 @@ export function UnifiedHeader({
       if (raf1) window.cancelAnimationFrame(raf1)
       if (raf2) window.cancelAnimationFrame(raf2)
     }
-  }, [clampToolbarOffset, toolbarVisible])
+  }, [clampToolbarOffset, toolbarVisible, windowControlsReservedWidth])
+
+  const handleToolbarCenterWheel: WheelEventHandler<HTMLDivElement> = useCallback(
+    (event) => {
+      if (!toolbarVisible || !wrapperRef.current) return
+      const bounds = computeOffsetBounds()
+      if (!bounds) return
+      const dominant =
+        Math.abs(event.deltaX) >= Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+      const cur = offsetRef.current
+      const next = Math.max(bounds.min, Math.min(bounds.max, cur + dominant))
+      if (next !== cur) {
+        event.preventDefault()
+        onToolbarOffsetChange(next)
+      }
+    },
+    [toolbarVisible, computeOffsetBounds, onToolbarOffsetChange],
+  )
 
   useEffect(() => {
     if (!headingMenuOpen) return
@@ -461,6 +489,7 @@ export function UnifiedHeader({
       <div
         ref={centerRef}
         className={`unified-header-center${toolbarVisible ? '' : ' collapsed'}`}
+        onWheel={handleToolbarCenterWheel}
       >
         {toolbarVisible && (
           <div

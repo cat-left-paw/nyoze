@@ -116,9 +116,6 @@ export const UI_TEXT_REGISTRY = {
   'common.custom': {
     label: { ja: 'カスタム', en: 'Custom' },
   },
-  'common.curated': {
-    label: { ja: '厳選', en: 'Curated' },
-  },
   'common.show': {
     label: { ja: '表示する', en: 'Show' },
   },
@@ -170,6 +167,9 @@ export const UI_TEXT_REGISTRY = {
   },
   'menu.openBackupFolder': {
     label: { ja: 'バックアップフォルダを開く', en: 'Open Backup Folder' },
+  },
+  'menu.openFileBackupFolder': {
+    label: { ja: 'このファイルのバックアップを開く', en: 'Open Backup for This File' },
   },
   'menu.viewSettings': {
     label: { ja: '表示設定', en: 'View Settings' },

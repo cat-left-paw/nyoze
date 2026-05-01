@@ -1,4 +1,10 @@
 import { useEffect } from "react";
+import { snapshotSpecialInlineBoundaryCompositionPendingForE2e } from "../../editor-core/extensions/specialInlineBoundarySentinel";
+import {
+  consumeSpecialInlineDiagLines,
+  setSpecialInlineBoundaryDiagEnabled,
+} from "../../editor-core/features/specialInlineBoundaryDiagnostics";
+import type { SpecialInlineAdjacentPmInspection } from "../../editor-core/types";
 import type { SavedFileStat } from "../utils/externalEditConflict";
 import { getPathBaseName } from "../utils/path";
 import type { ActiveTabLoadResult, TabAddResult } from "./useTabManager";
@@ -18,6 +24,7 @@ type UseE2eBridgeOptions = {
   ) => Promise<TabAddResult>;
   flushImeCompositionSideEffects: (reason: string) => void;
   showTabLimitNotice: () => void;
+  inspectSpecialInlineAdjacentCaretPm?: () => SpecialInlineAdjacentPmInspection | null;
 };
 
 export function useE2eBridge({
@@ -25,6 +32,7 @@ export function useE2eBridge({
   openFileInNewTab,
   flushImeCompositionSideEffects,
   showTabLimitNotice,
+  inspectSpecialInlineAdjacentCaretPm,
 }: UseE2eBridgeOptions) {
   useEffect(() => {
     const bridge = window.nyozeBridge?.e2e;
@@ -45,6 +53,13 @@ export function useE2eBridge({
     };
 
     window.__NYOZE_E2E__ = {
+      snapshotSpecialInlineBoundaryCompositionPendingForE2e,
+      setSpecialInlineBoundaryDiagEnabled: (on: boolean) => {
+        setSpecialInlineBoundaryDiagEnabled(on);
+      },
+      flushSpecialInlineBoundaryDiagLogs: () => consumeSpecialInlineDiagLines(),
+      inspectSpecialInlineAdjacentCaretPm:
+        inspectSpecialInlineAdjacentCaretPm ?? (() => null),
       loadFileIntoActiveTab: async (filePath: string) => {
         const fixture = await readDocumentFixture(filePath);
         if (!fixture) return false;
@@ -79,6 +94,7 @@ export function useE2eBridge({
     };
   }, [
     flushImeCompositionSideEffects,
+    inspectSpecialInlineAdjacentCaretPm,
     loadIntoActiveTab,
     openFileInNewTab,
     showTabLimitNotice,

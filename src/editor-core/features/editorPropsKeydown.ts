@@ -5,6 +5,7 @@ import { handleHomeEndKey, resetHomeEndState } from './homeEndNavigation'
 import { handlePageUpDownKey } from './pageUpDownNavigation'
 import { handleHeadingFoldStartArrowKey } from './headingFoldStartArrowNavigation'
 import { handleRubyBoundaryArrowKey } from './rubyBoundaryArrowNavigation'
+import { handleRubyBaseBackspaceKey } from './rubyBoundarySelection'
 import { handleListTabKey } from './listTabNavigation'
 
 type Dispatch = (tr: Transaction) => void
@@ -47,6 +48,10 @@ export function createEditorPropsKeyDownHandler({
     }
     // Home/End 以外のキーで2段階状態をリセット
     resetHomeEndState()
+
+    if (handleRubyBaseBackspaceKey(view, event, { pushLog })) {
+      return true
+    }
 
     if (
       handlePageUpDownKey(view, event, {

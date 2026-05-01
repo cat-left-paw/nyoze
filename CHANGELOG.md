@@ -3,6 +3,17 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
+## 0.2.0-beta.1
+
+- Electron を `41.3.0` へ更新し、縦書き・scroll restore・shortcut E2E と macOS arm64 / Windows x64 package の確認を実施
+- Paragraph Plain 解除時に、単一 top-level block として解釈できる `# heading` / list / quote / fenced code / `---` を通常表示へ反映するよう改善
+- special inline boundary を `aozoraRuby` / `aozoraTcy` 共通へ整理し、WORD JOINER sentinel、delayed composition suppression、診断ログ改善で日本語 IME 境界入力を安定化
+- Windows / Linux の native titlebar overlay controls と header toolbar / Document Type badge が重ならないよう、window controls overlay reservation と狭幅 header layout を調整
+- 拡大表示や狭幅で header toolbar が clipped される場合、toolbar 上の wheel / trackpad で隠れたボタンへ pan できるよう改善
+- Windows の native select で選択中 option に check prefix を付け、テーマ選択は 2 色 swatch 付きの軽量 custom menu へ変更
+- App icon を円形シンプルアイコンへ差し替え、開発起動時の icon も更新
+- Microsoft Store / MSIX 配布準備として、`package:win:store`、Store 専用 AppX config、privacy policy、Partner Center 入力方針を追加
+
 ## 0.1.1-beta.1
 
 - `UI Language` に `ja` / `en` / `mixed` を追加し、主要 UI の stage1 i18n を導入

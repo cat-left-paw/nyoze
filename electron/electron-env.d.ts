@@ -158,6 +158,15 @@ interface Window {
     }
   }
   __NYOZE_E2E__?: {
+    snapshotSpecialInlineBoundaryCompositionPendingForE2e?: () => Record<string, string>;
+    setSpecialInlineBoundaryDiagEnabled?: (on: boolean) => void;
+    flushSpecialInlineBoundaryDiagLogs?: () => string[];
+    inspectSpecialInlineAdjacentCaretPm?: () => {
+      collapsed: boolean;
+      adjacentKind: "aozoraRuby" | "aozoraTcy" | null;
+      anchorPos: number;
+      headPos: number;
+    } | null;
     loadFileIntoActiveTab: (
       filePath: string,
     ) => Promise<"loaded" | "activated-existing" | "cancelled" | false>

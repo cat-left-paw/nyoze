@@ -98,7 +98,6 @@ function ExplorerActionIconButton({
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
-        title={label}
       >
         {icon}
       </button>

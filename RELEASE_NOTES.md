@@ -1,12 +1,38 @@
-# Nyoze 0.1.1-beta.1 Release Notes
+# Nyoze Beta Release Notes
 
-Nyoze 0.1.1-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 更新版です。
-この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。
+Nyoze は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 版です。
+この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行公開版は `0.2.0-beta.1` です。
 
 - 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
 
-## 今回の更新
+## 0.2.0-beta.1
+
+Nyoze 0.2.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 更新版です。Windows では引き続き GitHub Releases の zip 配布を継続しつつ、Microsoft Store / MSIX 申請準備を進めています。
+
+### 今回の更新
+
+- Electron を `41.3.0` へ更新し、縦書き、scroll restore、shortcut 周辺の既存 E2E / package 確認を合わせて行いました。
+- Paragraph Plain で `# 見出し`、`- list`、`1. list`、`> quote`、fenced code、`---` などを単一 block として入力した場合、明示解除・境界矢印移動・Enter 分割時に通常表示側へ反映されるよう改善しました。
+- special inline boundary を `aozoraRuby` / `aozoraTcy` 共通へ整理し、WORD JOINER sentinel、delayed composition suppression、診断ログ改善で日本語 IME 境界入力を安定化しました。
+- Windows の native titlebar overlay controls と header toolbar / Document Type badge が重ならないよう調整しました。
+- 拡大表示や狭幅で header toolbar の一部が隠れる場合、toolbar 上の wheel / trackpad 操作で隠れたボタンへ移動できるようにしました。
+- Windows の native select では選択中 option に check prefix を表示し、テーマ選択メニューではテーマ名の右側に 2 色 swatch を表示するようにしました。
+- App icon を円形シンプルアイコンへ差し替え、開発起動時の icon も更新しました。
+- Microsoft Store / MSIX 配布準備として、`package:win:store`、Store 専用 AppX config、privacy policy、Partner Center 入力方針を追加しました。
+
+### Windows 配布と Store 準備
+
+- GitHub Releases の Windows 配布物は引き続き `Nyoze-Windows-0.2.0-beta.1-x64.zip` です。
+- Microsoft Store 向けには `npm run package:win:store` を追加し、Store 用 identity / publisher / AppX version の分離管理を入れています。
+- Partner Center では検証用 `0.1.1-beta.1` appx の validation と申請フォーム入力を完了済みで、最終送信前に `0.2.0-beta.1` appx へ差し替える前提です。
+- Store 版公開後も、GitHub zip は Store を使えない環境向けの代替配布として残す予定です。
+
+## 0.1.1-beta.1
+
+Nyoze 0.1.1-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 更新版です。
+
+### 今回の更新
 
 - `UI Language` に `ja` / `en` / `mixed` を追加し、主要 UI の stage1 i18n を導入しました。
 - Theme / slider / chip / tooltip / header 周辺を見直し、`Display Settings` の `TCY` を独立セクション化しました。
@@ -16,13 +42,13 @@ Nyoze 0.1.1-beta.1 は、縦書き日本語執筆を主目的とした Markdown 
 - 日本語引用符つき強調の reopen / round-trip を改善し、`**「文学的な気分」**や**「情緒」**` のような単一装飾の隣接ペアが崩れにくくなりました。
 - Windows 配布物は installer から zip へ切り替えました。`0.1.0-beta.1` / `0.1.0-beta.2` の installer 利用者も、`0.1.1-beta.1` は zip を展開して同梱の `Nyoze.exe` を起動してください。
 
-## 対象
+### 対象
 
 - Markdown 原稿を縦書き / 横書きで編集したいユーザー
 - UTF-8 の Markdown ファイルを中心に扱うユーザー
 - beta 版として、未対応機能や表記の正規化を確認しながら試せるユーザー
 
-## 配布物
+### 配布物
 
 - macOS:
   - `Nyoze-Mac-0.1.1-beta.1-arm64-Installer.dmg`
@@ -105,12 +131,16 @@ beta で実用上対応している文字コードは UTF-8 のみです。非 U
 
 beta では、長大文書に対する仮想化や表示範囲に応じた描画最適化はまだ入れていません。
 
+ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目で入力が進まない状態になることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます。
+
+縦書きでルビ直後に句読点が続き、ちょうど行頭 / 行末の境界にかかる場合、Chromium 系では句読点が行頭側に表示されることがあります。頻度は高くありませんが、現行 beta では既知制限として扱います。
+
 ## まだ対応していない導線
 
 - OS からの drag and drop 読み込み
 - Open With からの起動引き渡し
 - `.md` の OS 全体関連付け
-- Windows installer の安定配布（`0.1.1-beta.1` では zip 配布へ一時切り替え）
+- Windows Microsoft Store / MSIX 配布（`0.2.0-beta` 向けに準備中）
 - frontmatter の一般編集 UI
 - 高度な競合解決 / merge UI
 - autosave / crash recovery journal

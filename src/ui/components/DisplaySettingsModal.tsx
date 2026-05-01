@@ -57,7 +57,6 @@ import { UI_THEME_VALUES } from "../../settings/themeUtils";
 import type { CaretColorMode } from "../../theme/caretColor";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { createUiTextGetter } from "../i18n/uiText";
-import { buildBundledUiPresetGroups } from "../utils/themePresetGrouping";
 import { DisplayNumberSlider } from "./DisplayNumberSlider";
 import {
   createDefaultDisplaySettingsSectionOpenState,
@@ -65,12 +64,23 @@ import {
   type DisplaySettingsSectionKey,
   type DisplaySettingsSectionOpenState,
 } from "./displaySettingsSectionState";
+import { formatNativeSelectOptionLabel } from "../utils/nativeSelectOptionLabel";
+import { ThemeSwatchSelect } from "./ThemeSwatchSelect";
+import {
+  getDocumentPresetSwatches,
+  getDocumentThemeSwatches,
+  getUiPresetSwatches,
+  getUiThemeSwatches,
+} from "../utils/themeSwatchOptions";
+import type { ThemeSwatchOption } from "../utils/themeSwatchOptions";
 
 type DisplaySettingsModalProps = {
   open: boolean;
   displaySettings: DisplaySettings;
   writingMode: WritingMode;
   uiLanguageMode: UiLanguageMode;
+  /** process.platform と同じ値（Electron） */
+  platform: string;
   theme: Theme;
   uiThemePresets: UiThemePreset[];
   activeUiThemePresetId: string | null;
@@ -193,6 +203,7 @@ export function DisplaySettingsModal({
   displaySettings,
   writingMode,
   uiLanguageMode,
+  platform,
   theme,
   uiThemePresets,
   activeUiThemePresetId,
@@ -360,6 +371,20 @@ export function DisplaySettingsModal({
         null);
   const bundledUiThemePresets = uiThemePresets
     .filter((preset) => isBundledUiThemePreset(preset));
+  const flatUiThemePresets = [
+    ...UI_THEME_VALUES.map((value) => ({
+      key: value,
+      value: `theme:${value}`,
+      label: THEME_LABELS[value],
+      swatches: getUiThemeSwatches(value),
+    })),
+    ...bundledUiThemePresets.map((preset) => ({
+      key: preset.id,
+      value: `preset:${preset.id}`,
+      label: preset.name,
+      swatches: getUiPresetSwatches(preset),
+    })),
+  ];
   const customUiThemePresets = uiThemePresets
     .filter((preset) => !isSystemUiThemePreset(preset))
     .sort((a, b) => a.name.localeCompare(b.name, "ja"));
@@ -520,10 +545,6 @@ export function DisplaySettingsModal({
     ...APP_TITLE_PRESET_LABELS,
     custom: t("displaySettings.appTitlePreset.custom"),
   };
-  const bundledUiPresetGroups = buildBundledUiPresetGroups(
-    bundledUiThemePresets,
-    t("common.curated"),
-  );
 
   const headingAlignLabels: Record<HeadingAlign, string> =
     writingMode === "horizontal-tb"
@@ -585,13 +606,25 @@ export function DisplaySettingsModal({
                       }
                     >
                       <option value="ja">
-                        {t("settings.uiLanguageMode.option.ja")}
+                        {formatNativeSelectOptionLabel(
+                          t("settings.uiLanguageMode.option.ja"),
+                          uiLanguageMode === "ja",
+                          platform,
+                        )}
                       </option>
                       <option value="en">
-                        {t("settings.uiLanguageMode.option.en")}
+                        {formatNativeSelectOptionLabel(
+                          t("settings.uiLanguageMode.option.en"),
+                          uiLanguageMode === "en",
+                          platform,
+                        )}
                       </option>
                       <option value="mixed">
-                        {t("settings.uiLanguageMode.option.mixed")}
+                        {formatNativeSelectOptionLabel(
+                          t("settings.uiLanguageMode.option.mixed"),
+                          uiLanguageMode === "mixed",
+                          platform,
+                        )}
                       </option>
                     </select>
                   </div>
@@ -989,22 +1022,46 @@ export function DisplaySettingsModal({
                       }
                     >
                       <option value="same-as-body">
-                        {docHeadingFontLabels["same-as-body"]}
+                        {formatNativeSelectOptionLabel(
+                          docHeadingFontLabels["same-as-body"],
+                          docHeadingFont === "same-as-body",
+                          platform,
+                        )}
                       </option>
                       <option value="mincho">
-                        {docHeadingFontLabels.mincho}
+                        {formatNativeSelectOptionLabel(
+                          docHeadingFontLabels.mincho,
+                          docHeadingFont === "mincho",
+                          platform,
+                        )}
                       </option>
                       <option value="gothic">
-                        {docHeadingFontLabels.gothic}
+                        {formatNativeSelectOptionLabel(
+                          docHeadingFontLabels.gothic,
+                          docHeadingFont === "gothic",
+                          platform,
+                        )}
                       </option>
                       {isCustomHeadingFont && !hasHeadingCustomFontOption && (
                         <option value={docHeadingFont}>
-                          {headingCustomFontName}
+                          {formatNativeSelectOptionLabel(
+                            headingCustomFontName ?? "",
+                            Boolean(
+                              headingCustomFontName !== null &&
+                                isCustomHeadingFont &&
+                                !hasHeadingCustomFontOption,
+                            ),
+                            platform,
+                          )}
                         </option>
                       )}
                       {registeredFonts.map((font) => (
                         <option key={font} value={`custom:${font}`}>
-                          {font}
+                          {formatNativeSelectOptionLabel(
+                            font,
+                            docHeadingFont === `custom:${font}`,
+                            platform,
+                          )}
                         </option>
                       ))}
                     </select>
@@ -1287,43 +1344,34 @@ export function DisplaySettingsModal({
                     </div>
                   </div>
                   <div className="setting-item-control">
-                    <select
-                      className="setting-select"
+                    <ThemeSwatchSelect
+                      ariaLabel={t("displaySettings.section.uiTheme")}
                       value={selectedUiThemeValue}
-                      onChange={(e) => handleUiThemeSelect(e.target.value)}
-                    >
-                      <optgroup label={t("common.standard")}>
-                        {UI_THEME_VALUES.map((value) => (
-                          <option key={value} value={`theme:${value}`}>
-                            {THEME_LABELS[value]}
-                          </option>
-                        ))}
-                      </optgroup>
-                      {bundledUiPresetGroups.map((group) => (
-                        <optgroup key={group.label} label={group.label}>
-                          {group.presets.map((preset) => (
-                            <option
-                              key={preset.id}
-                              value={`preset:${preset.id}`}
-                            >
-                              {preset.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                      {customUiThemePresets.length > 0 && (
-                        <optgroup label={t("common.custom")}>
-                          {customUiThemePresets.map((preset) => (
-                            <option
-                              key={preset.id}
-                              value={`preset:${preset.id}`}
-                            >
-                              {preset.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
+                      onChange={handleUiThemeSelect}
+                      options={flatUiThemePresets.map((preset) => ({
+                        value: preset.value,
+                        label: preset.label,
+                        swatches: preset.swatches,
+                        kind: "system",
+                      }))}
+                      groups={
+                        customUiThemePresets.length > 0
+                          ? [
+                              {
+                                label: t("common.custom"),
+                                options: customUiThemePresets.map(
+                                  (preset): ThemeSwatchOption => ({
+                                    value: `preset:${preset.id}`,
+                                    label: preset.name,
+                                    swatches: getUiPresetSwatches(preset),
+                                    kind: "custom",
+                                  }),
+                                ),
+                              },
+                            ]
+                          : undefined
+                      }
+                    />
                   </div>
                 </div>
                 <div className="setting-item">
@@ -1338,14 +1386,40 @@ export function DisplaySettingsModal({
                       value={uiFont}
                       onChange={(e) => onUiFontChange(e.target.value as UiFont)}
                     >
-                      <option value="mincho">{uiFontLabels.mincho}</option>
-                      <option value="gothic">{uiFontLabels.gothic}</option>
+                      <option value="mincho">
+                        {formatNativeSelectOptionLabel(
+                          uiFontLabels.mincho,
+                          uiFont === "mincho",
+                          platform,
+                        )}
+                      </option>
+                      <option value="gothic">
+                        {formatNativeSelectOptionLabel(
+                          uiFontLabels.gothic,
+                          uiFont === "gothic",
+                          platform,
+                        )}
+                      </option>
                       {isCustomUiFont && !hasUiCustomFontOption && (
-                        <option value={uiFont}>{uiCustomFontName}</option>
+                        <option value={uiFont}>
+                          {formatNativeSelectOptionLabel(
+                            uiCustomFontName ?? "",
+                            Boolean(
+                              uiCustomFontName !== null &&
+                                isCustomUiFont &&
+                                !hasUiCustomFontOption,
+                            ),
+                            platform,
+                          )}
+                        </option>
                       )}
                       {registeredFonts.map((font) => (
                         <option key={font} value={`custom:${font}`}>
-                          {font}
+                          {formatNativeSelectOptionLabel(
+                            font,
+                            uiFont === `custom:${font}`,
+                            platform,
+                          )}
                         </option>
                       ))}
                     </select>
@@ -1603,7 +1677,11 @@ export function DisplaySettingsModal({
                             ] as const
                           ).map((preset) => (
                             <option key={preset} value={preset}>
-                              {appTitlePresetLabels[preset]}
+                              {formatNativeSelectOptionLabel(
+                                appTitlePresetLabels[preset],
+                                appTitlePreset === preset,
+                                platform,
+                              )}
                             </option>
                           ))}
                         </select>
@@ -1679,19 +1757,47 @@ export function DisplaySettingsModal({
                           }
                         >
                           <option value="ui-default">
-                            {t("displaySettings.sameAsUiFont")}
+                            {formatNativeSelectOptionLabel(
+                              t("displaySettings.sameAsUiFont"),
+                              appTitleFont === "ui-default",
+                              platform,
+                            )}
                           </option>
-                          <option value="mincho">{uiFontLabels.mincho}</option>
-                          <option value="gothic">{uiFontLabels.gothic}</option>
+                          <option value="mincho">
+                            {formatNativeSelectOptionLabel(
+                              uiFontLabels.mincho,
+                              appTitleFont === "mincho",
+                              platform,
+                            )}
+                          </option>
+                          <option value="gothic">
+                            {formatNativeSelectOptionLabel(
+                              uiFontLabels.gothic,
+                              appTitleFont === "gothic",
+                              platform,
+                            )}
+                          </option>
                           {isCustomAppTitleFont &&
                             !hasAppTitleCustomFontOption && (
                               <option value={appTitleFont}>
-                                {appTitleCustomFontName}
+                                {formatNativeSelectOptionLabel(
+                                  appTitleCustomFontName ?? "",
+                                  Boolean(
+                                    appTitleCustomFontName !== null &&
+                                      isCustomAppTitleFont &&
+                                      !hasAppTitleCustomFontOption,
+                                  ),
+                                  platform,
+                                )}
                               </option>
                             )}
                           {registeredFonts.map((font) => (
                             <option key={font} value={`custom:${font}`}>
-                              {font}
+                              {formatNativeSelectOptionLabel(
+                                font,
+                                appTitleFont === `custom:${font}`,
+                                platform,
+                              )}
                             </option>
                           ))}
                         </select>
@@ -1720,13 +1826,12 @@ export function DisplaySettingsModal({
                     </div>
                   </div>
                   <div className="setting-item-control">
-                    <select
-                      className="setting-select"
+                    <ThemeSwatchSelect
+                      ariaLabel={t("displaySettings.section.documentTheme")}
                       value={selectedDocThemeValue}
-                      onChange={(e) => handleDocumentThemeSelect(e.target.value)}
-                    >
-                      <optgroup label={t("common.standard")}>
-                        {(
+                      onChange={handleDocumentThemeSelect}
+                      options={[
+                        ...(
                           [
                             "ui-linked",
                             "paper-light",
@@ -1735,37 +1840,45 @@ export function DisplaySettingsModal({
                             "wob",
                             "soft-neutral",
                           ] as const
-                        ).map((value) => (
-                          <option key={value} value={`theme:${value}`}>
-                            {documentThemeLabels[value]}
-                          </option>
-                        ))}
-                      </optgroup>
-                      {bundledDocThemePresets.length > 0 && (
-                        <optgroup label={t("common.curated")}>
-                          {bundledDocThemePresets.map((preset) => (
-                            <option
-                              key={preset.id}
-                              value={`preset:${preset.id}`}
-                            >
-                              {preset.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {customDocThemePresets.length > 0 && (
-                        <optgroup label={t("common.custom")}>
-                          {customDocThemePresets.map((preset) => (
-                            <option
-                              key={preset.id}
-                              value={`preset:${preset.id}`}
-                            >
-                              {preset.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
+                        ).map(
+                          (value): ThemeSwatchOption => ({
+                            value: `theme:${value}`,
+                            label: documentThemeLabels[value],
+                            swatches: getDocumentThemeSwatches(
+                              value,
+                              theme,
+                              activeUiPreset,
+                            ),
+                            kind: "system",
+                          }),
+                        ),
+                        ...bundledDocThemePresets.map(
+                          (preset): ThemeSwatchOption => ({
+                            value: `preset:${preset.id}`,
+                            label: preset.name,
+                            swatches: getDocumentPresetSwatches(preset),
+                            kind: "system",
+                          }),
+                        ),
+                      ]}
+                      groups={
+                        customDocThemePresets.length > 0
+                          ? [
+                              {
+                                label: t("common.custom"),
+                                options: customDocThemePresets.map(
+                                  (preset): ThemeSwatchOption => ({
+                                    value: `preset:${preset.id}`,
+                                    label: preset.name,
+                                    swatches: getDocumentPresetSwatches(preset),
+                                    kind: "custom",
+                                  }),
+                                ),
+                              },
+                            ]
+                          : undefined
+                      }
+                    />
                   </div>
                 </div>
 
@@ -1840,10 +1953,18 @@ export function DisplaySettingsModal({
                       }
                     >
                       <option value="auto">
-                        {t("displaySettings.caretColorAuto")}
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.caretColorAuto"),
+                          caretColorMode === "auto",
+                          platform,
+                        )}
                       </option>
                       <option value="custom">
-                        {t("displaySettings.caretColorCustom")}
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.caretColorCustom"),
+                          caretColorMode === "custom",
+                          platform,
+                        )}
                       </option>
                     </select>
                   </div>
@@ -1930,7 +2051,9 @@ export function DisplaySettingsModal({
                       {t("displaySettings.support.updateCheck")}
                     </div>
                     <div className="setting-item-desc">
-                      最新版かどうかを確認します
+                      GitHub Releases の公開版を確認します
+                      <br />
+                      ※Microsoft Store 版は Store から更新されます
                     </div>
                   </div>
                   <div className="setting-item-control">
@@ -1955,10 +2078,9 @@ export function DisplaySettingsModal({
                       {t("displaySettings.support.repository")}
                     </div>
                     <div className="setting-item-desc">
-                      プロジェクトのリポジトリページを開きます
+                      ソースコードと GitHub 配布ページを開きます
                       <br />
-                      ※NYOZEの最新版の配布物は Releases
-                      ページからダウンロードできます
+                      ※Microsoft Store 版の通常更新は Store を使ってください
                     </div>
                   </div>
                   <div className="setting-item-control">

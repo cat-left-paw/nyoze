@@ -13,6 +13,7 @@
 !/latest.json
 !/scripts/
 !/scripts/package-mac-arch.mjs
+!/scripts/package-windows-zip.mjs
 !/scripts/run-with-clean-electron-env.mjs
 !/src/
 !/src/**

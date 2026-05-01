@@ -12,6 +12,8 @@
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
+Windows は `0.2.0-beta` 以降で Microsoft Store / MSIX を推奨導線にする準備中です。Store 版が公開されるまでは、GitHub Releases の zip を使ってください。Store 版の公開後も、GitHub zip は代替配布として残す方針です。
+
 ## macOS
 
 1. GitHub Releases から、自分の環境に合った DMG をダウンロードします。
@@ -65,9 +67,9 @@ xattr -dr com.apple.quarantine "/Applications/Nyoze.app"
 
 ## Windows
 
-`0.1.1-beta.1` の Windows 配布物は installer ではなく zip です。
+現行 beta の Windows 配布物は installer ではなく zip です。
 
-`0.1.0-beta.1` / `0.1.0-beta.2` では installer を配布していましたが、`0.1.1-beta.1` では一部の Windows 環境で Smart App Control により installer や単一 exe がブロックされたため、zip 形式へ切り替えています。
+`0.1.0-beta.1` / `0.1.0-beta.2` では installer を配布していましたが、`0.1.1-beta.1` 以降は一部の Windows 環境で Smart App Control により installer や単一 exe がブロックされたため、zip 形式へ切り替えています。
 
 Windows 版は `x64` 専用です。32bit Windows では起動できません。
 
@@ -77,19 +79,28 @@ Windows 版は `x64` 専用です。32bit Windows では起動できません。
 4. 展開したフォルダ内の `Nyoze.exe` を起動します。
 5. 必要ならショートカットを自分で作成してください。
 
+### Microsoft Store 版について
+
+Microsoft Store 版は準備中です。公開後は、通常の Windows 利用では Store 版を推奨導線にする予定です。
+
+- Store 版が公開されるまでは GitHub Releases の zip を使ってください。
+- Store 版と zip 版の設定保存先や共存可否は、MSIX package 作成後に Windows 実機で確認してから案内を確定します。
+- Store 版が公開された後も、GitHub zip は Store を使えない環境向けの代替配布として残す方針です。
+
 ### 旧 installer 版を使っている人へ
 
-- `0.1.0-beta.1` / `0.1.0-beta.2` を installer で入れている場合でも、`0.1.1-beta.1` は自動で上書き更新されません。
-- `0.1.1-beta.1` を使うには、新しく zip 版をダウンロードして展開し、その中の `README.txt` と `Nyoze.exe` を使ってください。
+- `0.1.0-beta.1` / `0.1.0-beta.2` を installer で入れている場合でも、現行 beta は自動で上書き更新されません。
+- 現行 beta を使うには、新しく zip 版をダウンロードして展開し、その中の `README.txt` と `Nyoze.exe` を使ってください。
 - 旧 installer 版を残したまま zip 版を試しても構いませんが、混乱を避けるため同時起動はしないでください。
 - 旧 installer 版が不要になった場合は、Windows のアプリ設定からアンインストールしてください。
 
 ### Smart App Control について
 
-今回確認できた範囲では、zip を展開した中の `Nyoze.exe` は起動できましたが、installer や単一 exe 形式は Smart App Control によってブロックされることがありました。
+Smart App Control の挙動は環境やタイミングによって異なることがあります。過去の確認では、installer や単一 exe 形式は Smart App Control によってブロックされることがありました。zip 展開後の `Nyoze.exe` も、将来を含めて常に起動できるとは保証しません。
 
-- `0.1.1-beta.1` の Windows 版は zip 展開後の `Nyoze.exe` を使ってください。
-- 以前の installer 版を使っている環境でも、`0.1.1-beta.1` へ更新するときは zip 版へ切り替えてください。
+- 現行 beta の Windows 版は zip 展開後の `Nyoze.exe` を使ってください。
+- zip 版でも起動できない場合は、Microsoft Store 版の利用を優先してください。
+- 以前の installer 版を使っている環境でも、現行 beta へ更新するときは zip 版へ切り替えてください。
 
 ## アンインストール
 

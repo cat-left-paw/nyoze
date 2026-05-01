@@ -10,7 +10,7 @@ Windows 版は 64bit (x64) 専用です。32bit Windows では使えません。
 
 旧 installer 版について:
 - 0.1.0-beta.1 / 0.1.0-beta.2 は installer 版を配布していました。
-- 0.1.1-beta.1 は zip 版です。自動更新や上書きインストールはされません。
+- 0.1.1-beta.1 以降の Windows 配布物は zip 版です。自動更新や上書きインストールはされません。
 - 旧 installer 版を使っている場合も、この zip を展開して Nyoze.exe を起動してください。
 - 混乱を避けるため、旧 installer 版と zip 版の同時起動は避けてください。
 
@@ -21,8 +21,9 @@ Windows 版は 64bit (x64) 専用です。32bit Windows では使えません。
 - 完全に消したい場合だけ、この Nyoze フォルダも手動で削除してください。
 
 補足:
-- 一部の Windows 環境では、installer や単一 exe が Smart App Control により block されることがありました。
-- 今回確認できた範囲では、zip 展開後の Nyoze.exe は起動できています。
+- Smart App Control の挙動は環境やタイミングによって異なることがあります。
+- 過去の確認では、installer や単一 exe が Smart App Control によりブロックされることがありました。
+- zip 展開後の Nyoze.exe も、将来を含めて常に起動できるとは保証しません。起動できない場合は Microsoft Store 版を優先してください。
 
 詳しい説明:
 - 公開リポジトリ: https://github.com/cat-left-paw/nyoze

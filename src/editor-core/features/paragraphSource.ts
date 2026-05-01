@@ -125,6 +125,51 @@ export function parseReplacementNode(
   return node
 }
 
+const PARAGRAPH_PLAIN_EXIT_REPARSE_TYPES = new Set([
+  'paragraph',
+  'heading',
+  'bulletList',
+  'orderedList',
+  'blockquote',
+  'codeBlock',
+  'horizontalRule',
+])
+
+/**
+ * Paragraph Plain 解除時専用の置換ノード解決。
+ *
+ * 通常の `parseReplacementNode` は paragraph ↔ heading の swap だけを許容するが、
+ * 解除時に限って overlay の Markdown を再パースし、`# 見出し` / `- list` /
+ * `> quote` / `` ``` `` で書かれた block 記法を該当 PM ノードへ巻き戻す。
+ *
+ * スコープ:
+ * - 元 block が `paragraph` または `heading` のときだけ block 再解釈を許容する。
+ * - 上記以外（`codeBlock`, `html_block_atom` 等）は従来通り厳格 swap。
+ * - 複数 top-level block（例: `# 見出し` + 本文）はこのスライスでは未対応で、
+ *   既存の `parseReplacementNode` 経路へフォールバックする（挙動は従来同等）。
+ */
+export function parseParagraphPlainExitReplacementContent(
+  state: EditorState,
+  markdown: string,
+  typeName: string,
+  lineBreakPolicy: LineBreakPolicy,
+): PMNode | null {
+  if (typeName !== 'paragraph' && typeName !== 'heading') {
+    return parseReplacementNode(state, markdown, typeName, lineBreakPolicy)
+  }
+
+  const parsed = parseMarkdown(state.schema, markdown, lineBreakPolicy)
+  if (parsed.childCount !== 1) {
+    return parseReplacementNode(state, markdown, typeName, lineBreakPolicy)
+  }
+
+  const node = parsed.child(0)
+  if (PARAGRAPH_PLAIN_EXIT_REPARSE_TYPES.has(node.type.name)) {
+    return node
+  }
+  return parseReplacementNode(state, markdown, typeName, lineBreakPolicy)
+}
+
 export function resolveParagraphElement(
   editor: Editor,
   context: ParagraphNodeContext,

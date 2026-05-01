@@ -1,3 +1,7 @@
+import type { SpecialInlineAdjacentPmInspection } from './features/specialInlineBoundaryDiagnostics'
+
+export type { SpecialInlineAdjacentPmInspection }
+
 /** Log entry emitted by EditorCore */
 export type LogEntry = {
   id: number
@@ -187,6 +191,11 @@ export interface EditorCoreHandle {
 
   /** Resolve ruby editing target from current selection */
   getRubyEditContext(): RubyEditContext | null
+
+  /**
+   * E2E / 調査: 折りたたみ選択が `aozoraRuby` / `aozoraTcy` の直上・直後か。
+   */
+  inspectSpecialInlineAdjacentCaretPm(): SpecialInlineAdjacentPmInspection
 
   /** Insert ruby annotation on the currently selected text */
   insertRuby(ruby: string, range?: SelectionRange): void

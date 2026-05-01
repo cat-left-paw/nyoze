@@ -1110,8 +1110,11 @@ body.is-resizing-pane {
    ---------------------------------------------------------- */
 
 .unified-header {
+  --header-window-controls-reserved-width: 0px;
   display: flex;
   align-items: center;
+  box-sizing: border-box;
+  width: 100vw;
   height: 36px;
   padding: 0 8px;
   background: var(--bg-topbar);
@@ -1151,12 +1154,25 @@ body.is-resizing-pane {
 /* Windows/Linux: keep app controls clear of native overlay buttons on the right. */
 [data-platform="win32"] .unified-header-right,
 [data-platform="linux"] .unified-header-right {
-  padding-right: 138px;
+  padding-right: var(--header-window-controls-reserved-width);
+}
+
+[data-platform="win32"] .unified-header,
+[data-platform="linux"] .unified-header {
+  --header-window-controls-fallback-width: 138px;
+  --header-window-controls-reserved-width: max(
+    0px,
+    calc(
+      100vw - env(titlebar-area-x, 0px) -
+        env(titlebar-area-width, calc(100vw - var(--header-window-controls-fallback-width)))
+    )
+  );
 }
 
 .unified-header-right {
   justify-content: flex-end;
   margin-left: auto;
+  min-width: 0;
 }
 
 .unified-header-sep {
@@ -1172,9 +1188,12 @@ body.is-resizing-pane {
   align-items: center;
   min-width: 0;
   overflow: visible;
+  /* Clip only horizontally so an oversized toolbar cannot paint over the fixed
+     left/right header zones, while dropdowns and tooltips can still open down. */
+  clip-path: inset(-100vh 0 -100vh 0);
   justify-content: center;
   /* Animation for collapse/expand */
-  flex: 1 1 auto;
+  flex: 1 1 0px;
   max-width: 100%;
   opacity: 1;
   transition:
@@ -1398,6 +1417,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
   width: var(--toolbar-btn-size);
   height: var(--toolbar-btn-size);
   border: 1px solid transparent;
@@ -1788,15 +1808,24 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   align-items: center;
   gap: 5px;
   position: relative;
+  min-width: 0;
+  max-width: 180px;
   margin: 0;
   padding: 2px 0;
   border: none;
   background: transparent;
   cursor: pointer;
   font: inherit;
-  flex-shrink: 0;
+  flex: 0 1 auto;
   -webkit-app-region: no-drag;
   transition: opacity 0.12s ease;
+}
+
+.unified-header-right .unified-header-line-break-policy-btn .editor-tab-policy-badge {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .unified-header-right .unified-header-line-break-policy-btn:focus-visible {
@@ -2183,8 +2212,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .file-explorer-action-chip {
   position: absolute;
-  /* Anchor to left edge so chip expands rightward into the pane (avoids right-edge clipping under overflow:hidden) */
-  left: 0;
+  /* Header action buttons sit near the pane edge, so expand the chip inward. */
+  right: 0;
   top: calc(100% + 6px);
   bottom: auto;
   display: inline-flex;
@@ -4532,6 +4561,127 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   color: var(--text-primary);
 }
 
+/* --- Theme Swatch Select (custom popover for theme-only selects) --- */
+
+.theme-swatch-select {
+  position: relative;
+  display: inline-block;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+.theme-swatch-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 2px 8px;
+  font-size: calc(12px * var(--ui-font-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-swatch-select-trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-swatch-select-trigger-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.theme-swatch-select-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.theme-swatch-select-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-input);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.theme-swatch-select-popover {
+  z-index: 1000;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  padding: 4px;
+}
+
+.theme-swatch-select-list,
+.theme-swatch-select-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.theme-swatch-select-option {
+  display: block;
+}
+
+.theme-swatch-select-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-swatch-select-option-btn:hover {
+  background: var(--bg-hover);
+}
+
+.theme-swatch-select-option.is-selected > .theme-swatch-select-option-btn {
+  background: var(--bg-active, var(--bg-hover));
+}
+
+.theme-swatch-select-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.theme-swatch-select-option-check {
+  width: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-swatch-select-group-label {
+  margin: 4px 8px 2px;
+  font-size: calc(10px * var(--ui-font-scale));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  border-top: 1px solid var(--border-input);
+  padding-top: 4px;
+}
+
 /* --- Color Controls --- */
 
 .color-control {
@@ -4863,6 +5013,14 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .editor-panel[data-ruby-visible="0"] .tategaki-aozora-ruby-rt {
   display: none !important;
+}
+
+.editor-surface .ProseMirror .nyoze-special-inline-boundary {
+  display: inline;
+  font-size: 1em;
+  line-height: inherit;
+  white-space: pre;
+  text-decoration: none;
 }
 
 /* Tate-chu-yoko (horizontal-in-vertical) */

@@ -37,7 +37,28 @@ export {
   toClientRectSnapshot,
 } from './paragraphSource'
 export { moveListItemDown, moveListItemUp } from './listMove'
+export {
+  consumeSpecialInlineDiagLines,
+  inspectPmCollapsedAfterSpecialInline,
+  recordSpecialInlinePointerSample,
+  selectionTouchesSpecialInlineNode,
+  setSpecialInlineBoundaryDiagEnabled,
+  SPECIAL_INLINE_NODE_TYPES,
+} from './specialInlineBoundaryDiagnostics'
+export type {
+  SpecialInlineAdjacentPmInspection,
+  SpecialInlineDiagContext,
+  SpecialInlineNodeTypeName,
+} from './specialInlineBoundaryDiagnostics'
 export { resolveRubyEditContext } from './rubyContext'
+export {
+  deleteRubyBaseDomSelection,
+  handleRubyBaseBackspaceKey,
+  handleRubyBaseBeforeInput,
+  handleRubyBaseCompositionStart,
+  normalizeRubyBaseDomSelectionAfterNode,
+  resolveRubyBaseDomSelection,
+} from './rubyBoundarySelection'
 export { collectHeadingUiState, resolveActiveHeadingIndex } from './outlineTracking'
 export {
   deleteHorizontalRuleWithKey,

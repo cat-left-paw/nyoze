@@ -1487,6 +1487,8 @@ function App() {
     openFileInNewTab: tabManager.openFileInTab,
     flushImeCompositionSideEffects,
     showTabLimitNotice,
+    inspectSpecialInlineAdjacentCaretPm: () =>
+      coreRef.current?.inspectSpecialInlineAdjacentCaretPm() ?? null,
   });
 
   // --- Menu command listener (macOS menu bar / Win+Linux popup menu) ---
@@ -2654,6 +2656,7 @@ function App() {
         themeStudioSlot={
           <ThemeStudioPanel
             uiLanguageMode={ui.uiLanguageMode}
+            platform={ui.platform}
             uiThemePresets={ui.uiThemePresets}
             activeUiThemePresetId={ui.activeUiThemePresetId}
             currentUiTheme={ui.theme}
@@ -2763,6 +2766,7 @@ function App() {
         displaySettings={ui.displaySettings}
         writingMode={ui.writingMode}
         uiLanguageMode={ui.uiLanguageMode}
+        platform={ui.platform}
         theme={ui.theme}
         uiThemePresets={ui.uiThemePresets}
         activeUiThemePresetId={ui.activeUiThemePresetId}

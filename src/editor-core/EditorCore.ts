@@ -57,6 +57,7 @@ import {
   resolveChecklistClickPos,
   resolveClickTargetElement,
   resolveFoldToggleHeadingPos,
+  inspectPmCollapsedAfterSpecialInline,
   moveListItemDown,
   moveListItemUp,
   MAX_DIFF_LOG_LENGTH,
@@ -68,6 +69,7 @@ import {
   scrollEditorSurfaceToRatio,
   selectHorizontalRuleAtEventTarget,
   parseSingleParagraphNode,
+  recordSpecialInlinePointerSample,
   resolveParagraphElement,
   resolveParagraphNodeContext,
   resolveRubyEditContext,
@@ -291,6 +293,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     onKeyDown,
   } = createCompositionEventHandlers({
     getState: () => editor.state,
+    getView: () => editor.view,
     getIsComposing: () => isComposing || editor.view.composing,
     setIsComposing: (next) => {
       isComposing = next
@@ -340,6 +343,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
   const searchController = createSearchController({
     getIsComposing: () => isComposing || editor.view.composing,
+    getLineBreakPolicy: readLineBreakPolicy,
     setSearchQueryCommand: (query, caseSensitive) => {
       editor.commands.setSearchQuery(query, caseSensitive)
     },
@@ -408,6 +412,8 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     onMouseOver,
     onMouseOut,
     onWheel,
+    onPointerDown: (event) => recordSpecialInlinePointerSample(event),
+    onPointerUp: (event) => recordSpecialInlinePointerSample(event),
   })
 
   function applyLineBreakPolicyImmediately(
@@ -531,6 +537,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
     getRubyEditContext(): RubyEditContext | null {
       return inlineAnnotationController.getRubyEditContext()
+    },
+
+    inspectSpecialInlineAdjacentCaretPm() {
+      return inspectPmCollapsedAfterSpecialInline(editor.state)
     },
 
     getParagraphSourceContext(range?: SelectionRange): ParagraphSourceContext | null {

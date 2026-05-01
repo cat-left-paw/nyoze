@@ -1,5 +1,5 @@
 import type { EditorState, Transaction } from '@tiptap/pm/state'
-import type { SearchState } from '../types'
+import type { LineBreakPolicy, SearchState } from '../types'
 import { createSearchRefreshScheduler } from './searchRefreshScheduler'
 
 type LogPush = (event: string, detail: string) => void
@@ -8,6 +8,7 @@ type SearchPluginStateLike = { matches: SearchMatchLike[]; currentIndex: number 
 
 type CreateSearchControllerOptions = {
   getIsComposing: () => boolean
+  getLineBreakPolicy: () => LineBreakPolicy
   setSearchQueryCommand: (query: string, caseSensitive: boolean) => void
   refreshSearchCommand: (anchorPos?: number | null) => void
   setSearchCurrentIndexCommand: (index: number) => void
@@ -20,11 +21,13 @@ type CreateSearchControllerOptions = {
     state: EditorState,
     match: SearchMatchLike,
     replacement: string,
+    lineBreakPolicy: LineBreakPolicy,
   ) => Transaction
   replaceAllMatchesInDoc: (
     state: EditorState,
     matches: SearchMatchLike[],
     replacement: string,
+    lineBreakPolicy: LineBreakPolicy,
   ) => Transaction
   emitSearchStateChange: () => void
   scrollToPos: (pos: number) => void
@@ -33,6 +36,7 @@ type CreateSearchControllerOptions = {
 
 export function createSearchController({
   getIsComposing,
+  getLineBreakPolicy,
   setSearchQueryCommand,
   refreshSearchCommand,
   setSearchCurrentIndexCommand,
@@ -140,7 +144,7 @@ export function createSearchController({
     if (!match) return -1
 
     refreshScheduler.cancel()
-    const tr = replaceMatchInDoc(getEditorState(), match, replacement)
+    const tr = replaceMatchInDoc(getEditorState(), match, replacement, getLineBreakPolicy())
     dispatch(tr)
     refreshScheduler.cancel()
     refreshSearchMatches(match.from)
@@ -157,7 +161,12 @@ export function createSearchController({
 
     const count = pluginState.matches.length
     refreshScheduler.cancel()
-    const tr = replaceAllMatchesInDoc(getEditorState(), pluginState.matches, replacement)
+    const tr = replaceAllMatchesInDoc(
+      getEditorState(),
+      pluginState.matches,
+      replacement,
+      getLineBreakPolicy(),
+    )
     dispatch(tr)
     refreshScheduler.cancel()
     refreshSearchMatches()
