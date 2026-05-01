@@ -30,6 +30,7 @@
 !/NOTICE
 !/CHANGELOG.md
 !/INSTALL.md
+!/PRIVACY.md
 !/RELEASE_NOTES.md
 
 # Deny common local/OS/editor artifacts even under allowed directories.
