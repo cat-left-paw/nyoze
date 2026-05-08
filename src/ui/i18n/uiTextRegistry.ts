@@ -119,6 +119,9 @@ export const UI_TEXT_REGISTRY = {
   'common.show': {
     label: { ja: '表示する', en: 'Show' },
   },
+  'common.enable': {
+    label: { ja: '有効', en: 'Enable' },
+  },
   'common.check': {
     label: { ja: '確認', en: 'Check' },
   },
@@ -161,6 +164,12 @@ export const UI_TEXT_REGISTRY = {
   },
   'menu.help': {
     label: { ja: 'ヘルプ', en: 'Help' },
+  },
+  'help.openManual': {
+    label: { ja: 'MANUAL を開く', en: 'Open Manual' },
+  },
+  'help.shortcutsReference': {
+    label: { ja: 'ショートカットキー一覧', en: 'Keyboard Shortcuts' },
   },
   'menu.bringAllToFront': {
     label: { ja: 'すべてを手前に移動', en: 'Bring All to Front' },
@@ -239,6 +248,9 @@ export const UI_TEXT_REGISTRY = {
   },
   'editor.headingMenu': {
     label: { ja: '見出しメニュー', en: 'Heading Menu' },
+  },
+  'editor.listMenu': {
+    label: { ja: 'リストメニュー', en: 'List Menu' },
   },
   'editor.heading.level1': {
     label: { ja: '見出し1', en: 'Heading 1' },
@@ -361,6 +373,63 @@ export const UI_TEXT_REGISTRY = {
   'explorer.eol.crlf': {
     label: { ja: 'CRLF', en: 'CRLF' },
   },
+  'explorer.transferConflict.title': {
+    label: {
+      ja: '同じ名前のファイルがあります',
+      en: 'An item with that name already exists',
+    },
+  },
+  'explorer.transferConflict.bodyLine1Copy': {
+    label: {
+      ja: 'コピー先には「{name}」がすでにあります。',
+      en: 'The destination already has an item named “{name}”.',
+    },
+  },
+  'explorer.transferConflict.bodyLine1Move': {
+    label: {
+      ja: '移動先には「{name}」がすでにあります。',
+      en: 'The destination already has an item named “{name}”.',
+    },
+  },
+  'explorer.transferConflict.bodyLine2': {
+    label: {
+      ja: 'このファイルを置き換えますか？',
+      en: 'Do you want to replace it?',
+    },
+  },
+  'explorer.transferConflict.helperKeepBothCopy': {
+    label: {
+      ja: '「両方とも残す」を選ぶと、新しい名前でコピーします。',
+      en: 'If you choose Keep Both, the copy is saved with a new name.',
+    },
+  },
+  'explorer.transferConflict.helperKeepBothMove': {
+    label: {
+      ja: '「両方とも残す」を選ぶと、移動中のファイルを新しい名前で移動先に置きます。移動先にあった同名ファイルはそのまま残り、元の場所からはこのファイルがなくなります。',
+      en: 'If you choose Keep Both, the item you are moving is placed at the destination under a new name. The file that was already there stays unchanged, and the item is removed from its original location.',
+    },
+  },
+  'explorer.transferConflict.keepBoth': {
+    label: { ja: '両方とも残す', en: 'Keep Both' },
+  },
+  'explorer.transferConflict.cancel': {
+    label: { ja: 'キャンセル', en: 'Cancel' },
+  },
+  'explorer.transferConflict.replace': {
+    label: { ja: '置き換える', en: 'Replace' },
+  },
+  'explorer.transferConflict.errorKeepBothUnexpected': {
+    label: {
+      ja: '別名でのコピー / 移動に失敗しました。パスと権限を確認してください。',
+      en: 'Could not copy or move with a new name. Check the path and permissions.',
+    },
+  },
+  'explorer.transferConflict.errorKeepBothExhausted': {
+    label: {
+      ja: '利用できる別名を見つけられませんでした。手動で名前を変更してから再度お試しください。',
+      en: 'Could not find an available name. Rename files manually and try again.',
+    },
+  },
   'workspace.outline.empty': {
     label: { ja: '見出しがありません', en: 'No headings yet' },
   },
@@ -377,6 +446,12 @@ export const UI_TEXT_REGISTRY = {
     label: {
       ja: '文書設定を表示できません。',
       en: 'Document Settings is unavailable.',
+    },
+  },
+  'workspace.document.internalShortcutUnavailable': {
+    label: {
+      ja: 'この内部ドキュメントでは文書設定は使用できません。',
+      en: 'Document Settings are not available for this built-in document.',
     },
   },
   'workspace.theme.unavailable': {
@@ -558,7 +633,7 @@ export const UI_TEXT_REGISTRY = {
     label: { ja: '基本設定', en: 'Basics' },
   },
   'displaySettings.section.tcy': {
-    label: { ja: 'TCY', en: 'TCY' },
+    label: { ja: '縦中横', en: 'TCY' },
     helper: {
       ja: '表示専用の縦中横。本文のマークダウンは変えません。',
       en: 'Tate-chu-yoko in the preview only. Markdown source is unchanged.',
@@ -601,7 +676,7 @@ export const UI_TEXT_REGISTRY = {
     label: { ja: '行間', en: 'Line Height' },
   },
   'displaySettings.autoTcy': {
-    label: { ja: 'auto TCY', en: 'Auto TCY' },
+    label: { ja: '自動縦中横', en: 'Auto TCY' },
     helper: {
       ja: '表示のみ。文書自体は変更しない',
       en: 'Display only. The document source is not modified.',
@@ -614,7 +689,7 @@ export const UI_TEXT_REGISTRY = {
     },
   },
   'displaySettings.autoTcyTarget': {
-    label: { ja: 'auto TCY 対象', en: 'Auto TCY Target' },
+    label: { ja: '自動縦中横 対象', en: 'Auto TCY Target' },
     helper: {
       ja: '英字を含む短い単語や URL 断片を対象外にする',
       en: 'Excludes short words with Latin letters and URL-like fragments.',
@@ -810,6 +885,145 @@ export const UI_TEXT_REGISTRY = {
   },
   'displaySettings.caretColorCustomValue': {
     label: { ja: 'キャレットカスタム色', en: 'Custom Caret Color' },
+  },
+  'displaySettings.editorArrowPointer': {
+    label: { ja: 'エディタで矢印ポインターを使う', en: 'Use Arrow Pointer in Editor' },
+    helper: {
+      ja: 'Windows の一部環境で I-beam ポインターが白く見えなくなる場合の回避策です。通常編集、Paragraph Plain、Source Mode に適用します。',
+      en: 'Workaround for Windows environments where the I-beam pointer can turn white. Applies to the main editor, Paragraph Plain, and Source Mode.',
+    },
+  },
+  'displaySettings.section.paragraphPlain': {
+    label: { ja: '段落プレーン編集', en: 'Paragraph Plain' },
+  },
+  'displaySettings.paragraphPlainBehavior': {
+    label: { ja: '段落プレーン編集の動作', en: 'Paragraph Plain behavior' },
+    helper: {
+      ja:
+        '軽さ優先: 入力・クリック・スクロールを軽くします。編集中の段落が後続本文に重なることがあります。\n表示優先: 後続本文を隠しにくい表示を優先します。文書の内容によっては一部の操作が重くなることがあります。',
+      en:
+        'Performance: lighter typing, clicks, and scrolling while editing in Paragraph Plain; the edited block may overlap following text.\nComfort: keeps following text more visible; some operations may feel heavier depending on document content.',
+    },
+  },
+  'displaySettings.paragraphPlainBehavior.fast': {
+    label: { ja: '軽さ優先', en: 'Performance' },
+  },
+  'displaySettings.paragraphPlainBehavior.comfortable': {
+    label: { ja: '表示優先', en: 'Comfort' },
+  },
+  'displaySettings.section.typewriter': {
+    label: { ja: 'タイプライターモード', en: 'Typewriter Mode' },
+  },
+  'displaySettings.typewriter.scrollHeading': {
+    label: { ja: 'タイプライタースクロール', en: 'Typewriter Scroll' },
+    helper: {
+      ja: '入力時にキャレットが読みやすい位置へスクロールが追従します（通常編集のみ）。',
+      en: 'Scroll follows the caret while typing so it stays in a comfortable reading position (WYSIWYG only).',
+    },
+  },
+  'displaySettings.typewriter': {
+    label: { ja: 'タイプライターモード', en: 'Typewriter Mode' },
+    helper: {
+      ja: 'タイプライター機能の説明は「タイプライタースクロール」に分割しました。',
+      en: 'See Typewriter Scroll for scroll-follow options.',
+    },
+  },
+  'displaySettings.typewriter.enabled': {
+    label: { ja: 'タイプライタースクロール', en: 'Typewriter scroll' },
+  },
+  'displaySettings.typewriter.followPosition': {
+    label: { ja: '追従位置', en: 'Follow position' },
+    helper: {
+      ja: 'キャレットを置きたい画面内位置のオフセットです。',
+      en: 'Offsets where the caret is kept within the viewport.',
+    },
+  },
+  'displaySettings.typewriter.followBandWidth': {
+    label: { ja: '追従帯の幅', en: 'Follow band width' },
+    helper: {
+      ja: 'この範囲からキャレットが外れたときだけスクロールします。',
+      en: 'Scroll only when the caret leaves this band around the target position.',
+    },
+  },
+  'displaySettings.section.visualFocus': {
+    label: { ja: 'ビジュアルフォーカス', en: 'Visual focus' },
+  },
+  'displaySettings.visualFocus.editBlockHighlight': {
+    label: { ja: '編集ブロックのハイライト', en: 'Edit block highlight' },
+    helper: {
+      ja:
+        '通常編集（WYSIWYG）で、キャレットのある段落などを薄く強調します。Source Mode・段落プレーン編集では無効です。',
+      en:
+        'Highlights the active paragraph-like block in WYSIWYG. Disabled in Source Mode and Paragraph Plain.',
+    },
+  },
+  'displaySettings.visualFocus.dimNonFocusedBlocks': {
+    label: { ja: '編集ブロック以外を薄くする', en: 'Dim non-focused blocks' },
+    helper: {
+      ja:
+        'キャレットのないブロックを薄くします（行単位ではなくブロック単位）。Source Mode・段落プレーン編集では無効です。',
+      en:
+        'Dims blocks without the caret (block-level, not line-level). Disabled in Source Mode and Paragraph Plain.',
+    },
+  },
+  'displaySettings.visualFocus.blockHighlightColor': {
+    label: { ja: '編集ブロックの色', en: 'Block highlight color' },
+    helper: {
+      ja: '編集ブロックのハイライトの下地色です。透明度は別スライダーで調整します。',
+      en: 'Fill color for the active block highlight; opacity is adjusted separately.',
+    },
+  },
+  'displaySettings.visualFocus.blockHighlightOpacity': {
+    label: { ja: '編集ブロックの透明度', en: 'Block highlight opacity' },
+    helper: {
+      ja: '編集ブロックのハイライトの不透明度です。',
+      en: 'Opacity of the active block highlight fill.',
+    },
+  },
+  'displaySettings.visualFocus.dimNonFocusedOpacity': {
+    label: { ja: '非フォーカス時の透明度', en: 'Non-focused block opacity' },
+    helper: {
+      ja: '編集ブロック以外を薄くするときの不透明度です。',
+      en: 'Opacity applied when dimming blocks without the caret.',
+    },
+  },
+  'displaySettings.visualFocus.currentLineHighlight': {
+    label: { ja: '現在行のハイライト', en: 'Current line highlight' },
+    helper: {
+      ja:
+        '通常編集で、折り返し後の表示行（キャレット行）だけを薄く強調します。Source Mode・段落プレーン編集では非表示です。IME 入力・変換中も表示を維持します。ON/OFF はツールバーのクイックメニューからも切り替えられます。色・透明度は表示設定が正本です。',
+      en:
+        'In WYSIWYG, subtly highlights only the current visual line. Hidden in Source Mode and Paragraph Plain; remains visible during IME input and composition. You can toggle it from the toolbar quick menu; color and opacity stay in Display Settings.',
+    },
+  },
+  'displaySettings.visualFocus.currentLineColor': {
+    label: { ja: '現在行の色', en: 'Current line color' },
+    helper: {
+      ja: '現在行ハイライトの下地色です。透明度は別スライダーで調整します。',
+      en: 'Fill color for the current line highlight; opacity is adjusted separately.',
+    },
+  },
+  'displaySettings.visualFocus.currentLineOpacity': {
+    label: { ja: '現在行の透明度', en: 'Current line opacity' },
+    helper: {
+      ja: '現在行ハイライトの不透明度です。',
+      en: 'Opacity of the current line highlight fill.',
+    },
+  },
+  'toolbar.typewriterFocusMenu.button': {
+    label: { ja: 'タイプライター', en: 'Typewriter' },
+  },
+  'toolbar.typewriterFocusMenu.menuAriaLabel': {
+    label: {
+      ja: 'タイプライターとビジュアルフォーカス',
+      en: 'Typewriter and Visual Focus',
+    },
+  },
+  'toolbar.typewriterFocusMenu.openInDisplaySettings': {
+    label: {
+      ja: '表示設定で詳細を編集…',
+      en: 'Edit details in Display Settings…',
+    },
   },
   'displaySettings.support.bugReport': {
     label: { ja: '不具合報告', en: 'Bug Report' },

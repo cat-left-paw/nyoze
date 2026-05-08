@@ -1,6 +1,9 @@
+import type { InternalDocId } from '../internalDocs/internalDocIds'
+
 export type DirtyTrackedTab = {
   dirty: boolean
   cleanMarkdownSnapshot: string
+  internalDocId?: InternalDocId
 }
 
 export function isMarkdownDifferentFromClean(
@@ -19,6 +22,11 @@ export function resolveDirtyState(
   currentMarkdown: string,
 ): boolean | null {
   if (!tab) return null
+  if (tab.internalDocId) {
+    const nextDirty = false
+    if (tab.dirty === nextDirty) return null
+    return nextDirty
+  }
   const nextDirty = isMarkdownDifferentFromClean(
     tab.cleanMarkdownSnapshot,
     currentMarkdown,
@@ -31,6 +39,7 @@ export function resolveDirtyStateFromDocChangeSignal(
   tab: DirtyTrackedTab | undefined,
 ): boolean | null {
   if (!tab) return null
+  if (tab.internalDocId) return null
   if (tab.dirty) return null
   return true
 }

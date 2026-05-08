@@ -35,9 +35,11 @@ import {
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
   IconLink,
+  IconCheck,
   IconList,
-  IconPhoto,
   IconListNumbers,
+  IconListTree,
+  IconPhoto,
   IconMenu2,
   IconMinus,
   IconPlus,
@@ -66,6 +68,7 @@ import {
   formatDocumentTypeLabel,
 } from '../utils/documentTypePresentation'
 import { useWindowControlsOverlayReservation } from '../hooks/useWindowControlsOverlayReservation'
+import { TypewriterVisualFocusMenu } from './TypewriterVisualFocusMenu'
 
 const ICON_SIZE = 18
 const ICON_STROKE = 1.1
@@ -108,7 +111,17 @@ type UnifiedHeaderProps = {
   availability: CommandAvailability
   paragraphPlainModeActive: boolean
   fullPlainEditActive: boolean
+  /** Built-in read-only internal doc (shortcut reference): hide Plain/Source affordances. */
+  internalDocActive?: boolean
   displaySettingsOpen: boolean
+  typewriterModeEnabled: boolean
+  onTypewriterModeEnabledChange: (enabled: boolean) => void
+  visualFocusBlockHighlightEnabled: boolean
+  onVisualFocusBlockHighlightEnabledChange: (enabled: boolean) => void
+  visualFocusDimNonFocusedBlocksEnabled: boolean
+  onVisualFocusDimNonFocusedBlocksEnabledChange: (enabled: boolean) => void
+  visualFocusCurrentLineHighlightEnabled: boolean
+  onVisualFocusCurrentLineHighlightEnabledChange: (enabled: boolean) => void
   onRunMarkCommand: (commandName: 'bold' | 'italic' | 'strike' | 'highlight') => void
   onUndo: () => void
   onRedo: () => void
@@ -133,6 +146,7 @@ type UnifiedHeaderProps = {
   onToggleParagraphPlainMode: () => void
   onToggleFullPlainEdit: () => void
   onOpenDisplaySettings: () => void
+  onOpenDisplaySettingsForTypewriter: () => void
   onShowEditorInlineHint: (message: string) => void
   // Search
   searchOpen: boolean
@@ -165,7 +179,16 @@ export function UnifiedHeader({
   availability,
   paragraphPlainModeActive,
   fullPlainEditActive,
+  internalDocActive = false,
   displaySettingsOpen,
+  typewriterModeEnabled,
+  onTypewriterModeEnabledChange,
+  visualFocusBlockHighlightEnabled,
+  onVisualFocusBlockHighlightEnabledChange,
+  visualFocusDimNonFocusedBlocksEnabled,
+  onVisualFocusDimNonFocusedBlocksEnabledChange,
+  visualFocusCurrentLineHighlightEnabled,
+  onVisualFocusCurrentLineHighlightEnabledChange,
   onRunMarkCommand,
   onUndo,
   onRedo,
@@ -190,6 +213,7 @@ export function UnifiedHeader({
   onToggleParagraphPlainMode,
   onToggleFullPlainEdit,
   onOpenDisplaySettings,
+  onOpenDisplaySettingsForTypewriter,
   onShowEditorInlineHint,
   searchOpen,
   onOpenSearch,
@@ -211,9 +235,36 @@ export function UnifiedHeader({
     { id: 'h5', label: t('editor.heading.level5'), level: 5, icon: IconH5 },
     { id: 'h6', label: t('editor.heading.level6'), level: 6, icon: IconH6 },
   ] as const
+  const listMenuItems = [
+    {
+      id: 'bullet',
+      icon: IconList,
+      label: t('editor.bulletList'),
+      selected: availability.isBulletList,
+      onSelect: onToggleBulletList,
+    },
+    {
+      id: 'ordered',
+      icon: IconListNumbers,
+      label: t('editor.orderedList'),
+      selected: availability.isOrderedList,
+      onSelect: onToggleOrderedList,
+    },
+    {
+      id: 'checklist',
+      icon: IconSquareCheck,
+      label: t('editor.checklist'),
+      selected: availability.isChecklist,
+      onSelect: onToggleChecklist,
+    },
+  ]
+  const listMenuTriggerActive =
+    availability.isBulletList || availability.isOrderedList || availability.isChecklist
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
+  const [listMenuOpen, setListMenuOpen] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
   const headingMenuRef = useRef<HTMLDivElement | null>(null)
+  const listMenuRef = useRef<HTMLDivElement | null>(null)
   const headerRef = useRef<HTMLElement | null>(null)
   const leftZoneRef = useRef<HTMLDivElement | null>(null)
   const centerRef = useRef<HTMLDivElement | null>(null)
@@ -347,17 +398,20 @@ export function UnifiedHeader({
   )
 
   useEffect(() => {
-    if (!headingMenuOpen) return
+    if (!headingMenuOpen && !listMenuOpen) return
 
     const onMouseDown = (event: MouseEvent) => {
-      if (!headingMenuRef.current) return
-      if (headingMenuRef.current.contains(event.target as Node)) return
+      const target = event.target as Node
+      if (headingMenuRef.current?.contains(target)) return
+      if (listMenuRef.current?.contains(target)) return
       setHeadingMenuOpen(false)
+      setListMenuOpen(false)
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setHeadingMenuOpen(false)
+      setListMenuOpen(false)
     }
 
     document.addEventListener('mousedown', onMouseDown, true)
@@ -366,11 +420,12 @@ export function UnifiedHeader({
       document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [headingMenuOpen])
+  }, [headingMenuOpen, listMenuOpen])
 
   useEffect(() => {
     if (!plainFormattingBlocked) return
     setHeadingMenuOpen(false)
+    setListMenuOpen(false)
   }, [plainFormattingBlocked])
 
   const withPlainFormattingGuard = useCallback(
@@ -378,6 +433,7 @@ export function UnifiedHeader({
       if (plainModeKind) {
         onShowEditorInlineHint(plainFormattingTooltip)
         setHeadingMenuOpen(false)
+        setListMenuOpen(false)
         return
       }
       action()
@@ -511,6 +567,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={onToggleWritingMode}
+          disabled={internalDocActive}
           type='button'
           data-tooltip={isVertical ? t('editor.switchHorizontal') : t('editor.switchVertical')}
           aria-label={isVertical ? t('editor.switchHorizontal') : t('editor.switchVertical')}
@@ -537,6 +594,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={onSave}
+          disabled={internalDocActive}
           type='button'
           data-tooltip={shiftPressed ? t('common.saveAs') : t('common.save')}
           aria-label={shiftPressed ? t('common.saveAs') : t('common.save')}
@@ -640,7 +698,13 @@ export function UnifiedHeader({
         <div className='toolbar-heading-menu-wrap' ref={headingMenuRef}>
           <button
             className={`toolbar-btn-icon-only toolbar-heading-trigger${headingMenuOpen ? ' open' : ''}`}
-            onClick={withPlainFormattingGuard(() => setHeadingMenuOpen((prev) => !prev))}
+            onClick={withPlainFormattingGuard(() => {
+              setHeadingMenuOpen((prev) => {
+                const next = !prev
+                if (next) setListMenuOpen(false)
+                return next
+              })
+            })}
             type='button'
             tabIndex={-1}
             aria-label={t('editor.heading')}
@@ -652,13 +716,14 @@ export function UnifiedHeader({
             <IconChevronDown size={12} stroke={ICON_STROKE} />
           </button>
           {headingMenuOpen && (
-            <div className='toolbar-heading-menu' role='menu' aria-label={t('editor.headingMenu')}>
+            <div className='toolbar-select-menu' role='menu' aria-label={t('editor.headingMenu')}>
               {headingItems.map((item) => {
                 const Icon = item.icon
+                const rowSelected = availability.isHeading === item.level
                 return (
                   <button
                     key={item.id}
-                    className={`toolbar-heading-menu-item${availability.isHeading === item.level ? ' active' : ''}`}
+                    className={`toolbar-select-menu-item${rowSelected ? ' toolbar-select-menu-item--selected' : ''}`}
                     type='button'
                     role='menuitem'
                     disabled={plainFormattingBlocked}
@@ -668,13 +733,18 @@ export function UnifiedHeader({
                     })}
                   >
                     <Icon size={16} stroke={ICON_STROKE} />
-                    <span>{item.label}</span>
+                    <span className='toolbar-select-menu-label'>{item.label}</span>
+                    <span className='toolbar-select-menu-check-slot' aria-hidden>
+                      {rowSelected ? (
+                        <IconCheck className='toolbar-select-menu-check' size={14} stroke={2} />
+                      ) : null}
+                    </span>
                   </button>
                 )
               })}
               <div className='toolbar-heading-menu-separator' role='separator' />
               <button
-                className={`toolbar-heading-menu-item${availability.isHeading === false ? ' active' : ''}`}
+                className={`toolbar-select-menu-item${availability.isHeading === false ? ' toolbar-select-menu-item--selected' : ''}`}
                 type='button'
                 role='menuitem'
                 disabled={plainFormattingBlocked}
@@ -684,41 +754,65 @@ export function UnifiedHeader({
                 })}
               >
                 <IconHeadingOff size={16} stroke={ICON_STROKE} />
-                <span>{t('editor.heading.clear')}</span>
+                <span className='toolbar-select-menu-label'>{t('editor.heading.clear')}</span>
+                <span className='toolbar-select-menu-check-slot' aria-hidden>
+                  {availability.isHeading === false ? (
+                    <IconCheck className='toolbar-select-menu-check' size={14} stroke={2} />
+                  ) : null}
+                </span>
               </button>
             </div>
           )}
         </div>
-        <button
-          className={`toolbar-btn-icon-only${availability.isBulletList ? ' toggle-active' : ''}`}
-          onClick={withPlainFormattingGuard(onToggleBulletList)}
-          type='button'
-          tabIndex={-1}
-          aria-label={t('editor.bulletList')}
-          {...getFormattingButtonProps(t('editor.bulletList'), !availability.canBlockTransforms)}
-        >
-          <IconList size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
-        <button
-          className={`toolbar-btn-icon-only${availability.isOrderedList ? ' toggle-active' : ''}`}
-          onClick={withPlainFormattingGuard(onToggleOrderedList)}
-          type='button'
-          tabIndex={-1}
-          aria-label={t('editor.orderedList')}
-          {...getFormattingButtonProps(t('editor.orderedList'), !availability.canBlockTransforms)}
-        >
-          <IconListNumbers size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
-        <button
-          className={`toolbar-btn-icon-only${availability.isChecklist ? ' toggle-active' : ''}`}
-          onClick={withPlainFormattingGuard(onToggleChecklist)}
-          type='button'
-          tabIndex={-1}
-          aria-label={t('editor.checklist')}
-          {...getFormattingButtonProps(t('editor.checklist'), !availability.canBlockTransforms)}
-        >
-          <IconSquareCheck size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
+        <div className='toolbar-list-menu-wrap' ref={listMenuRef}>
+          <button
+            className={`toolbar-btn-icon-only toolbar-list-trigger${listMenuOpen ? ' open' : ''}${listMenuTriggerActive ? ' toggle-active' : ''}`}
+            onClick={withPlainFormattingGuard(() => {
+              setListMenuOpen((prev) => {
+                const next = !prev
+                if (next) setHeadingMenuOpen(false)
+                return next
+              })
+            })}
+            type='button'
+            tabIndex={-1}
+            aria-label={t('editor.listMenu')}
+            aria-haspopup='menu'
+            aria-expanded={listMenuOpen}
+            {...getFormattingButtonProps(t('editor.listMenu'), !availability.canBlockTransforms)}
+          >
+            <IconListTree size={ICON_SIZE} stroke={ICON_STROKE} />
+            <IconChevronDown size={12} stroke={ICON_STROKE} />
+          </button>
+          {listMenuOpen && (
+            <div className='toolbar-select-menu' role='menu' aria-label={t('editor.listMenu')}>
+              {listMenuItems.map((item) => {
+                const Icon = item.icon
+                return (
+                  <button
+                    key={item.id}
+                    className={`toolbar-select-menu-item${item.selected ? ' toolbar-select-menu-item--selected' : ''}`}
+                    type='button'
+                    role='menuitem'
+                    disabled={plainFormattingBlocked}
+                    onClick={withPlainFormattingGuard(() => {
+                      item.onSelect()
+                      setListMenuOpen(false)
+                    })}
+                  >
+                    <Icon size={16} stroke={ICON_STROKE} />
+                    <span className='toolbar-select-menu-label'>{item.label}</span>
+                    <span className='toolbar-select-menu-check-slot' aria-hidden>
+                      {item.selected ? (
+                        <IconCheck className='toolbar-select-menu-check' size={14} stroke={2} />
+                      ) : null}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
         <button
           className={`toolbar-btn-icon-only${availability.isBlockquote ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(onToggleBlockquote)}
@@ -826,7 +920,7 @@ export function UnifiedHeader({
           onPointerDown={(e) => e.preventDefault()}
           onMouseDown={(e) => e.preventDefault()}
           onClick={onToggleParagraphPlainMode}
-          disabled={fullPlainEditActive || (!availability.canParagraphPlain && !paragraphPlainModeActive)}
+          disabled={fullPlainEditActive || (!availability.canParagraphPlain && !paragraphPlainModeActive) || internalDocActive}
           type='button'
           data-tooltip={t('editor.paragraphPlain')}
           aria-label={t('editor.paragraphPlain')}
@@ -837,7 +931,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${fullPlainEditActive ? ' toggle-active' : ''}`}
           onClick={onToggleFullPlainEdit}
-          disabled={paragraphPlainModeActive}
+          disabled={paragraphPlainModeActive || internalDocActive}
           type='button'
           data-tooltip={t('editor.sourceMode')}
           aria-label={t('editor.sourceMode')}
@@ -845,6 +939,21 @@ export function UnifiedHeader({
         >
           <IconFileCode size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
+        <span className='toolbar-sep'>|</span>
+        <TypewriterVisualFocusMenu
+          uiLanguageMode={uiLanguageMode}
+          typewriterModeEnabled={typewriterModeEnabled}
+          onTypewriterModeEnabledChange={onTypewriterModeEnabledChange}
+          visualFocusBlockHighlightEnabled={visualFocusBlockHighlightEnabled}
+          onVisualFocusBlockHighlightEnabledChange={onVisualFocusBlockHighlightEnabledChange}
+          visualFocusDimNonFocusedBlocksEnabled={visualFocusDimNonFocusedBlocksEnabled}
+          onVisualFocusDimNonFocusedBlocksEnabledChange={onVisualFocusDimNonFocusedBlocksEnabledChange}
+          visualFocusCurrentLineHighlightEnabled={visualFocusCurrentLineHighlightEnabled}
+          onVisualFocusCurrentLineHighlightEnabledChange={
+            onVisualFocusCurrentLineHighlightEnabledChange
+          }
+          onOpenDisplaySettingsForTypewriter={onOpenDisplaySettingsForTypewriter}
+        />
         <button
           className={`toolbar-btn-icon-only${displaySettingsOpen ? ' toggle-active' : ''}`}
           onClick={onOpenDisplaySettings}

@@ -37,6 +37,8 @@ import {
   CARET_COLOR_MODE_STORAGE_KEY,
   CARET_COLOR_CUSTOM_STORAGE_KEY,
   DEFAULT_CARET_COLOR_MODE,
+  EDITOR_ARROW_POINTER_STORAGE_KEY,
+  DEFAULT_EDITOR_ARROW_POINTER,
   REGISTERED_FONTS_STORAGE_KEY,
   RUBY_VISIBILITY_STORAGE_KEY,
   SELECTED_FONT_STORAGE_KEY,
@@ -914,6 +916,26 @@ export function saveCaretColorCustom(value: string | null): void {
   }
 }
 
+export function loadUseEditorArrowPointer(): boolean {
+  try {
+    return window.localStorage.getItem(EDITOR_ARROW_POINTER_STORAGE_KEY) === '1'
+  } catch {
+    return DEFAULT_EDITOR_ARROW_POINTER
+  }
+}
+
+export function saveUseEditorArrowPointer(value: boolean): void {
+  try {
+    if (value) {
+      window.localStorage.setItem(EDITOR_ARROW_POINTER_STORAGE_KEY, '1')
+    } else {
+      window.localStorage.removeItem(EDITOR_ARROW_POINTER_STORAGE_KEY)
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /** Phase5-H Slice 3: settings.json persistence via IPC */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -990,6 +1012,7 @@ export async function saveSettingsJson(settings: SettingsJson): Promise<void> {
     if (settings.rubyVisible !== undefined) saveRubyVisibility(settings.rubyVisible)
     if (settings.caretColorMode !== undefined) saveCaretColorMode(normalizeCaretColorMode(settings.caretColorMode))
     if (settings.caretColorCustom !== undefined) saveCaretColorCustom(settings.caretColorCustom ?? null)
+    if (settings.useEditorArrowPointer !== undefined) saveUseEditorArrowPointer(settings.useEditorArrowPointer)
   } catch {
     // ignore localStorage errors
   }

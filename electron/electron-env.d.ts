@@ -123,6 +123,9 @@ interface Window {
       read: () => Promise<Record<string, unknown> | null>
       write: (data: Record<string, unknown>) => Promise<boolean>
     }
+    appInfo: {
+      windowsStore: boolean
+    }
     update: {
       checkForUpdate: () => Promise<{
         ok: boolean
@@ -155,6 +158,7 @@ interface Window {
         content: string
         savedStat: { mtimeMs: number; size: number } | null
       } | null>
+      establishWorkspaceRoot: (dirPath: string) => Promise<string | null>
     }
   }
   __NYOZE_E2E__?: {
@@ -173,5 +177,48 @@ interface Window {
     openFileInNewTab: (
       filePath: string,
     ) => Promise<'added' | 'tab-limit' | 'cancelled' | false>
+    openShortcutReferenceDoc?: () => Promise<
+      'added' | 'tab-limit' | 'cancelled' | false
+    >
+    macosArrowScrollClampE2eEvaluate?: (payload: {
+      gate: import('../src/editor-core/features/macosArrowScrollClamp').MacosArrowScrollClampGateInput
+      beforeTop: number
+      beforeLeft: number
+      afterTop: number
+      afterLeft: number
+      clientWidth: number
+      clientHeight: number
+    }) => {
+      shouldGate: boolean
+      scrollTop: number
+      scrollLeft: number
+      changed: boolean
+    }
+    /** NYOZE_E2E: set trusted workspace + Explorer root to an absolute fixture directory. */
+    establishFixtureWorkspace?: (dirPath: string) => Promise<boolean>
+  }
+  __NYOZE_PP_PROFILE__?: Array<{
+    op: 'click-switch' | 'enter-reentry' | 'arrow-switch'
+    phase: string
+    ms: number
+    meta?: string
+    ts: number
+  }>
+  __NYOZE_ENABLE_PP_PROFILER__?: boolean
+  __nyozeParagraphPlainProfiler?: {
+    isEnabled(): boolean
+    getSamples(): NonNullable<Window['__NYOZE_PP_PROFILE__']>
+    clear(): void
+    getSessions(): Array<NonNullable<Window['__NYOZE_PP_PROFILE__']>>
+    cancelActiveSession(reason?: string): void
+  }
+  /** Internal Paragraph Plain experiment flags (localStorage); not user-facing. */
+  __nyozeParagraphPlainExperiments?: {
+    getState(): {
+      lightweight: boolean
+      scrollRepositionDisabled: boolean
+      reservedBlockSizeDisabled: boolean
+      formalBehavior: 'fast' | 'comfortable'
+    }
   }
 }

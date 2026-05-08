@@ -403,7 +403,8 @@ export function FileExplorerPane({
             )}
 
             {visibleEntries.map((entry) => {
-              const isClipboardSource =
+              const isCutClipboardSource =
+                clipboardMode === "cut" &&
                 clipboardSourcePath != null &&
                 clipboardSourcePath === entry.path;
               const normalizedEntryPath = normalizeForCompare(entry.path);
@@ -419,7 +420,7 @@ export function FileExplorerPane({
               return (
                 <button
                   key={entry.path}
-                  className={`file-explorer-tree-item${entry.selected ? " is-selected" : ""}${entry.isDirectory ? " is-dir" : ""}${isClipboardSource ? " is-clipboard-source" : ""}${isActiveTabFile ? " is-active-tab-file" : isOpenInTab ? " is-open-in-tab" : ""}`}
+                  className={`file-explorer-tree-item${entry.selected ? " is-selected" : ""}${entry.isDirectory ? " is-dir" : ""}${isCutClipboardSource ? " is-clipboard-source" : ""}${isActiveTabFile ? " is-active-tab-file" : isOpenInTab ? " is-open-in-tab" : ""}`}
                   type="button"
                   onClick={() => {
                     closeContextMenu();

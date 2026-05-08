@@ -1,16 +1,20 @@
 import { useEffect, useRef } from 'react'
 import { createEditorCore } from '../../editor-core/EditorCore'
+import type { CreateEditorCoreOptions } from '../../editor-core/EditorCore'
 import type {
   EditorCoreHandle,
   LineBreakPolicy,
   LogEntry,
   OpenExternalUrl,
 } from '../../editor-core/types'
+import type { TypewriterRuntimeRef } from './typewriterRuntimeRef'
 
 type UseEditorCoreBridgeOptions = {
   coreRef?: { current: EditorCoreHandle | null }
   editorDivRef: { current: HTMLDivElement | null }
   initialLineBreakPolicy: LineBreakPolicy
+  /** Live Typewriter settings + Source Mode flag for scroll suppression */
+  typewriterRuntimeRef?: TypewriterRuntimeRef
   onLog: (entry: LogEntry) => void
   onSelectionUpdate: (snapshot: string) => void
   onParagraphPlainModeChange: (active: boolean) => void
@@ -36,12 +40,9 @@ type ConnectEditorCoreBridgeOptions = {
   coreRef: { current: EditorCoreHandle | null }
   element: HTMLElement
   lineBreakPolicy: LineBreakPolicy
+  typewriterRuntimeRef?: TypewriterRuntimeRef
   callbacks: BridgeCallbacks
-  createCore?: (options: {
-    element: HTMLElement
-    lineBreakPolicy?: LineBreakPolicy
-    openExternalUrl?: OpenExternalUrl
-  }) => EditorCoreHandle
+  createCore?: (options: CreateEditorCoreOptions) => EditorCoreHandle
 }
 
 export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions): () => void {
@@ -49,6 +50,7 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
     coreRef,
     element,
     lineBreakPolicy,
+    typewriterRuntimeRef,
     callbacks,
     createCore = createEditorCore,
   } = options
@@ -63,10 +65,27 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
     onReady,
   } = callbacks
 
+  const tw = typewriterRuntimeRef
   const core = createCore({
     element,
     lineBreakPolicy,
     openExternalUrl,
+    getMacosArrowScrollClampEnabled: () =>
+      tw?.current.macosArrowScrollClampEnabled !== false,
+    ...(tw
+      ? {
+          getTypewriterModeEnabled: () => tw.current.enabled === true,
+          getTypewriterOffsetRatio: () => tw.current.offsetRatio,
+          getTypewriterFollowBandRatio: () => tw.current.followBandRatio,
+          getIsSourceModeActive: () => tw.current.sourceModeActive === true,
+          getVisualFocusBlockHighlightEnabled: () =>
+            tw.current.visualFocusBlockHighlightEnabled === true,
+          getVisualFocusDimNonFocusedBlocksEnabled: () =>
+            tw.current.visualFocusDimNonFocusedBlocksEnabled === true,
+          getVisualFocusCurrentLineHighlightEnabled: () =>
+            tw.current.visualFocusCurrentLineHighlightEnabled === true,
+        }
+      : {}),
   })
   coreRef.current = core
   onParagraphPlainModeChange(core.isParagraphPlainModeActive())
@@ -114,6 +133,7 @@ export function useEditorCoreBridge({
   coreRef: sharedCoreRef,
   editorDivRef,
   initialLineBreakPolicy,
+  typewriterRuntimeRef,
   onLog,
   onSelectionUpdate,
   onParagraphPlainModeChange,
@@ -158,6 +178,7 @@ export function useEditorCoreBridge({
       coreRef,
       element: el,
       lineBreakPolicy: initialLineBreakPolicy,
+      typewriterRuntimeRef,
       callbacks: {
         onLog: (entry) => callbacksRef.current.onLog(entry),
         onSelectionUpdate: (snapshot) => callbacksRef.current.onSelectionUpdate(snapshot),
@@ -169,7 +190,7 @@ export function useEditorCoreBridge({
         onReady: (core) => callbacksRef.current.onReady?.(core),
       },
     })
-  }, [coreRef, editorDivRef, initialLineBreakPolicy])
+  }, [coreRef, editorDivRef, initialLineBreakPolicy, typewriterRuntimeRef])
 
   return coreRef
 }

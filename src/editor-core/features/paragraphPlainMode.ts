@@ -18,11 +18,43 @@ import {
 } from './paragraphSource'
 import {
   shouldRequestParagraphPlainOverlayMeasure,
+  shouldRequestParagraphPlainOverlayPosition,
 } from './paragraphPlainOverlayMeasure'
 import type {
   ParagraphPlainOverlayMeasureReason,
 } from './paragraphPlainOverlayMeasure'
+import {
+  selectReusableParagraphPlainLayoutSnapshot,
+  type ParagraphPlainLayoutReuseSnapshot,
+} from './paragraphPlainLayoutReuse'
 import { shouldBlockShiftEnterInParagraphPlain } from './lineBreakGuards'
+import {
+  ensureParagraphPlainProfilerWindowApi,
+  paragraphPlainProfilerBeginSession,
+  paragraphPlainProfilerCancelSession,
+  paragraphPlainProfilerClearEndScheduledForFlush,
+  paragraphPlainProfilerCompleteSessionAfterFlush,
+  paragraphPlainProfilerHasActiveSession,
+  paragraphPlainProfilerMark,
+  paragraphPlainProfilerMarkEndScheduledForFlush,
+  paragraphPlainProfilerPeekEndScheduledForFlush,
+  paragraphPlainProfilerRunPhase,
+} from './paragraphPlainProfiler'
+import {
+  ensureParagraphPlainExperimentsWindowApi,
+  isParagraphPlainReservedBlockSizeDisabled,
+  isParagraphPlainScrollRepositionDisabled,
+} from './paragraphPlainExperiments'
+import {
+  computeComfortableReservedHostTargetPx,
+  paragraphPlainReserveAxisBasePx,
+  resolveParagraphPlainReservedStepPx,
+  type ParagraphPlainReservedStepPxCache,
+} from './paragraphPlainReservedLayout'
+import {
+  createHorizontalEditorSurfaceWheelApplier,
+  createVerticalWheelScrollController,
+} from './verticalWheelScroll'
 
 type ParagraphPlainPluginState = {
   pos: number | null
@@ -43,6 +75,27 @@ type ParagraphPlainOverlayBaseRect = {
   height: number
 }
 
+/** PP-L4: flush 直呼びでも read と同じ子 phase 名で block/host の GBC コストを比較する。 */
+function computeParagraphPlainBlockRectRelativeToHostFromElementProfiled(
+  blockElement: Element,
+  host: HTMLElement,
+): ParagraphPlainOverlayBaseRect {
+  const rect = paragraphPlainProfilerRunPhase(
+    'readParagraphPlainBlockRectRelativeToHost.blockRect',
+    () => blockElement.getBoundingClientRect(),
+  )
+  const hostRect = paragraphPlainProfilerRunPhase(
+    'readParagraphPlainBlockRectRelativeToHost.hostRect',
+    () => host.getBoundingClientRect(),
+  )
+  return {
+    top: rect.top - hostRect.top + host.scrollTop,
+    left: rect.left - hostRect.left + host.scrollLeft,
+    width: Math.max(1, rect.width),
+    height: Math.max(1, rect.height),
+  }
+}
+
 type ParagraphPlainOverlayUpdateFlags = {
   needsPosition: boolean
   needsMeasure: boolean
@@ -59,6 +112,13 @@ export type ParagraphPlainOverlayLayoutCache = {
   measuredHeight: number | null
   reservedSize: number | null
   writingMode: string | null
+  /** 対象 block の computed style 由来。テーマ / フォント / 行高の DOM 変化を PM トランザクションなしで検知する。 */
+  blockLayoutSignature: string | null
+  /**
+   * flush 直後の block 相対矩形（当時の reserved / 折返し状態を含む）。ペイン幅変化など style 指紋が
+   * 不変でも getBoundingClientRect だけ変わるケースを sync で検知する。
+   */
+  blockLayoutLastObservedRect: ParagraphPlainOverlayBaseRect | null
   activeBlockKey: string | null
   hostIdentity: unknown
 }
@@ -97,9 +157,93 @@ export function createEmptyParagraphPlainOverlayLayoutCache(): ParagraphPlainOve
     measuredHeight: null,
     reservedSize: null,
     writingMode: null,
+    blockLayoutSignature: null,
+    blockLayoutLastObservedRect: null,
     activeBlockKey: null,
     hostIdentity: null,
   }
+}
+
+/** Block DOM の表示レイアウト指紋（computed style）。ペイン幅・折返しのみの変化は `readParagraphPlainBlockRectRelativeToHost` 側で検知する。 */
+export function computeParagraphPlainBlockLayoutSignature(el: Element | null): string {
+  if (!el || typeof getComputedStyle === 'undefined') return ''
+  try {
+    const cs = getComputedStyle(el)
+    return [cs.writingMode, cs.fontSize, cs.lineHeight, cs.fontFamily, cs.letterSpacing].join(
+      '\0',
+    )
+  } catch {
+    return ''
+  }
+}
+
+export function paragraphPlainOverlayBlockRectsRoughlyEqual(
+  a: ParagraphPlainOverlayBaseRect | null,
+  b: ParagraphPlainOverlayBaseRect | null,
+  epsilon = 0.75,
+): boolean {
+  if (a == null || b == null) return false
+  return (
+    Math.abs(a.top - b.top) <= epsilon &&
+    Math.abs(a.left - b.left) <= epsilon &&
+    Math.abs(a.width - b.width) <= epsilon &&
+    Math.abs(a.height - b.height) <= epsilon
+  )
+}
+
+/**
+ * 既知の block DOM と host から相対矩形を 1 回の layout read（block + host）で求める。
+ * `readParagraphPlainBlockRectRelativeToHost` / flush の観測再利用の共通実体。
+ */
+export function computeParagraphPlainBlockRectRelativeToHostFromElement(
+  blockElement: Element,
+  host: HTMLElement,
+): ParagraphPlainOverlayBaseRect {
+  return computeParagraphPlainBlockRectRelativeToHostFromElementProfiled(blockElement, host)
+}
+
+/** 現在の DOM レイアウト（host の reserved 含む）での block 相対矩形。sync / flush 末尾の観測に使う。 */
+export function readParagraphPlainBlockRectRelativeToHost(params: {
+  view: EditorView
+  pos: number
+  typeName: string
+  host: HTMLElement | null
+}): ParagraphPlainOverlayBaseRect | null {
+  const { view, pos, typeName, host } = params
+  if (!host) return null
+  const blockElement = paragraphPlainProfilerRunPhase(
+    'readParagraphPlainBlockRectRelativeToHost.resolveBlockElement',
+    () => resolveBlockElementAtPos(view, pos, typeName),
+  )
+  if (!blockElement) return null
+  return computeParagraphPlainBlockRectRelativeToHostFromElement(blockElement, host)
+}
+
+/**
+ * PP-L2: same-block で pm の from/to が不変でも、ホスト / 書字モード / block の style 指紋 /
+ * flush 時点との相対矩形がずれていれば overlay の再配置・再計測が必要。
+ */
+export function shouldParagraphPlainSyncScheduleOverlayUpdate(params: {
+  positionalChange: boolean
+  cache: ParagraphPlainOverlayLayoutCache
+  overlayHost: HTMLElement | null
+  overlayWritingMode: string
+  blockLayoutSignature: string
+  liveBlockRect: ParagraphPlainOverlayBaseRect | null
+}): boolean {
+  if (params.positionalChange) return true
+  const c = params.cache
+  if (!c.hasMeasurement) return true
+  if (c.hostIdentity !== params.overlayHost) return true
+  if (c.writingMode !== params.overlayWritingMode) return true
+  if (c.blockLayoutSignature == null) return true
+  if (c.blockLayoutSignature !== params.blockLayoutSignature) return true
+  if (params.liveBlockRect == null) return true
+  if (c.blockLayoutLastObservedRect == null) return true
+  return !paragraphPlainOverlayBlockRectsRoughlyEqual(
+    c.blockLayoutLastObservedRect,
+    params.liveBlockRect,
+  )
 }
 
 export function shouldRemeasureParagraphPlainOverlay(params: {
@@ -174,37 +318,46 @@ export function resolveParagraphPlainSplitBeforeNode({
   lineBreakPolicy,
   allowMarkdownBlockReparse = false,
 }: ResolveSplitBeforeNodeParams): PMNode | null {
-  const paragraphType = state.schema.nodes.paragraph
-  if (!paragraphType) return null
+  return paragraphPlainProfilerRunPhase('resolveParagraphPlainSplitBeforeNode', (): PMNode | null => {
+    const paragraphType = state.schema.nodes.paragraph
+    if (!paragraphType) return null
 
-  if (allowMarkdownBlockReparse) {
-    const reparsed = parseParagraphPlainExitReplacementContent(
-      state,
-      beforeText,
-      typeName,
-      lineBreakPolicy,
-    )
-    if (reparsed) return reparsed
-  }
+    if (allowMarkdownBlockReparse) {
+      const reparsed = paragraphPlainProfilerRunPhase(
+        'parseParagraphPlainExitReplacementContent',
+        () =>
+          parseParagraphPlainExitReplacementContent(
+            state,
+            beforeText,
+            typeName,
+            lineBreakPolicy,
+          ),
+        'split-before',
+      )
+      if (reparsed) return reparsed
+    }
 
-  const beforeDoc = parseMarkdown(state.schema, beforeText, lineBreakPolicy)
-  if (beforeDoc.childCount === 1 && beforeDoc.child(0).type.name === typeName) {
-    return beforeDoc.child(0)
-  }
-  if (beforeDoc.childCount === 0) {
+    const beforeDoc = parseMarkdown(state.schema, beforeText, lineBreakPolicy)
+    if (beforeDoc.childCount === 1 && beforeDoc.child(0).type.name === typeName) {
+      return beforeDoc.child(0)
+    }
+    if (beforeDoc.childCount === 0) {
+      return typeName === 'heading'
+        ? currentNode.type.create(currentNode.attrs)
+        : paragraphType.create()
+    }
     return typeName === 'heading'
-      ? currentNode.type.create(currentNode.attrs)
-      : paragraphType.create()
-  }
-  return typeName === 'heading'
-    ? currentNode.type.create(currentNode.attrs, beforeText ? [state.schema.text(beforeText)] : undefined)
-    : paragraphType.create(null, beforeText ? [state.schema.text(beforeText)] : undefined)
+      ? currentNode.type.create(currentNode.attrs, beforeText ? [state.schema.text(beforeText)] : undefined)
+      : paragraphType.create(null, beforeText ? [state.schema.text(beforeText)] : undefined)
+  })
 }
 
 export function createParagraphPlainModeController(
   options: CreateParagraphPlainModeControllerOptions,
 ): ParagraphPlainModeController {
   const { editor, getLineBreakPolicy, pushLog } = options
+
+  ensureParagraphPlainProfilerWindowApi()
 
   const paragraphPlainModeListeners = new Set<ParagraphPlainModeListener>()
   const paragraphPlainPluginKey = new PluginKey<ParagraphPlainPluginState>('nyozeParagraphPlainMode')
@@ -219,8 +372,22 @@ export function createParagraphPlainModeController(
   let paragraphPlainLastView: EditorView | null = null
   let paragraphPlainScrollSource: HTMLElement | null = null
   let paragraphPlainScrollHandler: (() => void) | null = null
+  /** ResizeObserver 非対応環境のみ window.resize でホスト寸法変化を代替検知 */
   let paragraphPlainResizeHandler: (() => void) | null = null
-  let paragraphPlainPendingSelection: { start: number; end: number } | null = null
+  let paragraphPlainHostResizeObserver: ResizeObserver | null = null
+  let paragraphPlainHostResizeObserved: HTMLElement | null = null
+  let paragraphPlainHostLastClientSize: { w: number; h: number } | null = null
+  let paragraphPlainOverlayWheelCleanup: (() => void) | null = null
+  let paragraphPlainOverlayWheelViewDom: HTMLElement | null = null
+  // 通常は textarea の選択範囲を絶対 offset で復元するが、隣接 block への
+  // 矢印移動など「次の block の物理的長さに依存する終端配置」のときは
+  // serialize 結果の length を事前に取らず sentinel を渡し、startParagraphPlain
+  // 側で markdown.length を採用する。これで block 切替時の余計な
+  // serializeBlockNode を 1 回省ける。
+  type PendingOverlaySelection =
+    | { kind: 'absolute'; start: number; end: number }
+    | { kind: 'block-end' }
+  let paragraphPlainPendingSelection: PendingOverlaySelection | null = null
   let paragraphPlainOverlayUpdateFrame: number | null = null
   let paragraphPlainOverlayPending: ParagraphPlainOverlayUpdateFlags = {
     needsPosition: false,
@@ -235,9 +402,81 @@ export function createParagraphPlainModeController(
   // the caret. Regular activations / block switches leave it false to avoid
   // gratuitous scroll jumps.
   let paragraphPlainScrollIntoViewPending = false
+  /**
+   * click-switch 時: overlay の配置・計測 flush を先に済ませ、その後に focus / selection を適用して
+   * 同期レイアウトとブロックする時間を減らす（PP click-switch focus 遅延スライス）。
+   */
+  let paragraphPlainOverlayFocusDeferred = false
   // CSS variable name set on the overlay host (outside ProseMirror's DOM)
   // to avoid triggering ProseMirror's MutationObserver infinite loop.
   const PP_RESERVED_BLOCK_SIZE_VAR = '--pp-reserved-block-size'
+  let paragraphPlainLayoutReuseEpoch = 0
+  const paragraphPlainLayoutReuseSnapshots = new Map<
+    string,
+    ParagraphPlainLayoutReuseSnapshot
+  >()
+
+  /** comfortable 時: host に実際に書いた量子化済み px（ideal の `reservedSize` と別）。 */
+  let comfortableReservedRaf: number | null = null
+  let pendingComfortableReservedHostPx: number | null = null
+  let lastComfortableReservedHostPx: number | null = null
+  let comfortableReservedStepPxCache: ParagraphPlainReservedStepPxCache | null = null
+
+  function cancelComfortableReservedHostAnimation(): void {
+    if (comfortableReservedRaf != null) {
+      cancelAnimationFrame(comfortableReservedRaf)
+      comfortableReservedRaf = null
+    }
+    pendingComfortableReservedHostPx = null
+  }
+
+  /** commit / position 先頭など: 保留中の host 予約を破棄せず同期適用。 */
+  function flushComfortableReservedHostPendingSync(): void {
+    if (comfortableReservedRaf != null) {
+      cancelAnimationFrame(comfortableReservedRaf)
+      comfortableReservedRaf = null
+    }
+    if (isParagraphPlainReservedBlockSizeDisabled() || !paragraphPlainOverlayHost) {
+      pendingComfortableReservedHostPx = null
+      return
+    }
+    const pending = pendingComfortableReservedHostPx
+    pendingComfortableReservedHostPx = null
+    if (pending != null) {
+      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, `${pending}px`)
+      lastComfortableReservedHostPx = pending
+    }
+  }
+
+  /** overlay 更新 hot path: rAF で host へ 1 フレームにまとめて書く（同一値はスキップ）。 */
+  function scheduleComfortableReservedHostWrite(hostTargetPx: number): void {
+    if (isParagraphPlainReservedBlockSizeDisabled() || !paragraphPlainOverlayHost) return
+    if (hostTargetPx === lastComfortableReservedHostPx) return
+    pendingComfortableReservedHostPx = hostTargetPx
+    if (comfortableReservedRaf != null) return
+    comfortableReservedRaf = requestAnimationFrame(() => {
+      comfortableReservedRaf = null
+      const target = pendingComfortableReservedHostPx
+      pendingComfortableReservedHostPx = null
+      if (
+        target == null ||
+        !paragraphPlainOverlayHost ||
+        isParagraphPlainReservedBlockSizeDisabled()
+      ) {
+        return
+      }
+      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, `${target}px`)
+      lastComfortableReservedHostPx = target
+    })
+  }
+
+  /** position など即時整合が必要な経路。 */
+  function applyComfortableReservedHostImmediate(hostTargetPx: number): void {
+    cancelComfortableReservedHostAnimation()
+    if (isParagraphPlainReservedBlockSizeDisabled() || !paragraphPlainOverlayHost) return
+    paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, `${hostTargetPx}px`)
+    lastComfortableReservedHostPx = hostTargetPx
+  }
 
   function buildParagraphPlainActiveBlockKey(
     pos: number | null,
@@ -247,9 +486,53 @@ export function createParagraphPlainModeController(
     return `${typeName}:${pos}`
   }
 
+  function computeParagraphPlainHostViewportSignature(host: HTMLElement | null): string {
+    if (!host) return ''
+    return [host.clientWidth, host.clientHeight].join(':')
+  }
+
+  function invalidateParagraphPlainLayoutReuseSnapshots(): void {
+    paragraphPlainLayoutReuseEpoch += 1
+    paragraphPlainLayoutReuseSnapshots.clear()
+  }
+
+  function rememberParagraphPlainLayoutReuseSnapshot(reason: string): void {
+    if (!paragraphPlainOverlayHost) return
+    const cache = paragraphPlainOverlayLayoutCache
+    if (
+      !cache.hasMeasurement ||
+      !cache.activeBlockKey ||
+      !cache.baseRect ||
+      !cache.blockLayoutSignature ||
+      !cache.writingMode ||
+      cache.text == null
+    ) {
+      return
+    }
+    paragraphPlainLayoutReuseSnapshots.set(cache.activeBlockKey, {
+      activeBlockKey: cache.activeBlockKey,
+      hostIdentity: paragraphPlainOverlayHost,
+      hostViewportSignature: computeParagraphPlainHostViewportSignature(
+        paragraphPlainOverlayHost,
+      ),
+      blockLayoutSignature: cache.blockLayoutSignature,
+      writingMode: cache.writingMode,
+      layoutEpoch: paragraphPlainLayoutReuseEpoch,
+      baseRect: cache.baseRect,
+      measuredWidth: cache.measuredWidth,
+      measuredHeight: cache.measuredHeight,
+      reservedSize: cache.reservedSize,
+      blockLayoutLastObservedRect: cache.blockLayoutLastObservedRect,
+      text: cache.text,
+    })
+    paragraphPlainProfilerMark('pp-l8-store-layout-reuse-snapshot', reason)
+  }
+
   function resetParagraphPlainOverlayLayoutCache(): void {
     paragraphPlainOverlayLayoutCache = createEmptyParagraphPlainOverlayLayoutCache()
     paragraphPlainLastOverlayMeasureAt = null
+    cancelComfortableReservedHostAnimation()
+    lastComfortableReservedHostPx = null
   }
 
   function cancelScheduledParagraphPlainOverlayUpdate(): void {
@@ -294,25 +577,81 @@ export function createParagraphPlainModeController(
   }
 
   function hideParagraphPlainOverlay(): void {
+    paragraphPlainOverlayFocusDeferred = false
     cancelScheduledParagraphPlainOverlayUpdate()
+    cancelComfortableReservedHostAnimation()
+    invalidateParagraphPlainLayoutReuseSnapshots()
     paragraphPlainOverlayHost?.style.removeProperty(PP_RESERVED_BLOCK_SIZE_VAR)
+    lastComfortableReservedHostPx = null
     if (!paragraphPlainOverlayEl) return
     paragraphPlainOverlayEl.style.display = 'none'
     resetParagraphPlainOverlayLayoutCache()
   }
 
+  function teardownParagraphPlainHostResizeTracking(): void {
+    paragraphPlainHostResizeObserver?.disconnect()
+    paragraphPlainHostResizeObserver = null
+    if (paragraphPlainResizeHandler) {
+      window.removeEventListener('resize', paragraphPlainResizeHandler)
+      paragraphPlainResizeHandler = null
+    }
+    paragraphPlainHostResizeObserved = null
+    paragraphPlainHostLastClientSize = null
+  }
+
+  /**
+   * `.editor-surface` の client 寸法が変わったときだけ overlay を再配置する。
+   * ウィンドウ resize だけでは左右ペイン開閉を拾えないため ResizeObserver を使う。
+   */
+  function ensureParagraphPlainHostResizeObserver(host: HTMLElement): void {
+    if (
+      paragraphPlainHostResizeObserved === host &&
+      (paragraphPlainHostResizeObserver != null || paragraphPlainResizeHandler != null)
+    ) {
+      return
+    }
+    teardownParagraphPlainHostResizeTracking()
+    paragraphPlainHostResizeObserved = host
+
+    const onHostClientSizeMaybeChanged = (): void => {
+      if (!paragraphPlainLastView || !paragraphPlainActive) return
+      const w = host.clientWidth
+      const h = host.clientHeight
+      const last = paragraphPlainHostLastClientSize
+      if (last != null && last.w === w && last.h === h) return
+      paragraphPlainHostLastClientSize = { w, h }
+      invalidateParagraphPlainLayoutReuseSnapshots()
+      scheduleParagraphPlainOverlayUpdateForReason('resize')
+    }
+
+    if (typeof ResizeObserver === 'undefined') {
+      paragraphPlainResizeHandler = onHostClientSizeMaybeChanged
+      window.addEventListener('resize', paragraphPlainResizeHandler)
+      return
+    }
+
+    paragraphPlainHostResizeObserver = new ResizeObserver(onHostClientSizeMaybeChanged)
+    paragraphPlainHostResizeObserver.observe(host)
+  }
+
   function destroyParagraphPlainOverlay(): void {
+    paragraphPlainOverlayFocusDeferred = false
     cancelScheduledParagraphPlainOverlayUpdate()
+    cancelComfortableReservedHostAnimation()
+    invalidateParagraphPlainLayoutReuseSnapshots()
     paragraphPlainOverlayHost?.style.removeProperty(PP_RESERVED_BLOCK_SIZE_VAR)
+    lastComfortableReservedHostPx = null
+    comfortableReservedStepPxCache = null
     if (paragraphPlainScrollSource && paragraphPlainScrollHandler) {
       paragraphPlainScrollSource.removeEventListener('scroll', paragraphPlainScrollHandler)
     }
-    if (paragraphPlainResizeHandler) {
-      window.removeEventListener('resize', paragraphPlainResizeHandler)
-    }
+    teardownParagraphPlainHostResizeTracking()
     paragraphPlainScrollSource = null
     paragraphPlainScrollHandler = null
-    paragraphPlainResizeHandler = null
+
+    paragraphPlainOverlayWheelCleanup?.()
+    paragraphPlainOverlayWheelCleanup = null
+    paragraphPlainOverlayWheelViewDom = null
 
     if (!paragraphPlainOverlayEl) return
     paragraphPlainOverlayEl.remove()
@@ -321,12 +660,37 @@ export function createParagraphPlainModeController(
     resetParagraphPlainOverlayLayoutCache()
   }
 
+  function ensureParagraphPlainOverlayWheelBound(
+    overlay: HTMLTextAreaElement,
+    view: EditorView,
+    host: HTMLElement,
+  ): void {
+    if (paragraphPlainOverlayWheelViewDom === view.dom && paragraphPlainOverlayWheelCleanup) return
+    paragraphPlainOverlayWheelCleanup?.()
+    paragraphPlainOverlayWheelViewDom = view.dom
+    const verticalWheel = createVerticalWheelScrollController(view.dom)
+    const horizontalWheel = createHorizontalEditorSurfaceWheelApplier()
+    const onWheel = (event: WheelEvent): void => {
+      verticalWheel.onWheel(event)
+      if (!event.defaultPrevented) {
+        horizontalWheel.apply(event, view.dom, host)
+      }
+    }
+    overlay.addEventListener('wheel', onWheel, { passive: false })
+    paragraphPlainOverlayWheelCleanup = (): void => {
+      overlay.removeEventListener('wheel', onWheel)
+      verticalWheel.destroy()
+      horizontalWheel.destroy()
+    }
+  }
+
   function ensureParagraphPlainOverlay(view: EditorView): void {
     const host = (view.dom.closest('.editor-surface') ??
       view.dom.parentElement ??
       view.dom) as HTMLElement
     paragraphPlainOverlayHost = host
     paragraphPlainLastView = view
+    ensureParagraphPlainExperimentsWindowApi(typeof window !== 'undefined' ? window : null)
 
     // Match Obsidian's approach: make the host the positioning context.
     // Without this, `position: absolute` may anchor to an ancestor (e.g. `.editor-panel`),
@@ -340,9 +704,6 @@ export function createParagraphPlainModeController(
       if (paragraphPlainScrollSource && paragraphPlainScrollHandler) {
         paragraphPlainScrollSource.removeEventListener('scroll', paragraphPlainScrollHandler)
       }
-      if (paragraphPlainResizeHandler) {
-        window.removeEventListener('resize', paragraphPlainResizeHandler)
-      }
       // The visible editor scrolls on `.editor-surface` (the host), not on `.ProseMirror`.
       // Listening to the wrong node leaves the overlay stranded while the document moves.
       paragraphPlainScrollSource = host
@@ -350,19 +711,16 @@ export function createParagraphPlainModeController(
         if (!paragraphPlainLastView || !paragraphPlainActive) return
         scheduleParagraphPlainOverlayUpdateForReason('scroll')
       }
-      paragraphPlainResizeHandler = () => {
-        if (!paragraphPlainLastView || !paragraphPlainActive) return
-        scheduleParagraphPlainOverlayUpdateForReason('resize')
-      }
       paragraphPlainScrollSource.addEventListener('scroll', paragraphPlainScrollHandler)
-      window.addEventListener('resize', paragraphPlainResizeHandler)
     }
+    ensureParagraphPlainHostResizeObserver(host)
 
     if (paragraphPlainOverlayEl) {
       if (paragraphPlainOverlayEl.parentElement !== host) {
         paragraphPlainOverlayEl.remove()
         host.appendChild(paragraphPlainOverlayEl)
       }
+      ensureParagraphPlainOverlayWheelBound(paragraphPlainOverlayEl, view, host)
       return
     }
 
@@ -492,45 +850,72 @@ export function createParagraphPlainModeController(
 
     paragraphPlainOverlayEl = overlay
     host.appendChild(overlay)
+    ensureParagraphPlainOverlayWheelBound(overlay, view, host)
   }
 
   function scheduleParagraphPlainOverlayUpdate(options?: {
     measure?: boolean
     deferTextMeasure?: boolean
+    position?: boolean
+    endProfileSessionAfterFlush?: boolean
   }): void {
-    if (!paragraphPlainActive || !paragraphPlainLastView || !paragraphPlainOverlayEl) return
-    paragraphPlainOverlayPending.needsPosition = true
-    if (options?.measure) {
-      paragraphPlainOverlayPending.needsMeasure = true
-      paragraphPlainOverlayPending.deferTextMeasure = false
-    } else if (options?.deferTextMeasure && !paragraphPlainOverlayPending.needsMeasure) {
-      paragraphPlainOverlayPending.deferTextMeasure = true
-    }
-    if (paragraphPlainOverlayUpdateFrame != null) return
-    paragraphPlainOverlayUpdateFrame = requestAnimationFrame(() => {
-      paragraphPlainOverlayUpdateFrame = null
-      flushParagraphPlainOverlayUpdate()
+    paragraphPlainProfilerRunPhase('scheduleParagraphPlainOverlayUpdate', () => {
+      if (!paragraphPlainActive || !paragraphPlainLastView || !paragraphPlainOverlayEl) return
+      if (options?.endProfileSessionAfterFlush) {
+        paragraphPlainProfilerMarkEndScheduledForFlush()
+      }
+      if (options?.position !== false) {
+        paragraphPlainOverlayPending.needsPosition = true
+      }
+      if (options?.measure) {
+        paragraphPlainOverlayPending.needsMeasure = true
+        paragraphPlainOverlayPending.deferTextMeasure = false
+      } else if (options?.deferTextMeasure && !paragraphPlainOverlayPending.needsMeasure) {
+        paragraphPlainOverlayPending.deferTextMeasure = true
+      }
+      if (paragraphPlainOverlayUpdateFrame != null) return
+      paragraphPlainOverlayUpdateFrame = requestAnimationFrame(() => {
+        paragraphPlainOverlayUpdateFrame = null
+        flushParagraphPlainOverlayUpdate()
+      })
     })
   }
 
   function scheduleParagraphPlainOverlayUpdateForReason(
     reason: ParagraphPlainOverlayMeasureReason,
   ): void {
+    if (reason === 'scroll' && isParagraphPlainScrollRepositionDisabled()) {
+      paragraphPlainProfilerMark('pp-experiment-disable-scroll-reposition', 'schedule-skipped')
+      return
+    }
     const shouldMeasure = shouldRequestParagraphPlainOverlayMeasure({
       reason,
       isComposing: paragraphPlainComposing,
       lastMeasuredAt: paragraphPlainLastOverlayMeasureAt,
       now: getParagraphPlainOverlayNow(),
     })
-    scheduleParagraphPlainOverlayUpdate(
-      shouldMeasure
-        ? { measure: true }
-        : reason === 'scroll' ||
-            (paragraphPlainComposing &&
-              (reason === 'input' || reason === 'compositionupdate'))
-          ? { deferTextMeasure: true }
-          : undefined,
-    )
+    // input / compositionupdate のような hot path では、cache が有効である限り
+    // positionParagraphPlainOverlay (= getBoundingClientRect 走査) を skip し、
+    // adjustOverlaySizeToContent だけで content サイズに追従させる。
+    // scroll / resize / sync / undo / redo / compositionend / cache 無効時は
+    // 従来どおり full reposition を要求する。
+    const hasCachedBaseRect =
+      paragraphPlainOverlayLayoutCache.hasMeasurement &&
+      paragraphPlainOverlayLayoutCache.baseRect != null &&
+      paragraphPlainOverlayLayoutCache.writingMode != null
+    const shouldPosition = shouldRequestParagraphPlainOverlayPosition({
+      reason,
+      hasCachedBaseRect,
+    })
+    const deferTextMeasure =
+      reason === 'scroll' ||
+      (paragraphPlainComposing &&
+        (reason === 'input' || reason === 'compositionupdate'))
+    scheduleParagraphPlainOverlayUpdate({
+      measure: shouldMeasure || undefined,
+      deferTextMeasure: !shouldMeasure && deferTextMeasure ? true : undefined,
+      position: shouldPosition ? undefined : false,
+    })
   }
 
   function resolveParagraphPlainOverlayWritingMode(): string {
@@ -542,27 +927,35 @@ export function createParagraphPlainModeController(
     )
   }
 
-  function captureParagraphPlainBaseRect(
-    view: EditorView,
-    pos: number,
-    typeName: string,
-  ): ParagraphPlainOverlayBaseRect | null {
+  function captureParagraphPlainBaseRectFromElement(
+    blockElement: Element,
+    blockLayoutSignature: string,
+  ): {
+    baseRect: ParagraphPlainOverlayBaseRect
+    blockLayoutSignature: string
+  } | null {
     if (!paragraphPlainOverlayHost) return null
-    const blockElement = resolveBlockElementAtPos(view, pos, typeName)
-    if (!blockElement) return null
-
-    // Temporarily clear reserved space (via CSS variable on host, outside PM DOM)
-    // so getBoundingClientRect returns the block's natural size.
-    paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
-
-    const rect = blockElement.getBoundingClientRect()
-    const hostRect = paragraphPlainOverlayHost.getBoundingClientRect()
+    const rect = paragraphPlainProfilerRunPhase('positionParagraphPlainOverlay.blockRect', () => {
+      // Temporarily clear reserved space (via CSS variable on host, outside PM DOM)
+      // so getBoundingClientRect returns the block's natural size.
+      if (!isParagraphPlainReservedBlockSizeDisabled()) {
+        paragraphPlainOverlayHost!.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
+      }
+      return blockElement.getBoundingClientRect()
+    })
+    const hostRect = paragraphPlainProfilerRunPhase(
+      'positionParagraphPlainOverlay.hostRect',
+      () => paragraphPlainOverlayHost!.getBoundingClientRect(),
+    )
     const top = rect.top - hostRect.top + paragraphPlainOverlayHost.scrollTop
     const left = rect.left - hostRect.left + paragraphPlainOverlayHost.scrollLeft
     const baseWidth = Math.max(1, rect.width)
     const baseHeight = Math.max(1, rect.height)
 
-    return { top, left, width: baseWidth, height: baseHeight }
+    return {
+      baseRect: { top, left, width: baseWidth, height: baseHeight },
+      blockLayoutSignature,
+    }
   }
 
   function applyParagraphPlainOverlayPlacement(params: {
@@ -586,49 +979,171 @@ export function createParagraphPlainModeController(
     view: EditorView,
     pos: number,
     typeName: string,
-  ): { baseRect: ParagraphPlainOverlayBaseRect; writingMode: string } | null {
+  ): {
+    baseRect: ParagraphPlainOverlayBaseRect
+    writingMode: string
+    blockElement: Element
+    layoutSource: 'exact' | 'reused'
+    reusedSnapshot: ParagraphPlainLayoutReuseSnapshot | null
+    /** PP-L6: flush で adjust 後の net と比較し、同一なら post-position の blockRect 観測を再利用する。 */
+    placementAfterPosition: {
+      overlayWidth: number
+      overlayHeight: number
+      /** position 終了時に host に書いた量子化済み reserved px。`auto` のときは null（remeasure 後の再利用対象外）。 */
+      reservedPx: number | null
+    }
+  } | null {
     if (!paragraphPlainOverlayEl || !paragraphPlainOverlayHost) return null
-    const baseRect = captureParagraphPlainBaseRect(view, pos, typeName)
-    if (!baseRect) {
+    flushComfortableReservedHostPendingSync()
+    if (!isParagraphPlainReservedBlockSizeDisabled()) {
+      cancelComfortableReservedHostAnimation()
+      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
+      lastComfortableReservedHostPx = null
+    }
+    const blockElement = paragraphPlainProfilerRunPhase(
+      'positionParagraphPlainOverlay.resolveBlockElement',
+      () => resolveBlockElementAtPos(view, pos, typeName),
+    )
+    if (!blockElement) {
       hideParagraphPlainOverlay()
       return null
     }
 
+    const blockLayoutSignature = computeParagraphPlainBlockLayoutSignature(blockElement)
     const writingMode = resolveParagraphPlainOverlayWritingMode()
-    const nextWidth = paragraphPlainOverlayLayoutCache.measuredWidth ?? baseRect.width
-    const nextHeight = paragraphPlainOverlayLayoutCache.measuredHeight ?? baseRect.height
-
-    applyParagraphPlainOverlayPlacement({
-      baseRect,
-      width: nextWidth,
-      height: nextHeight,
+    const activeBlockKey = buildParagraphPlainActiveBlockKey(pos, typeName)
+    const reusableSnapshot = selectReusableParagraphPlainLayoutSnapshot({
+      snapshot: activeBlockKey
+        ? paragraphPlainLayoutReuseSnapshots.get(activeBlockKey) ?? null
+        : null,
+      activeBlockKey,
+      hostIdentity: paragraphPlainOverlayHost,
+      hostViewportSignature: computeParagraphPlainHostViewportSignature(
+        paragraphPlainOverlayHost,
+      ),
+      blockLayoutSignature,
       writingMode,
+      text: paragraphPlainOverlayEl.value,
+      layoutEpoch: paragraphPlainLayoutReuseEpoch,
+    })
+    const captured = reusableSnapshot
+      ? {
+          baseRect: reusableSnapshot.baseRect,
+          blockLayoutSignature: reusableSnapshot.blockLayoutSignature,
+        }
+      : captureParagraphPlainBaseRectFromElement(blockElement, blockLayoutSignature)
+    if (!captured) {
+      hideParagraphPlainOverlay()
+      return null
+    }
+
+    const { baseRect } = captured
+    const layoutSource = reusableSnapshot ? 'reused' : 'exact'
+    if (layoutSource === 'reused') {
+      paragraphPlainProfilerMark(
+        'pp-l8-reuse-position-base-rect',
+        'exact-snapshot-same-layout',
+      )
+    }
+    const nextWidth =
+      reusableSnapshot?.measuredWidth ?? paragraphPlainOverlayLayoutCache.measuredWidth ?? baseRect.width
+    const nextHeight =
+      reusableSnapshot?.measuredHeight ?? paragraphPlainOverlayLayoutCache.measuredHeight ?? baseRect.height
+
+    let placementAfterPosition!: {
+      overlayWidth: number
+      overlayHeight: number
+      reservedPx: number | null
+    }
+
+    paragraphPlainProfilerRunPhase('positionParagraphPlainOverlay.applyPlacement', () => {
+      applyParagraphPlainOverlayPlacement({
+        baseRect,
+        width: nextWidth,
+        height: nextHeight,
+        writingMode,
+      })
+
+      const allowReservedHostWrites = !isParagraphPlainReservedBlockSizeDisabled()
+      const idealReservedPx =
+        reusableSnapshot?.reservedSize ?? paragraphPlainOverlayLayoutCache.reservedSize
+      let reservedPxWritten: number | null = null
+      if (allowReservedHostWrites) {
+        if (idealReservedPx != null && paragraphPlainOverlayEl) {
+          const basePx = paragraphPlainReserveAxisBasePx({ baseRect, writingMode })
+          const { stepPx, cache } = resolveParagraphPlainReservedStepPx(
+            paragraphPlainOverlayEl,
+            writingMode,
+            comfortableReservedStepPxCache,
+          )
+          comfortableReservedStepPxCache = cache
+          reservedPxWritten = computeComfortableReservedHostTargetPx({
+            idealPx: idealReservedPx,
+            basePx,
+            stepPx,
+          })
+          applyComfortableReservedHostImmediate(reservedPxWritten)
+        } else {
+          cancelComfortableReservedHostAnimation()
+          paragraphPlainOverlayHost!.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
+          lastComfortableReservedHostPx = null
+        }
+      }
+
+      placementAfterPosition = {
+        overlayWidth: nextWidth,
+        overlayHeight: nextHeight,
+        reservedPx: allowReservedHostWrites ? reservedPxWritten : null,
+      }
+
+      paragraphPlainOverlayLayoutCache = {
+        ...paragraphPlainOverlayLayoutCache,
+        hasMeasurement: reusableSnapshot ? true : paragraphPlainOverlayLayoutCache.hasMeasurement,
+        baseRect,
+        measuredBaseWidth: reusableSnapshot?.baseRect.width ??
+          paragraphPlainOverlayLayoutCache.measuredBaseWidth,
+        measuredBaseHeight: reusableSnapshot?.baseRect.height ??
+          paragraphPlainOverlayLayoutCache.measuredBaseHeight,
+        text: reusableSnapshot?.text ?? paragraphPlainOverlayLayoutCache.text,
+        measuredWidth: reusableSnapshot?.measuredWidth ??
+          paragraphPlainOverlayLayoutCache.measuredWidth,
+        measuredHeight: reusableSnapshot?.measuredHeight ??
+          paragraphPlainOverlayLayoutCache.measuredHeight,
+        reservedSize: reusableSnapshot?.reservedSize ??
+          paragraphPlainOverlayLayoutCache.reservedSize,
+        writingMode: reusableSnapshot?.writingMode ?? paragraphPlainOverlayLayoutCache.writingMode,
+        blockLayoutSignature,
+        blockLayoutLastObservedRect: reusableSnapshot?.blockLayoutLastObservedRect ??
+          paragraphPlainOverlayLayoutCache.blockLayoutLastObservedRect,
+        activeBlockKey: reusableSnapshot?.activeBlockKey ??
+          paragraphPlainOverlayLayoutCache.activeBlockKey,
+        hostIdentity: reusableSnapshot?.hostIdentity ??
+          paragraphPlainOverlayLayoutCache.hostIdentity,
+      }
     })
 
-    if (paragraphPlainOverlayLayoutCache.reservedSize != null) {
-      paragraphPlainOverlayHost.style.setProperty(
-        PP_RESERVED_BLOCK_SIZE_VAR,
-        `${paragraphPlainOverlayLayoutCache.reservedSize}px`,
-      )
-    } else {
-      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
-    }
-
-    paragraphPlainOverlayLayoutCache = {
-      ...paragraphPlainOverlayLayoutCache,
+    return {
       baseRect,
+      writingMode,
+      blockElement,
+      layoutSource,
+      reusedSnapshot: reusableSnapshot,
+      placementAfterPosition,
     }
-    return { baseRect, writingMode }
   }
 
+  /**
+   * @returns true if overlay/host styles or cache were mutated (layout read / DOM write path).
+   * false = early no-op; flush may reuse a post-position block↔host rect sample (PP-L3).
+   */
   function adjustOverlaySizeToContent(params: {
     baseRect: ParagraphPlainOverlayBaseRect
     writingMode: string
     measureRequested: boolean
     deferTextMeasure: boolean
     activeBlockKey: string | null
-  }): void {
-    if (!paragraphPlainOverlayEl || !paragraphPlainOverlayHost) return
+  }): boolean {
+    if (!paragraphPlainOverlayEl || !paragraphPlainOverlayHost) return false
     const {
       baseRect,
       writingMode,
@@ -651,7 +1166,7 @@ export function createParagraphPlainModeController(
         baseHeight: baseRect.height,
       })
     ) {
-      return
+      return false
     }
 
     const padding = 2
@@ -680,10 +1195,24 @@ export function createParagraphPlainModeController(
       scrollHeight,
       writingMode: writingMode || '',
     })
-    paragraphPlainOverlayHost.style.setProperty(
-      PP_RESERVED_BLOCK_SIZE_VAR,
-      `${reservedSize}px`,
-    )
+    if (!isParagraphPlainReservedBlockSizeDisabled() && paragraphPlainOverlayEl) {
+      const basePx = paragraphPlainReserveAxisBasePx({
+        baseRect,
+        writingMode: writingMode || '',
+      })
+      const { stepPx, cache } = resolveParagraphPlainReservedStepPx(
+        paragraphPlainOverlayEl,
+        writingMode || '',
+        comfortableReservedStepPxCache,
+      )
+      comfortableReservedStepPxCache = cache
+      const hostTargetPx = computeComfortableReservedHostTargetPx({
+        idealPx: reservedSize,
+        basePx,
+        stepPx,
+      })
+      scheduleComfortableReservedHostWrite(hostTargetPx)
+    }
 
     paragraphPlainOverlayLayoutCache = {
       hasMeasurement: true,
@@ -695,14 +1224,88 @@ export function createParagraphPlainModeController(
       measuredHeight: nextHeight,
       reservedSize,
       writingMode,
+      blockLayoutSignature: paragraphPlainOverlayLayoutCache.blockLayoutSignature,
+      blockLayoutLastObservedRect: paragraphPlainOverlayLayoutCache.blockLayoutLastObservedRect,
       activeBlockKey,
       hostIdentity: paragraphPlainOverlayHost,
     }
     paragraphPlainLastOverlayMeasureAt = getParagraphPlainOverlayNow()
+    return true
+  }
+
+  /** PP-L4 / click-switch: overlay の focus と選択範囲（markdown はこの時点のブロックソース）。 */
+  function paragraphPlainOverlayRunFocusAndSelection(markdown: string): void {
+    if (!paragraphPlainOverlayEl) return
+    const el = paragraphPlainOverlayEl
+    const skipFocus = paragraphPlainProfilerRunPhase(
+      'startParagraphPlain.overlayDom.beforeFocus',
+      () => typeof document !== 'undefined' && document.activeElement === el,
+    )
+    paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.focus', () => {
+      if (!skipFocus) {
+        el.focus({ preventScroll: true })
+      } else {
+        paragraphPlainProfilerMark(
+          'startParagraphPlain.overlayDom.focus',
+          'skipped-already-focused',
+        )
+      }
+    })
+    paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.afterFocus', () => {
+      void el.selectionStart
+      void el.selectionEnd
+    })
+    paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setSelectionRange', () => {
+      // If deferred re-entry focus lands after the user has already resumed typing,
+      // don't rewind the caret back into the freshly typed text.
+      if (document.activeElement === el && el.value !== markdown) {
+        paragraphPlainPendingSelection = null
+        return
+      }
+      if (paragraphPlainPendingSelection) {
+        const len = markdown.length
+        if (paragraphPlainPendingSelection.kind === 'block-end') {
+          el.setSelectionRange(len, len)
+        } else {
+          const start = Math.min(paragraphPlainPendingSelection.start, len)
+          const end = Math.min(paragraphPlainPendingSelection.end, len)
+          el.setSelectionRange(start, end)
+        }
+        paragraphPlainPendingSelection = null
+      } else {
+        el.setSelectionRange(markdown.length, markdown.length)
+      }
+    })
+  }
+
+  function paragraphPlainApplyDeferredOverlayFocusIfNeeded(): void {
+    if (!paragraphPlainOverlayFocusDeferred) return
+    paragraphPlainOverlayFocusDeferred = false
+    if (
+      !paragraphPlainOverlayEl ||
+      !paragraphPlainActive ||
+      !paragraphPlainCurrent ||
+      paragraphPlainOverlayEl.style.display === 'none'
+    ) {
+      return
+    }
+    paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.deferredFocus', () => {
+      paragraphPlainOverlayRunFocusAndSelection(paragraphPlainCurrent!.originalMarkdown)
+    })
   }
 
   function flushParagraphPlainOverlayUpdate(): void {
-    if (!paragraphPlainActive || paragraphPlainApplying || !paragraphPlainLastView) return
+    const finalizeProfilerAfterFlush = (): void => {
+      if (paragraphPlainProfilerPeekEndScheduledForFlush()) {
+        paragraphPlainProfilerClearEndScheduledForFlush()
+        paragraphPlainProfilerCompleteSessionAfterFlush()
+      }
+    }
+
+    if (!paragraphPlainActive || paragraphPlainApplying || !paragraphPlainLastView) {
+      finalizeProfilerAfterFlush()
+      return
+    }
 
     const pending = paragraphPlainOverlayPending
     paragraphPlainOverlayPending = {
@@ -710,29 +1313,176 @@ export function createParagraphPlainModeController(
       needsMeasure: false,
       deferTextMeasure: false,
     }
-    if (!pending.needsPosition) return
-
-    const pluginState = paragraphPlainPluginKey.getState(paragraphPlainLastView.state)
-    const pos = pluginState?.pos ?? null
-    const typeName = pluginState?.typeName ?? null
-    if (pos == null || typeName == null) {
-      hideParagraphPlainOverlay()
+    if (!pending.needsPosition && !pending.needsMeasure && !pending.deferTextMeasure) {
+      finalizeProfilerAfterFlush()
       return
     }
 
-    const positioned = positionParagraphPlainOverlay(paragraphPlainLastView, pos, typeName)
-    if (!positioned) return
+    const endWanted = paragraphPlainProfilerPeekEndScheduledForFlush()
+    try {
+      paragraphPlainProfilerRunPhase('flushParagraphPlainOverlayUpdate', () => {
+        try {
+        const pluginState = paragraphPlainPluginKey.getState(paragraphPlainLastView!.state)
+        const pos = pluginState?.pos ?? null
+        const typeName = pluginState?.typeName ?? null
+        if (pos == null || typeName == null) {
+          hideParagraphPlainOverlay()
+          return
+        }
 
-    adjustOverlaySizeToContent({
-      baseRect: positioned.baseRect,
-      writingMode: positioned.writingMode,
-      measureRequested: pending.needsMeasure,
-      deferTextMeasure: pending.deferTextMeasure && !pending.needsMeasure,
-      activeBlockKey: buildParagraphPlainActiveBlockKey(pos, typeName),
-    })
+        const cache = paragraphPlainOverlayLayoutCache
+        const cacheUsable =
+          !pending.needsPosition &&
+          cache.hasMeasurement &&
+          cache.baseRect != null &&
+          cache.writingMode != null
+
+        let baseRect: ParagraphPlainOverlayBaseRect | null = null
+        let writingMode: string | null = null
+        let blockElementAfterPosition: Element | null = null
+        let placementAfterPosition: {
+          overlayWidth: number
+          overlayHeight: number
+          reservedPx: number | null
+        } | null = null
+        let layoutSource: 'exact' | 'reused' = 'exact'
+        let reusedSnapshot: ParagraphPlainLayoutReuseSnapshot | null = null
+
+        if (cacheUsable) {
+          baseRect = cache.baseRect
+          writingMode = cache.writingMode
+        } else {
+          const positioned = paragraphPlainProfilerRunPhase(
+            'positionParagraphPlainOverlay',
+            () =>
+              positionParagraphPlainOverlay(paragraphPlainLastView!, pos, typeName),
+          )
+          if (!positioned) return
+          baseRect = positioned.baseRect
+          writingMode = positioned.writingMode
+          blockElementAfterPosition = positioned.blockElement
+          placementAfterPosition = positioned.placementAfterPosition
+          layoutSource = positioned.layoutSource
+          reusedSnapshot = positioned.reusedSnapshot
+        }
+
+        if (!baseRect || writingMode == null) return
+
+        const overlayHost = paragraphPlainOverlayHost
+
+        const didRemeasure = paragraphPlainProfilerRunPhase('adjustOverlaySizeToContent', () =>
+          adjustOverlaySizeToContent({
+            baseRect,
+            writingMode,
+            measureRequested: pending.needsMeasure,
+            deferTextMeasure: pending.deferTextMeasure && !pending.needsMeasure,
+            activeBlockKey: buildParagraphPlainActiveBlockKey(pos, typeName),
+          }),
+        )
+
+        if (cacheUsable) {
+          paragraphPlainProfilerRunPhase('readParagraphPlainBlockRectRelativeToHost', () => {
+            const observed = readParagraphPlainBlockRectRelativeToHost({
+              view: paragraphPlainLastView!,
+              pos,
+              typeName,
+              host: overlayHost,
+            })
+            if (observed) {
+              paragraphPlainOverlayLayoutCache = {
+                ...paragraphPlainOverlayLayoutCache,
+                blockLayoutLastObservedRect: observed,
+              }
+            }
+          })
+        } else if (blockElementAfterPosition && overlayHost) {
+          // PP-L3: position で得た blockElement を使い resolveBlockElementAtPos を二重にしない。
+          // 観測は adjust 後のレイアウトを反映する（同一要素への read は最大 1 回）。
+          //
+          // PP-L7: didRemeasure かつ post-adjust の overlay 寸法が position 時と異なる場合、
+          // 以前は同一 block に対し read が 2 連続で走り、先頭の結果が破棄されていた。
+          // いまは分岐ごとに 1 回だけ読む。
+          let observed: ParagraphPlainOverlayBaseRect
+          const cAfter = paragraphPlainOverlayLayoutCache
+          const canReuseSnapshotObserved =
+            layoutSource === 'reused' &&
+            reusedSnapshot?.blockLayoutLastObservedRect != null &&
+            cAfter.measuredWidth === reusedSnapshot.measuredWidth &&
+            cAfter.measuredHeight === reusedSnapshot.measuredHeight &&
+            cAfter.reservedSize === reusedSnapshot.reservedSize &&
+            cAfter.text === reusedSnapshot.text
+
+          if (canReuseSnapshotObserved && reusedSnapshot?.blockLayoutLastObservedRect) {
+            observed = reusedSnapshot.blockLayoutLastObservedRect
+            paragraphPlainProfilerMark(
+              'pp-l8-reuse-post-position-observed',
+              'exact-snapshot-same-layout',
+            )
+          } else if (!didRemeasure) {
+            observed = paragraphPlainProfilerRunPhase(
+              'readParagraphPlainBlockRectRelativeToHost',
+              () =>
+                computeParagraphPlainBlockRectRelativeToHostFromElement(
+                  blockElementAfterPosition,
+                  overlayHost,
+                ),
+            )
+            paragraphPlainProfilerMark(
+              'readParagraphPlainBlockRectRelativeToHost',
+              'pp-l3-reuse-post-position-observed',
+            )
+          } else {
+            const snap = placementAfterPosition
+            const canReusePostPositionRect =
+              snap != null &&
+              cAfter.measuredWidth === snap.overlayWidth &&
+              cAfter.measuredHeight === snap.overlayHeight
+
+            if (canReusePostPositionRect) {
+              paragraphPlainProfilerMark(
+                'pp-l6-reuse-post-position-block-rect',
+                'post-adjust-net-unchanged',
+              )
+            } else {
+              paragraphPlainProfilerMark(
+                'pp-l7-single-observed-after-adjust',
+                'post-adjust-net-changed',
+              )
+            }
+            observed = paragraphPlainProfilerRunPhase(
+              'readParagraphPlainBlockRectRelativeToHost',
+              () =>
+                computeParagraphPlainBlockRectRelativeToHostFromElement(
+                  blockElementAfterPosition,
+                  overlayHost,
+                ),
+            )
+          }
+
+          paragraphPlainOverlayLayoutCache = {
+            ...paragraphPlainOverlayLayoutCache,
+            blockLayoutLastObservedRect: observed,
+          }
+        }
+        rememberParagraphPlainLayoutReuseSnapshot('flush-observed')
+        } finally {
+          paragraphPlainApplyDeferredOverlayFocusIfNeeded()
+        }
+      })
+    } finally {
+      if (endWanted) {
+        paragraphPlainProfilerClearEndScheduledForFlush()
+        paragraphPlainProfilerCompleteSessionAfterFlush()
+      }
+    }
   }
 
-  function startParagraphPlain(view: EditorView, pos: number, typeName: string): void {
+  function startParagraphPlain(
+    view: EditorView,
+    pos: number,
+    typeName: string,
+    options?: { deferOverlayFocus?: boolean },
+  ): void {
     const node = view.state.doc.nodeAt(pos)
     if (!node || node.type.name !== typeName) {
       paragraphPlainCurrent = null
@@ -741,44 +1491,50 @@ export function createParagraphPlainModeController(
       return
     }
 
-    const markdown = serializeBlockNode(view.state, node, pos, getLineBreakPolicy())
-    paragraphPlainCurrent = {
-      from: pos,
-      to: pos + node.nodeSize,
-      typeName,
-      originalMarkdown: markdown,
-    }
-    paragraphPlainActivePos = pos
+    paragraphPlainProfilerRunPhase('startParagraphPlain', () => {
+      const markdown = paragraphPlainProfilerRunPhase('serializeBlockNode', () =>
+        serializeBlockNode(view.state, node, pos, getLineBreakPolicy()),
+      )
+      paragraphPlainCurrent = {
+        from: pos,
+        to: pos + node.nodeSize,
+        typeName,
+        originalMarkdown: markdown,
+      }
+      paragraphPlainActivePos = pos
 
-    // When a preceding action (currently only Enter split) requested scroll
-    // follow-through, nudge the scroll host so the newly active block is
-    // inside the viewport before we position the overlay against its rect.
-    // Done before overlay focus so focus({ preventScroll: true }) still holds.
-    if (paragraphPlainScrollIntoViewPending) {
-      paragraphPlainScrollIntoViewPending = false
-      const targetEl = resolveBlockElementAtPos(view, pos, typeName)
-      if (targetEl) {
-        try {
-          targetEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-        } catch {
-          // Non-fatal: older engines may reject the options bag.
+      if (paragraphPlainScrollIntoViewPending) {
+        paragraphPlainScrollIntoViewPending = false
+        const targetEl = resolveBlockElementAtPos(view, pos, typeName)
+        if (targetEl) {
+          try {
+            targetEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+          } catch {
+            // Non-fatal: older engines may reject the options bag.
+          }
         }
       }
-    }
 
-    if (!paragraphPlainOverlayEl) return
-    paragraphPlainOverlayEl.value = markdown
-    paragraphPlainOverlayEl.style.display = ''
-    paragraphPlainOverlayEl.focus({ preventScroll: true })
-    if (paragraphPlainPendingSelection) {
-      const len = markdown.length
-      const start = Math.min(paragraphPlainPendingSelection.start, len)
-      const end = Math.min(paragraphPlainPendingSelection.end, len)
-      paragraphPlainOverlayEl.setSelectionRange(start, end)
-      paragraphPlainPendingSelection = null
-    } else {
-      paragraphPlainOverlayEl.setSelectionRange(markdown.length, markdown.length)
-    }
+      paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom', () => {
+        if (!paragraphPlainOverlayEl) return
+        const el = paragraphPlainOverlayEl
+        paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setValue', () => {
+          if (el.value !== markdown) {
+            el.value = markdown
+          }
+        })
+        paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setDisplay', () => {
+          if (el.style.display === 'none') {
+            el.style.display = ''
+          }
+        })
+        if (options?.deferOverlayFocus) {
+          paragraphPlainOverlayFocusDeferred = true
+          return
+        }
+        paragraphPlainOverlayRunFocusAndSelection(markdown)
+      })
+    })
   }
 
   function replaceBlockNodeInternal(
@@ -787,17 +1543,27 @@ export function createParagraphPlainModeController(
     options?: { preserveSelection?: boolean; allowMarkdownBlockReparse?: boolean },
   ): boolean {
     const nextNode = options?.allowMarkdownBlockReparse
-      ? parseParagraphPlainExitReplacementContent(
-          editor.state,
-          markdown,
-          context.typeName,
-          getLineBreakPolicy(),
+      ? paragraphPlainProfilerRunPhase(
+          'parseParagraphPlainExitReplacementContent',
+          () =>
+            parseParagraphPlainExitReplacementContent(
+              editor.state,
+              markdown,
+              context.typeName,
+              getLineBreakPolicy(),
+            ),
+          'replace-block',
         )
-      : parseReplacementNode(
-          editor.state,
-          markdown,
-          context.typeName,
-          getLineBreakPolicy(),
+      : paragraphPlainProfilerRunPhase(
+          'parseReplacementNode',
+          () =>
+            parseReplacementNode(
+              editor.state,
+              markdown,
+              context.typeName,
+              getLineBreakPolicy(),
+            ),
+          'replace-block',
         )
     if (!nextNode) {
       pushLog('sourceEdit', `replaceBlock rejected: parse failed for ${context.typeName}`)
@@ -810,15 +1576,14 @@ export function createParagraphPlainModeController(
 
     const tr = editor.state.tr.replaceWith(from, to, nextNode)
     if (!options?.preserveSelection) {
-      // 置換結果が paragraph / heading とは限らない（list / blockquote / hr 等）。
-      // mappedFrom + 1 を生 TextSelection に渡すと bulletList などの非 textblock
-      // コンテナ内に endpoint が落ちて ProseMirror の invariant 違反になるため、
-      // Selection.near で最寄りの有効な selection に寄せる。
       const mappedFrom = tr.mapping.map(from)
       const safePos = Math.max(0, Math.min(tr.doc.content.size, mappedFrom + 1))
       tr.setSelection(Selection.near(tr.doc.resolve(safePos), 1))
     }
-    editor.view.dispatch(tr)
+    paragraphPlainProfilerMark('dispatch.before', 'replaceBlock')
+    paragraphPlainProfilerRunPhase('dispatch', () => {
+      editor.view.dispatch(tr)
+    }, 'replaceBlock')
     pushLog('sourceEdit', `replaceBlock applied (${context.typeName})`)
     return true
   }
@@ -827,6 +1592,8 @@ export function createParagraphPlainModeController(
     save: boolean,
     options?: { preserveSelection?: boolean; allowMarkdownBlockReparse?: boolean },
   ): boolean {
+    flushComfortableReservedHostPendingSync()
+
     if (!paragraphPlainCurrent) {
       paragraphPlainActivePos = null
       return true
@@ -837,15 +1604,18 @@ export function createParagraphPlainModeController(
       if (nextMarkdown !== paragraphPlainCurrent.originalMarkdown) {
         paragraphPlainApplying = true
         try {
-          const applied = replaceBlockNodeInternal(
-            nextMarkdown,
-            paragraphPlainCurrent,
-            options,
+          const applied = paragraphPlainProfilerRunPhase('commitCurrentParagraphPlain', () =>
+            replaceBlockNodeInternal(
+              nextMarkdown,
+              paragraphPlainCurrent!,
+              options,
+            ),
           )
           if (!applied) {
             pushLog('sourceEdit', `replaceBlock kept editing (${paragraphPlainCurrent.typeName})`)
             return false
           }
+          invalidateParagraphPlainLayoutReuseSnapshots()
         } finally {
           paragraphPlainApplying = false
         }
@@ -943,39 +1713,57 @@ export function createParagraphPlainModeController(
     // causes the next Enter to fall through to the native textarea newline.
     const preflightTarget = findAdjacentPlainBlock(editor.state, currentPos, direction)
     if (!preflightTarget) {
-      // No-target boundary arrow: treat as no-op inside Paragraph Plain so the
-      // key doesn't fall through to native textarea navigation/newline.
+      const restoreSelection = () => {
+        if (!paragraphPlainOverlayEl) return
+        paragraphPlainOverlayEl.focus({ preventScroll: true })
+        paragraphPlainOverlayEl.setSelectionRange(selStart, selEnd)
+      }
+      restoreSelection()
+      queueMicrotask(restoreSelection)
+      requestAnimationFrame(restoreSelection)
       return true
     }
 
-    // Moving out of the current Paragraph Plain block should finalize that
-    // block the same way explicit disable does, so block Markdown markers do
-    // not remain literal when the overlay moves to the adjacent block.
+    paragraphPlainProfilerBeginSession('arrow-switch')
+
     const committed = commitCurrentParagraphPlain(true, {
       allowMarkdownBlockReparse: true,
     })
-    if (!committed) return false
+    if (!committed) {
+      paragraphPlainProfilerCancelSession('commit-failed')
+      return false
+    }
 
     const state = editor.state
     const target = findAdjacentPlainBlock(state, currentPos, direction)
     if (!target) {
-      // Commit changed the document in a way that removed the adjacent target.
-      // Recover overlay state from the fresh view instead of orphaning it.
+      paragraphPlainProfilerCancelSession('no-target-after-commit')
       if (paragraphPlainLastView) {
         syncParagraphPlainStateFromView(paragraphPlainLastView)
       }
       return true
     }
 
-    const targetMarkdown = serializeBlockNode(state, target.node, target.pos, getLineBreakPolicy())
-    const offset = direction === 'prev' ? targetMarkdown.length : 0
-    paragraphPlainPendingSelection = { start: offset, end: offset }
+    paragraphPlainPendingSelection =
+      direction === 'prev'
+        ? { kind: 'block-end' }
+        : { kind: 'absolute', start: 0, end: 0 }
 
+    // For 'prev', land at the inside-end of the target block. Using
+    // `target.pos + target.node.content.size` collapses to `target.pos`
+    // (the parent boundary BEFORE the block) when the target is an empty
+    // paragraph (`content.size === 0`), which causes findActiveBlockPos
+    // to lose the paragraph target on re-entry and the overlay disappears.
+    // `target.pos + target.node.nodeSize - 1` resolves to the inside-end
+    // for both empty (== inside-start) and non-empty paragraphs.
     const selectionPos = direction === 'prev'
-      ? target.pos + target.node.content.size
+      ? target.pos + target.node.nodeSize - 1
       : target.pos + 1
     const tr = state.tr.setSelection(TextSelection.create(state.doc, selectionPos))
-    editor.view.dispatch(tr)
+    paragraphPlainProfilerMark('dispatch.before', 'arrow-selection')
+    paragraphPlainProfilerRunPhase('dispatch', () => {
+      editor.view.dispatch(tr)
+    }, 'arrow-selection')
     return true
   }
 
@@ -998,6 +1786,8 @@ export function createParagraphPlainModeController(
     const paragraphType = state.schema.nodes.paragraph
     if (!paragraphType) return
 
+    paragraphPlainProfilerBeginSession('enter-reentry')
+
     const beforeNode = resolveParagraphPlainSplitBeforeNode({
       state,
       typeName,
@@ -1006,11 +1796,12 @@ export function createParagraphPlainModeController(
       lineBreakPolicy: getLineBreakPolicy(),
       allowMarkdownBlockReparse: true,
     })
-    if (!beforeNode) return
+    if (!beforeNode) {
+      paragraphPlainProfilerCancelSession('split-before-null')
+      return
+    }
 
-    // Build after node (always paragraph)
     let afterNode: PMNode
-    // Strip heading prefix if present (user types "## foo|bar", after should be "bar" not "## bar")
     let afterContent = afterText
     if (typeName === 'heading') {
       const headingMatch = afterContent.match(/^#{1,6}\s+(.*)$/)
@@ -1021,12 +1812,13 @@ export function createParagraphPlainModeController(
     if (!afterContent) {
       afterNode = paragraphType.create()
     } else {
-      const afterDoc = parseMarkdown(state.schema, afterContent, getLineBreakPolicy())
-      if (afterDoc.childCount === 1 && afterDoc.child(0).type.name === 'paragraph') {
-        afterNode = afterDoc.child(0)
-      } else {
-        afterNode = paragraphType.create(null, afterContent ? [state.schema.text(afterContent)] : undefined)
-      }
+      afterNode = paragraphPlainProfilerRunPhase('parseMarkdown.afterSplit', () => {
+        const afterDoc = parseMarkdown(state.schema, afterContent, getLineBreakPolicy())
+        if (afterDoc.childCount === 1 && afterDoc.child(0).type.name === 'paragraph') {
+          return afterDoc.child(0)
+        }
+        return paragraphType.create(null, afterContent ? [state.schema.text(afterContent)] : undefined)
+      })
     }
 
     const from = paragraphPlainCurrent.from
@@ -1035,13 +1827,22 @@ export function createParagraphPlainModeController(
     paragraphPlainCurrent = null
     paragraphPlainActivePos = null
     hideParagraphPlainOverlay()
+    paragraphPlainPendingSelection = {
+      kind: 'absolute',
+      start: 0,
+      end: 0,
+    }
 
     paragraphPlainApplying = true
     try {
       const tr = state.tr.replaceWith(from, to, [beforeNode, afterNode])
       const selectionPos = from + beforeNode.nodeSize + 1
       tr.setSelection(TextSelection.create(tr.doc, selectionPos))
-      editor.view.dispatch(tr)
+      paragraphPlainProfilerMark('dispatch.before', 'enter-split')
+      paragraphPlainProfilerRunPhase('dispatch', () => {
+        editor.view.dispatch(tr)
+      }, 'enter-split')
+      paragraphPlainProfilerMark('dispatch.after', 'enter-split')
       pushLog('sourceEdit', `enterKey split (${typeName})`)
     } finally {
       paragraphPlainApplying = false
@@ -1053,9 +1854,11 @@ export function createParagraphPlainModeController(
     paragraphPlainScrollIntoViewPending = true
 
     requestAnimationFrame(() => {
-      if (paragraphPlainActive && paragraphPlainLastView) {
-        syncParagraphPlainStateFromView(paragraphPlainLastView)
-      }
+      paragraphPlainProfilerRunPhase('enter-reentry.postDispatchRaf', () => {
+        if (paragraphPlainActive && paragraphPlainLastView) {
+          syncParagraphPlainStateFromView(paragraphPlainLastView)
+        }
+      })
     })
   }
 
@@ -1097,7 +1900,11 @@ export function createParagraphPlainModeController(
     paragraphPlainCurrent = null
     paragraphPlainActivePos = null
 
-    paragraphPlainPendingSelection = { start: prevMarkdown.length, end: prevMarkdown.length }
+    paragraphPlainPendingSelection = {
+      kind: 'absolute',
+      start: prevMarkdown.length,
+      end: prevMarkdown.length,
+    }
 
     paragraphPlainApplying = true
     try {
@@ -1107,6 +1914,7 @@ export function createParagraphPlainModeController(
       const selectionPos = prevPos + 1
       tr.setSelection(TextSelection.create(tr.doc, selectionPos))
       editor.view.dispatch(tr)
+      invalidateParagraphPlainLayoutReuseSnapshots()
       pushLog('sourceEdit', 'backspaceAtStart merge')
     } finally {
       paragraphPlainApplying = false
@@ -1139,34 +1947,103 @@ export function createParagraphPlainModeController(
       paragraphPlainCurrent?.typeName !== typeName ||
       !paragraphPlainCurrent
     ) {
-      // Preserve the user's click selection so it isn't overwritten by the
-      // commit transaction.  After commit, re-read the plugin state because
-      // the document may have changed (e.g. different node size) and the
-      // pre-commit `pos` could be stale.
-      const committed = commitCurrentParagraphPlain(true, { preserveSelection: true })
-      if (!committed) return
-      const freshPlugin = paragraphPlainPluginKey.getState(view.state)
-      const freshPos = freshPlugin?.pos ?? null
-      const freshType = freshPlugin?.typeName ?? null
-      if (freshPos != null && freshType != null) {
-        resetParagraphPlainOverlayLayoutCache()
-        startParagraphPlain(view, freshPos, freshType)
-        scheduleParagraphPlainOverlayUpdate({ measure: true })
-      } else {
-        hideParagraphPlainOverlay()
+      const hadPriorTarget =
+        paragraphPlainCurrent != null || paragraphPlainActivePos != null
+      const dirty =
+        paragraphPlainOverlayEl != null &&
+        paragraphPlainCurrent != null &&
+        paragraphPlainOverlayEl.value !== paragraphPlainCurrent.originalMarkdown
+
+      if (!paragraphPlainProfilerHasActiveSession() && hadPriorTarget) {
+        paragraphPlainProfilerBeginSession('click-switch', {
+          sessionMeta: dirty ? 'dirty' : 'clean',
+        })
       }
+
+      paragraphPlainProfilerRunPhase('syncParagraphPlainStateFromView.blockSwitch', () => {
+        if (!dirty) {
+          rememberParagraphPlainLayoutReuseSnapshot('clean-block-switch')
+        }
+        const committed = commitCurrentParagraphPlain(true, { preserveSelection: true })
+        if (!committed) {
+          paragraphPlainProfilerCancelSession('commit-failed-block-switch')
+          return
+        }
+        const freshPlugin = paragraphPlainPluginKey.getState(view.state)
+        const freshPos = freshPlugin?.pos ?? null
+        const freshType = freshPlugin?.typeName ?? null
+        if (freshPos != null && freshType != null) {
+          resetParagraphPlainOverlayLayoutCache()
+          startParagraphPlain(view, freshPos, freshType, { deferOverlayFocus: true })
+          scheduleParagraphPlainOverlayUpdate({
+            measure: true,
+            endProfileSessionAfterFlush: paragraphPlainProfilerHasActiveSession(),
+          })
+        } else {
+          hideParagraphPlainOverlay()
+          paragraphPlainProfilerCancelSession('no-fresh-block')
+        }
+      })
       return
     }
 
+    // PP-L2: same-block で PM の from/to が不変なら、毎回 schedule は不要。
+    // ただし overlay host / 書字モード / block の表示スタイル（テーマ・フォント等）
+    // だけが変わると PM は動かずに DOM レイアウトだけ変わるので、cache と live の
+    // 不整合を検知したときだけ再配置を許可する（input / composition hot path の
+    // PP-L1 は別経路で維持）。
+    let positionalChange = false
     if (paragraphPlainCurrent) {
       const node = view.state.doc.nodeAt(pos)
       if (node && node.type.name === paragraphPlainCurrent.typeName) {
-        paragraphPlainCurrent.from = pos
-        paragraphPlainCurrent.to = pos + node.nodeSize
+        const nextFrom = pos
+        const nextTo = pos + node.nodeSize
+        positionalChange =
+          paragraphPlainCurrent.from !== nextFrom ||
+          paragraphPlainCurrent.to !== nextTo
+        paragraphPlainCurrent.from = nextFrom
+        paragraphPlainCurrent.to = nextTo
+      } else {
+        positionalChange = true
       }
+    } else {
+      positionalChange = true
     }
 
-    scheduleParagraphPlainOverlayUpdate()
+    const overlayWritingMode = resolveParagraphPlainOverlayWritingMode()
+
+    // PP-L5: positionalChange === true では should* が先頭で true を返すため、
+    // liveBlockRect / blockLayoutSignature / resolve は不要（無駄な blockRect read を避ける）。
+    let liveBlockSignature = ''
+    let liveBlockRect: ParagraphPlainOverlayBaseRect | null = null
+    if (!positionalChange) {
+      const blockEl = paragraphPlainProfilerRunPhase(
+        'readParagraphPlainBlockRectRelativeToHost.resolveBlockElement',
+        () => resolveBlockElementAtPos(view, pos, typeName),
+      )
+      if (blockEl && paragraphPlainOverlayHost) {
+        liveBlockSignature = computeParagraphPlainBlockLayoutSignature(blockEl)
+        liveBlockRect = computeParagraphPlainBlockRectRelativeToHostFromElement(
+          blockEl,
+          paragraphPlainOverlayHost,
+        )
+      }
+    } else {
+      paragraphPlainProfilerMark('pp-l5-skip-same-block-live-block-rect', 'positional-change')
+    }
+
+    if (
+      shouldParagraphPlainSyncScheduleOverlayUpdate({
+        positionalChange,
+        cache: paragraphPlainOverlayLayoutCache,
+        overlayHost: paragraphPlainOverlayHost,
+        overlayWritingMode,
+        blockLayoutSignature: liveBlockSignature,
+        liveBlockRect,
+      })
+    ) {
+      scheduleParagraphPlainOverlayUpdate()
+    }
   }
 
   function createParagraphPlainPlugin(): Plugin<ParagraphPlainPluginState> {

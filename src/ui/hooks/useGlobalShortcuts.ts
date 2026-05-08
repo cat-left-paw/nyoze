@@ -24,6 +24,8 @@ type UseGlobalShortcutsOptions = {
   sourceModeController: SourceModeController
   writingMode: WritingMode
   getPlainModeKind: () => PlainModeKind | null
+  /** Built-in read-only internal docs (shortcut reference): block editing shortcuts only. */
+  getInternalDocActive?: () => boolean
   onOpenSearch: () => void
   onOpenSearchReplace: () => void
   onOpenLinkPrompt: () => void
@@ -50,6 +52,7 @@ export function useGlobalShortcuts({
   sourceModeController,
   writingMode,
   getPlainModeKind,
+  getInternalDocActive,
   onOpenSearch,
   onOpenSearchReplace,
   onOpenLinkPrompt,
@@ -167,6 +170,10 @@ export function useGlobalShortcuts({
         if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
           return
         }
+        if (getInternalDocActive?.()) {
+          e.preventDefault()
+          return
+        }
         e.preventDefault()
         onToggleParagraphPlainMode()
         return
@@ -190,6 +197,43 @@ export function useGlobalShortcuts({
         return
       }
       if (!core) return
+
+      // Outline navigation (allowed on internal read-only docs — reading aid)
+      const outlineKind = matchesOutlineShortcut({
+        code: e.code,
+        key: e.key,
+        mod,
+        alt,
+        shift,
+      })
+      if (outlineKind === 'fold') {
+        e.preventDefault()
+        core.toggleCurrentHeadingFold()
+        return
+      }
+      if (outlineKind === 'comma') {
+        e.preventDefault()
+        if (writingMode === 'horizontal-tb') {
+          core.jumpToPreviousHeading()
+        } else {
+          core.jumpToNextHeading()
+        }
+        return
+      }
+      if (outlineKind === 'period') {
+        e.preventDefault()
+        if (writingMode === 'horizontal-tb') {
+          core.jumpToNextHeading()
+        } else {
+          core.jumpToPreviousHeading()
+        }
+        return
+      }
+
+      const internalDocActive = getInternalDocActive?.()
+      if (internalDocActive) {
+        return
+      }
 
       // Ruby 挿入 shortcut: Cmd/Ctrl+Alt+R
       // IME 未確定中、defaultPrevented 済みのイベント (ProseMirror keymap 等) は既に
@@ -305,42 +349,6 @@ export function useGlobalShortcuts({
           }
         }
       }
-
-      // --- Outline navigation ---
-      // event.code で判定し、レイアウト / Shift 合成で key が揺れても安定して
-      // 拾えるようにする。物理キーは `,` / `.` / `L` (Comma / Period / KeyL)。
-      // 縦書きでは視覚方向に合わせて `,` / `.` の意味を反転する (`comma` =
-      // next, `period` = previous)。`fold` は writingMode 非依存。
-      const outlineKind = matchesOutlineShortcut({
-        code: e.code,
-        key: e.key,
-        mod,
-        alt,
-        shift,
-      })
-      if (outlineKind === 'fold') {
-        e.preventDefault()
-        core.toggleCurrentHeadingFold()
-        return
-      }
-      if (outlineKind === 'comma') {
-        e.preventDefault()
-        if (writingMode === 'horizontal-tb') {
-          core.jumpToPreviousHeading()
-        } else {
-          core.jumpToNextHeading()
-        }
-        return
-      }
-      if (outlineKind === 'period') {
-        e.preventDefault()
-        if (writingMode === 'horizontal-tb') {
-          core.jumpToNextHeading()
-        } else {
-          core.jumpToPreviousHeading()
-        }
-        return
-      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
@@ -349,6 +357,7 @@ export function useGlobalShortcuts({
     coreRef,
     writingMode,
     getPlainModeKind,
+    getInternalDocActive,
     onOpenSearch,
     onOpenSearchReplace,
     onOpenLinkPrompt,

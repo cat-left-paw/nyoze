@@ -21,6 +21,16 @@ import type {
   WritingMode,
 } from './types'
 
+export {
+  DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO,
+  DEFAULT_TYPEWRITER_MODE_ENABLED,
+  DEFAULT_TYPEWRITER_OFFSET_RATIO,
+  TYPEWRITER_FOLLOW_BAND_RATIO_MAX,
+  TYPEWRITER_FOLLOW_BAND_RATIO_MIN,
+  TYPEWRITER_OFFSET_RATIO_MAX,
+  TYPEWRITER_OFFSET_RATIO_MIN,
+} from './typewriterModeSettings'
+
 export const CUSTOM_BOUTEN_STORAGE_KEY = 'nyoze.customBoutenChars'
 export const THEME_STORAGE_KEY = 'nyoze.theme'
 export const PANE_STORAGE_KEY = 'nyoze.paneState'
@@ -397,6 +407,11 @@ export const SELECTED_FONT_STORAGE_KEY = 'nyoze.selectedFont'
 export const CARET_COLOR_MODE_STORAGE_KEY = 'nyoze.caretColorMode'
 export const CARET_COLOR_CUSTOM_STORAGE_KEY = 'nyoze.caretColorCustom'
 export const DEFAULT_CARET_COLOR_MODE = 'auto' as const
+export const EDITOR_ARROW_POINTER_STORAGE_KEY = 'nyoze.editorArrowPointer'
+export const DEFAULT_EDITOR_ARROW_POINTER = false
+
+/** Hidden settings.json: macOS Chromium の Arrow caret reveal 過大ジャンプ抑制 */
+export const DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED = true
 
 /**
  * Phase5-H Slice1: Main color definitions per UI theme.

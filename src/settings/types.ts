@@ -1,3 +1,7 @@
+import type { ParagraphPlainBehavior } from './paragraphPlainBehavior'
+
+export type { ParagraphPlainBehavior } from './paragraphPlainBehavior'
+
 export type Theme =
   | 'mist'
   | 'taupe'
@@ -191,4 +195,36 @@ export type SettingsJson = {
   /** BETA-DISP1: caret color setting (not stored in theme presets) */
   caretColorMode?: 'auto' | 'custom'
   caretColorCustom?: string | null
+  /** Windows Chromium I-beam workaround: use arrow pointer inside editor surfaces */
+  useEditorArrowPointer?: boolean
+  /**
+   * App-wide Paragraph Plain responsiveness vs following content visibility.
+   * Legacy `settings.json` value `comfortable-no-scroll-reposition` is normalized to `comfortable` on read.
+   * @see normalizeParagraphPlainBehavior
+   */
+  paragraphPlainBehavior?: ParagraphPlainBehavior
+  /** App-wide Typewriter scroll (not frontmatter / not per-tab). */
+  typewriterModeEnabled?: boolean
+  typewriterOffsetRatio?: number
+  typewriterFollowBandRatio?: number
+  /** Visual Focus Phase 1: edit block highlight in WYSIWYG (not Typewriter scroll). */
+  visualFocusBlockHighlightEnabled?: boolean
+  /** Visual Focus Phase 2: dim non-focused textblocks in WYSIWYG (not Typewriter scroll). */
+  visualFocusDimNonFocusedBlocksEnabled?: boolean
+  /** Visual Focus Phase 3: active block highlight fill (`#rgb` / `#rrggbb`). */
+  visualFocusBlockHighlightColor?: string
+  /** Visual Focus Phase 3: highlight fill opacity (0..1). */
+  visualFocusBlockHighlightOpacity?: number
+  /** Visual Focus Phase 3: dimmed non-focused block opacity (0..1). */
+  visualFocusDimNonFocusedBlocksOpacity?: number
+  /** Visual Focus Phase 5: current visual line overlay (WYSIWYG; not Typewriter scroll). */
+  visualFocusCurrentLineHighlightEnabled?: boolean
+  /** Visual Focus Phase 5: current line fill (`#rgb` / `#rrggbb`). */
+  visualFocusCurrentLineHighlightColor?: string
+  /** Visual Focus Phase 5: current line fill opacity (0..1). */
+  visualFocusCurrentLineHighlightOpacity?: number
+  /**
+   * Hidden: macOS のみ Arrow 後の過大スクロールを局所 clamp（UI なし / frontmatter 非連動）。
+   */
+  macosArrowScrollClampEnabled?: boolean
 }

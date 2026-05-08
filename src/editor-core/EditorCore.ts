@@ -1,5 +1,5 @@
 import { Editor } from '@tiptap/core'
-import { EditorState } from '@tiptap/pm/state'
+import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { parseMarkdown } from './io/parseMarkdown'
 import { serializeMarkdown } from './io/serializeMarkdown'
 import { resolveEffectiveDocumentMarkdownOptionsForLoad } from './io/emptyParagraphPreservation'
@@ -45,6 +45,7 @@ import {
   editorClipboardCopyCutDOMHandlers,
   createCompositionEventHandlers,
   createFoldTooltipController,
+  createEditorSurfaceWheelController,
   createInlineAnnotationController,
   createLineBreakPolicyController,
   createListenerSubscriptions,
@@ -52,7 +53,8 @@ import {
   createOutlineNavigationController,
   createParagraphPlainModeController,
   createSearchController,
-  createVerticalWheelScrollController,
+  createTypewriterModeController,
+  createVisualFocusCurrentLineController,
   deleteHorizontalRuleWithKey,
   resolveChecklistClickPos,
   resolveClickTargetElement,
@@ -83,6 +85,10 @@ import {
   toClientRectSnapshot,
   resetHomeEndState,
   notifySelectionChanged,
+  maybeScheduleMacosArrowScrollClamp,
+  readSinceLastInteractionMs,
+  registerMacosArrowScrollClampHostInteractions,
+  isMacOsRenderer,
 } from './features'
 import {
   FOLD_TOGGLE_CLASS,
@@ -101,6 +107,20 @@ export interface CreateEditorCoreOptions {
   lineBreakPolicy?: LineBreakPolicy
   /** Optional: safely open a validated https URL outside the editor. */
   openExternalUrl?: OpenExternalUrl
+  /** App-wide Typewriter scroll: live getters (ref-backed from UI). */
+  getTypewriterModeEnabled?: () => boolean
+  getTypewriterOffsetRatio?: () => number
+  getTypewriterFollowBandRatio?: () => number
+  /** Source Mode active — suppresses Typewriter scroll / scroll past end. */
+  getIsSourceModeActive?: () => boolean
+  /** Hidden settings.json: macOS Arrow scroll clamp (default true). */
+  getMacosArrowScrollClampEnabled?: () => boolean
+  /** Visual Focus Phase 1: block highlight in WYSIWYG (not Typewriter scroll). */
+  getVisualFocusBlockHighlightEnabled?: () => boolean
+  /** Visual Focus Phase 2: dim non-focused textblocks (not Typewriter scroll). */
+  getVisualFocusDimNonFocusedBlocksEnabled?: () => boolean
+  /** Visual Focus Phase 5: current visual line overlay (WYSIWYG; not Typewriter scroll). */
+  getVisualFocusCurrentLineHighlightEnabled?: () => boolean
 }
 
 export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHandle {
@@ -119,6 +139,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     searchStateListeners,
   })
   let isComposing = false
+  let visualFocusCurrentLineController: ReturnType<typeof createVisualFocusCurrentLineController> | null = null
   let enableRubyFlag = true
   let autoTcyEnabled = false
   let autoTcyNumbersOnly = false
@@ -160,8 +181,39 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       emitLineBreakPolicyChange,
     })
 
+  type ParagraphPlainControllerHandle = ReturnType<typeof createParagraphPlainModeController>
+  const paragraphPlainControllerRef: { current: ParagraphPlainControllerHandle | null } = {
+    current: null,
+  }
+
+  /** Set immediately after `Editor` construction so extension getters can read `view.composing`. */
+  const editorHolder: { current: Editor | null } = { current: null }
+
   const onEditorPropsKeyDown = createEditorPropsKeyDownHandler({
     getIsComposing: (viewComposing) => isComposing || viewComposing,
+    onBareArrowNavigationKeydown: (view, event) => {
+      const host = view.dom.closest('.editor-surface') as HTMLElement | null
+      if (!host) return
+      const { sinceLastWheelMs, sinceLastPointerDragMs } = readSinceLastInteractionMs(host)
+      maybeScheduleMacosArrowScrollClamp(host, event, {
+        clampSettingEnabled: options.getMacosArrowScrollClampEnabled?.() ?? true,
+        isMacOS: isMacOsRenderer(),
+        typewriterEnabled: options.getTypewriterModeEnabled?.() ?? false,
+        wysiwygSuppressForSourceMode: options.getIsSourceModeActive?.() ?? false,
+        paragraphPlainActive: paragraphPlainControllerRef.current?.isActive() ?? false,
+        composing: isComposing || view.composing,
+        selectionCollapsed: view.state.selection.empty,
+        defaultPrevented: event.defaultPrevented,
+        sinceLastWheelMs,
+        sinceLastPointerDragMs,
+      })
+    },
+    noteTypewriterKeyboardNavigationIntent: (event) => {
+      typewriterModeController?.noteKeyboardNavigationIntent(event)
+    },
+    noteTypewriterJumpNavigationSuppress: (source) => {
+      typewriterModeController?.noteJumpNavigationSuppress(source)
+    },
     getLineBreakPolicy: readLineBreakPolicy,
     deleteHorizontalRuleWithKey,
     shouldInsertHardBreakOnShiftEnterInRegularBody,
@@ -182,8 +234,11 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   const onSelectionUpdate = (payload: Parameters<typeof baseOnSelectionUpdate>[0]) => {
     notifySelectionChanged()
     baseOnSelectionUpdate(payload)
+    typewriterModeController?.handleSelectionUpdate()
+    visualFocusCurrentLineController?.scheduleUpdate()
   }
-  const onUpdate = () => {
+  let typewriterModeController: ReturnType<typeof createTypewriterModeController> | null = null
+  const onUpdate = ({ transaction }: { transaction: Transaction }) => {
     // If policy changed without "apply now", the first user edit should treat the doc as the current policy.
     const activePolicy = readLineBreakPolicy()
     if (documentLineBreakPolicy !== activePolicy) {
@@ -191,6 +246,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     }
     emitUpdate()
     searchController.scheduleRefreshForDocChange()
+    typewriterModeController?.handleEditorUpdate({
+      docChanged: transaction.docChanged,
+    })
+    visualFocusCurrentLineController?.scheduleUpdate()
   }
 
   const editor = new Editor({
@@ -199,6 +258,14 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
         isEnabled: () => autoTcyEnabled,
         getDigitRange: () => autoTcyDigitRange,
         getNumbersOnly: () => autoTcyNumbersOnly,
+      },
+      visualFocus: {
+        getBlockHighlightEnabled: () => options.getVisualFocusBlockHighlightEnabled?.() ?? false,
+        getDimNonFocusedBlocksEnabled: () =>
+          options.getVisualFocusDimNonFocusedBlocksEnabled?.() ?? false,
+        getSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
+        getParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+        getComposing: () => isComposing || editorHolder.current?.view.composing === true,
       },
     }),
     content: DEFAULT_EDITOR_CONTENT,
@@ -214,15 +281,29 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     onUpdate,
   })
 
-  const paragraphPlainController = createParagraphPlainModeController({
+  editorHolder.current = editor
+
+  paragraphPlainControllerRef.current = createParagraphPlainModeController({
     editor,
     getLineBreakPolicy: readLineBreakPolicy,
     pushLog,
   })
+  typewriterModeController = createTypewriterModeController({
+    view: editor.view,
+    getIsEnabled: options.getTypewriterModeEnabled ?? (() => false),
+    getIsComposing: () => isComposing || editor.view.composing,
+    getIsParagraphPlainActive: () => paragraphPlainControllerRef.current!.isActive(),
+    getIsSourceModeActive: options.getIsSourceModeActive ?? (() => false),
+    getOffsetRatio: options.getTypewriterOffsetRatio ?? (() => 0),
+    getFollowBandRatio: options.getTypewriterFollowBandRatio ?? (() => 0.16),
+  })
+  const unsubscribeTypewriterParagraphPlainMode = paragraphPlainControllerRef.current.onModeChange(() => {
+    typewriterModeController?.syncRuntimeState()
+  })
   const markdownIoController = createMarkdownIoController({
     getLineBreakPolicy: readLineBreakPolicy,
     setParagraphPlainMode: (enabled) => {
-      paragraphPlainController.setMode(enabled)
+      paragraphPlainControllerRef.current!.setMode(enabled)
     },
     parseMarkdownToJson: (markdownBody, lineBreakPolicy) =>
       parseMarkdown(editor.schema, markdownBody, lineBreakPolicy, {
@@ -297,6 +378,13 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getIsComposing: () => isComposing || editor.view.composing,
     setIsComposing: (next) => {
       isComposing = next
+      visualFocusCurrentLineController?.scheduleUpdate()
+    },
+    noteTypewriterBeforeInput: (event) => {
+      typewriterModeController?.noteBeforeInput(event)
+    },
+    scheduleVisualFocusCurrentLineUpdate: () => {
+      visualFocusCurrentLineController?.scheduleUpdate()
     },
     clearStoredMarks: () => clearStoredMarksAtBoundary(editor),
     pushLog,
@@ -316,12 +404,32 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     toggleHeadingFold: (headingPos) => editor.commands.toggleHeadingFold(headingPos),
     emitFoldChange,
     openExternalUrl: options.openExternalUrl,
+    onHeadingFoldToggled: () => {
+      typewriterModeController?.noteJumpNavigationSuppress('fold-toggle')
+    },
     pushLog,
   })
 
   // --- Fold ellipsis tooltip ---
   const foldTooltipController = createFoldTooltipController('heading-fold-preview-tooltip')
-  const wheelScrollController = createVerticalWheelScrollController(editor.view.dom)
+  const editorSurface = editor.view.dom.closest('.editor-surface') as HTMLElement | null
+  const wheelScrollController = editorSurface
+    ? createEditorSurfaceWheelController(editor.view.dom, editorSurface)
+    : null
+  let unregisterMacosArrowScrollClampHost: (() => void) | null = null
+  if (editorSurface) {
+    unregisterMacosArrowScrollClampHost = registerMacosArrowScrollClampHostInteractions(editorSurface)
+  }
+
+  visualFocusCurrentLineController = createVisualFocusCurrentLineController({
+    view: editor.view,
+    editorSurface,
+    getEnabled: () => options.getVisualFocusCurrentLineHighlightEnabled?.() ?? false,
+    getIsSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
+    getIsParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+    getIsComposing: () => isComposing || editor.view.composing,
+  })
+  visualFocusCurrentLineController.scheduleUpdate()
 
   function onMouseOver(event: MouseEvent) {
     foldTooltipController.onMouseOver(event, FOLD_ELLIPSIS_CLASS)
@@ -331,15 +439,17 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     foldTooltipController.onMouseOut(event, FOLD_ELLIPSIS_CLASS)
   }
 
-  function onWheel(event: WheelEvent): void {
-    wheelScrollController.onWheel(event)
-  }
-
   const outlineNavigationController = createOutlineNavigationController({
     editor,
     getIsComposing: () => isComposing || editor.view.composing,
     pushLog,
     emitFoldChange,
+    noteTypewriterProgrammaticJump: () => {
+      typewriterModeController?.noteJumpNavigationSuppress('outline-search-scroll')
+    },
+    noteTypewriterFoldToggleJump: () => {
+      typewriterModeController?.noteJumpNavigationSuppress('fold-toggle')
+    },
   })
   const searchController = createSearchController({
     getIsComposing: () => isComposing || editor.view.composing,
@@ -411,16 +521,20 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     onClick,
     onMouseOver,
     onMouseOut,
-    onWheel,
     onPointerDown: (event) => recordSpecialInlinePointerSample(event),
     onPointerUp: (event) => recordSpecialInlinePointerSample(event),
   })
+  if (editorSurface && wheelScrollController) {
+    editorSurface.addEventListener('wheel', wheelScrollController.onWheel, {
+      passive: false,
+    })
+  }
 
   function applyLineBreakPolicyImmediately(
     nextPolicy: LineBreakPolicy,
     nextOptions?: MarkdownDocumentOptions,
   ): boolean {
-    paragraphPlainController.setMode(false)
+    paragraphPlainControllerRef.current!.setMode(false)
     const sourcePolicy = documentLineBreakPolicy
     const sourceOptions = documentMarkdownOptions
     const targetOptions: MarkdownDocumentOptions = {
@@ -582,6 +696,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       searchController.refreshImmediately()
     },
 
+    setReadOnly(readOnly: boolean) {
+      editor.setEditable(!readOnly)
+    },
+
     setFrontmatterPrefix(prefix: string) {
       markdownIoController.setFrontmatterPrefix(prefix)
     },
@@ -610,36 +728,36 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     },
 
     undoParagraphPlain() {
-      paragraphPlainController.undoOverlay()
+      paragraphPlainControllerRef.current!.undoOverlay()
     },
 
     redoParagraphPlain() {
-      paragraphPlainController.redoOverlay()
+      paragraphPlainControllerRef.current!.redoOverlay()
     },
 
     selectAllParagraphPlain() {
-      paragraphPlainController.selectAllOverlay()
+      paragraphPlainControllerRef.current!.selectAllOverlay()
     },
 
     setParagraphPlainMode(enabled: boolean): boolean {
       resetHomeEndState()
-      return paragraphPlainController.setMode(enabled)
+      return paragraphPlainControllerRef.current!.setMode(enabled)
     },
 
     toggleParagraphPlainMode(): boolean {
-      return paragraphPlainController.toggleMode()
+      return paragraphPlainControllerRef.current!.toggleMode()
     },
 
     isParagraphPlainModeActive(): boolean {
-      return paragraphPlainController.isActive()
+      return paragraphPlainControllerRef.current!.isActive()
     },
 
     commitParagraphPlainIfActive(): boolean {
-      return paragraphPlainController.commitIfActive()
+      return paragraphPlainControllerRef.current!.commitIfActive()
     },
 
     onParagraphPlainModeChange(listener: ParagraphPlainModeListener): () => void {
-      return paragraphPlainController.onModeChange(listener)
+      return paragraphPlainControllerRef.current!.onModeChange(listener)
     },
 
     getLineBreakPolicy(): LineBreakPolicy {
@@ -731,14 +849,17 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     },
 
     restoreViewportAnchor(anchor) {
+      typewriterModeController?.noteJumpNavigationSuppress('viewport-restore')
       restoreViewportAnchor(editor.view, anchor)
     },
 
     scrollEditorSurfaceToRatio(ratio: number) {
+      typewriterModeController?.noteJumpNavigationSuppress('programmatic-scroll')
       scrollEditorSurfaceToRatio(editor.view, ratio)
     },
 
     scrollEditorSurfaceToTextOffset(textOffset: number): boolean {
+      typewriterModeController?.noteJumpNavigationSuppress('programmatic-scroll')
       return scrollEditorSurfaceToTextOffset(editor.view, textOffset)
     },
 
@@ -830,11 +951,33 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       editor.commands.focus()
     },
 
+    syncTypewriterRuntimeState() {
+      typewriterModeController?.syncRuntimeState()
+    },
+
+    nudgeDecorationsRefresh() {
+      const tr = editor.state.tr.setMeta('addToHistory', false)
+      editor.view.dispatch(tr)
+    },
+
+    scheduleVisualFocusCurrentLineUpdate() {
+      visualFocusCurrentLineController?.scheduleUpdate()
+    },
+
     destroy() {
+      unsubscribeTypewriterParagraphPlainMode()
+      visualFocusCurrentLineController?.destroy()
+      visualFocusCurrentLineController = null
+      typewriterModeController?.destroy()
       searchController.destroy()
-      paragraphPlainController.destroy()
+      paragraphPlainControllerRef.current!.destroy()
+      unregisterMacosArrowScrollClampHost?.()
+      unregisterMacosArrowScrollClampHost = null
       unbindDomEvents()
-      wheelScrollController.destroy()
+      if (editorSurface && wheelScrollController) {
+        editorSurface.removeEventListener('wheel', wheelScrollController.onWheel)
+      }
+      wheelScrollController?.destroy()
       foldTooltipController.destroy()
       listenerSubscriptions.clearAll()
       editor.destroy()

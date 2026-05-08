@@ -1,5 +1,7 @@
 # Nyoze Beta
 
+[日本語](./README.md) | [English](./README.en.md)
+
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
@@ -29,6 +31,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 
 - 縦書きでそのまま編集できます
 - 見た目のまま書ける編集画面があります
+- Typewriter scroll と Visual Focus で、今書いている場所へ視線を戻しやすくできます
 - ルビや縦中横に対応しています
 - `.md` だけでなく `.txt` もそのまま開いて保存できます
 - 原稿を壊さず保存往復することを重視しています
@@ -45,6 +48,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 
 - 縦書き / 横書きの切り替え
 - WYSIWYG 編集
+- Typewriter scroll、編集ブロックハイライト、現在行ハイライトなどの執筆補助表示
 - 複数タブでの文書の表示と編集
 - File Explorer からのファイル作成 / 名前変更 / 複製 / 移動 / ゴミ箱への削除
 - WYSIWYG での 自動 TCY （縦中横）表示（表示のみ、初期 OFF、数字だけ対象のオプションあり、保存内容は不変）
@@ -78,7 +82,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - OS からの drag and drop による文書読み込み
 - frontmatter の一般編集 UI
 - epub / pdf / 印刷 などへの出力
-- Windows の Microsoft Store / MSIX 配布
+- Windows の Store 版と GitHub zip 版での更新導線の追加整理
 - テーブルや数式への対応
 - ページレイアウト編集
 - 書籍モード
@@ -141,16 +145,18 @@ author: 著者名
 
 ## 対応環境
 
-beta 版で配布対象として扱うのは次の環境です。
+2026-05-06 時点で公開済みの beta 配布対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
   - Intel Mac 用 DMG（`x64`）
-- Windows: 現行 beta では GitHub Releases の zip 配布（展開後に `README.txt` を確認し、`Nyoze.exe` を起動）
+- Windows:
+  - Microsoft Store 版
+  - GitHub Releases の zip 配布（展開後に `README.txt` を確認し、`Nyoze.exe` を起動）
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windows は `0.2.0-beta` 以降で Microsoft Store / MSIX を推奨導線にする準備中です。Store 版が公開されるまでは GitHub Releases の zip を使ってください。Store 版の公開後も、GitHub zip は代替配布として残す方針です。
+Windows では、GitHub Releases の最新公開版は `0.2.0-beta.1` です。Microsoft Store 版も 2026-05-06 に公開開始しており、Store 上の package version は `1.2.0.0` です。通常の Windows 利用では Store 版を優先し、GitHub zip は Store を使えない環境や検証用の代替配布として残します。
 
 macOS 版は 2 種類あります。
 
@@ -161,9 +167,9 @@ macOS 版は 2 種類あります。
 
 Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run build` を試せます。ただし実機検証は未実施で、公式サポート対象は macOS / Windows の配布物を優先します。Electron / Linux に慣れている場合は、必要に応じて `electron-builder` で Linux 向けパッケージを作成できますが、現時点の beta では公式配布物としては提供しません。
 
-## ダウンロード
+## ダウンロードとインストール
 
-現行 beta 版は **GitHub Releases の配布物をダウンロードして使う** 想定です。
+現行 beta 版は **GitHub Releases または Microsoft Store の公開配布物を使う** 想定です。
 通常の利用では、ソースコードからのビルドは不要です。
 
 想定している導線:
@@ -171,14 +177,34 @@ Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run
 - macOS:
   - Apple Silicon Mac: `arm64` の DMG をダウンロードして起動
   - Intel Mac: `x64` の DMG をダウンロードして起動
-- Windows: 現時点では zip をダウンロードして展開し、同梱の `README.txt` を確認して `Nyoze.exe` を起動
+- Windows:
+  - 通常利用: Microsoft Store から `Nyoze` を導入
+  - 代替導線: GitHub Releases の zip をダウンロードして展開し、同梱の `README.txt` を確認して `Nyoze.exe` を起動
 
-Windows では、今後 Microsoft Store 版が公開された場合は Store 版を推奨導線にします。GitHub zip は、Store を使えない環境や検証用の代替配布として継続する予定です。
+インストール時の注意:
+
+- Microsoft Store 版以外では、macOS の Gatekeeper 警告や Windows の Smart App Control / ブラウザ保護などによる警告が出ることがあります
+- Windows では、GitHub zip 版でも Smart App Control により `Nyoze.exe` の実行が拒否されることがあります
+- Windows で確実に使いたい場合は、Microsoft Store 版の利用を優先してください
+- 特に macOS の未署名 DMG では、初回起動時に通常より強い警告が出る場合があります
+- 詳しい導入手順と警告時の対処は [INSTALL.md](./INSTALL.md) を参照してください
+
+### ストア版について
+
+Windows では Microsoft Store 版がすでに公開されています。通常利用では Store 版を優先してください。
+
+- Store 版は審査を伴うため、緊急度の低い小修正を毎回すぐ反映するとは限りません。ある程度まとまった単位で更新されることがあります
+- GitHub zip は、Store を使えない環境向けの代替配布であると同時に、Store 版より細かい beta 修正を先に含むことがあります
+- Store 版は、Microsoft Store アプリのライブラリ画面から更新できます
+- Store 版と GitHub zip 版は共存自体は可能ですが、通常利用ではどちらか一方に寄せることを推奨します。設定は共有されます
+- Microsoft Store ディープリンク: `ms-windows-store://pdp/?productid=9N52TD18DBCR`
+- Web ストア URL: [Nyoze on Microsoft Store](https://apps.microsoft.com/detail/9N52TD18DBCR)
 
 補足:
 
 - `0.1.0-beta.1` / `0.1.0-beta.2` の Windows 版は installer でしたが、`0.1.1-beta.1` は Smart App Control の影響により zip 配布へ切り替えています。
 - 旧 installer 版を入れている場合でも、この版は自動更新されません。新しく zip 版を展開して起動してください。
+- ただし zip 版でも、環境によっては Smart App Control により実行が止められることがあります。その場合は zip 版で回避しようとせず、Microsoft Store 版を使ってください。
 - Windows 版は `x64` のみです。32bit Windows 向け配布物はありません。
 
 ## アンインストールとユーザーデータ
@@ -268,8 +294,9 @@ npm run package:win:x64
 - コードブロックのシンタックスハイライトは WYSIWYG 表示のみです。言語未指定・未対応言語では自動判定せず、プレーン表示になります
 - 文書内リンクは `Cmd/Ctrl + Click` で外部ページへ移動できます。通常クリックでは開きません
 - `Cmd/Ctrl + Click` で開ける文書内リンクは、`https://` の認証情報なし絶対 URL のみです。`http://`、`mailto:`、`tel:`、相対リンク、文書内アンカーは通常編集上の外部オープン対象ではありません
-- ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目で入力が進まない状態になることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
+- ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
 - 縦書きでルビ直後に句読点が続き、行頭 / 行末の境界にかかる場合、Chromium 系では句読点が行頭側に表示されることがあります
+- Windows の一部 AMD GPU + Chromium 系環境では、本文や `Source Mode` 上の I-beam カーソルが白く見えて視認しづらくなることがあります。その場合は `View Settings > 文書テーマ > エディタで矢印ポインターを使う` を有効にすると、本文上だけ矢印ポインターへ切り替えて回避できます
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
 - 重く感じたときは、まずルビ表示をオフにする、`Paragraph Plain` を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
 - beta 版では、開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります
@@ -287,6 +314,13 @@ npm run package:win:x64
 - beta リリースノート: [RELEASE_NOTES.md](./RELEASE_NOTES.md)
 
 beta テスター向けの既知制限、配布上の注意、報告時の注意は `RELEASE_NOTES.md` を正本としてまとめています。版ごとの履歴は `CHANGELOG.md`、配布物の導入と初回起動の案内は `INSTALL.md` にまとめています。
+
+Windows 版の運用方針:
+
+- 通常利用は Microsoft Store 版を優先します
+- GitHub Releases の zip は、Store を使えない環境向けの代替配布として継続します
+- beta の小修正は GitHub zip の方が先に含むことがあり、Store 版は審査都合である程度まとまった単位で更新される場合があります
+- Store 版と GitHub zip 版は共存可能ですが、設定は共有されます。現行版は多重起動を抑止するため、両方を同時には起動できません
 
 ## ライセンス
 
@@ -310,3 +344,12 @@ beta 版のフィードバック導線はアプリ内にあります。
 - 再現手順
 
 報告前の注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md) を参照してください。
+
+## Support
+
+Nyoze は無料・オープンソースのアプリとして開発しています。
+もし気に入っていただけた場合は、以下から開発を支援できます。
+
+[Buy me a coffee](https://buymeacoffee.com/hidarite)
+
+＊支援は完全に任意です。支援者限定機能や有料での機能解放はありません。

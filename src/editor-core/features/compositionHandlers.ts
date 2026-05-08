@@ -3,6 +3,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import { shouldBlockTcyTextInput } from './tcyFormatting'
 import {
   handleRubyBaseBeforeInput,
+  handleRubyBaseCompositionEnd,
   handleRubyBaseCompositionStart,
 } from './rubyBoundarySelection'
 import {
@@ -27,6 +28,8 @@ type CreateCompositionEventHandlersOptions = {
   getView: () => EditorView
   getIsComposing: () => boolean
   setIsComposing: (next: boolean) => void
+  noteTypewriterBeforeInput?: (event: InputEvent) => void
+  scheduleVisualFocusCurrentLineUpdate?: () => void
   clearStoredMarks: () => boolean
   pushLog: LogPush
 }
@@ -36,6 +39,8 @@ export function createCompositionEventHandlers({
   getView,
   getIsComposing,
   setIsComposing,
+  noteTypewriterBeforeInput,
+  scheduleVisualFocusCurrentLineUpdate,
   clearStoredMarks,
   pushLog,
 }: CreateCompositionEventHandlersOptions): CompositionEventHandlers {
@@ -49,7 +54,7 @@ export function createCompositionEventHandlers({
         compositionData: event.data ?? '',
         eventTarget: event.target,
       })
-      handleRubyBaseCompositionStart(getView(), { pushLog })
+      handleRubyBaseCompositionStart(getView(), event, { pushLog })
       setIsComposing(true)
       pushLog('compositionstart', '')
       emitSpecialInlineBoundaryDiag(pushLog, {
@@ -72,6 +77,7 @@ export function createCompositionEventHandlers({
         compositionData: event.data ?? '',
         eventTarget: event.target,
       })
+      scheduleVisualFocusCurrentLineUpdate?.()
     },
 
     onCompositionEnd(event: CompositionEvent) {
@@ -84,6 +90,7 @@ export function createCompositionEventHandlers({
         compositionData: event.data ?? '',
         eventTarget: event.target,
       })
+      handleRubyBaseCompositionEnd(getView(), event, { pushLog })
       queueMicrotask(() => {
         setIsComposing(false)
         const changed = clearStoredMarks()
@@ -116,6 +123,7 @@ export function createCompositionEventHandlers({
         pushLog('tcyGuard', `blockedBeforeInput:${event.inputType ?? ''}`)
         return
       }
+      noteTypewriterBeforeInput?.(event)
       if (getIsComposing()) return
       if (event.inputType?.startsWith('insertComposition')) return
       const changed = clearStoredMarks()

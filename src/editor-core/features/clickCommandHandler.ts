@@ -30,6 +30,8 @@ type CreateEditorClickHandlerOptions = {
   ) => boolean
   toggleHeadingFold: (headingPos: number) => void
   emitFoldChange: () => void
+  /** エディタ内の折りたたみトグル直前（Typewriter ジャンプ抑制など） */
+  onHeadingFoldToggled?: () => void
   openExternalUrl?: OpenExternalUrl
   pushLog: LogPush
 }
@@ -47,6 +49,7 @@ export function createEditorClickHandler({
   toggleChecklistItemAtDocPos,
   toggleHeadingFold,
   emitFoldChange,
+  onHeadingFoldToggled,
   openExternalUrl,
   pushLog,
 }: CreateEditorClickHandlerOptions): (event: MouseEvent) => void {
@@ -100,6 +103,7 @@ export function createEditorClickHandler({
 
     const headingPos = resolveFoldToggleHeadingPos(targetElement, foldToggleClass)
     if (headingPos !== null) {
+      onHeadingFoldToggled?.()
       toggleHeadingFold(headingPos)
       pushLog('command', `toggleHeadingFold(click) pos=${headingPos}`)
       // Fold state is display-only, so notify fold listeners without dirtying the doc.

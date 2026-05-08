@@ -9,6 +9,7 @@ import type {
   MarkdownDocumentOptions,
 } from "../../editor-core/types";
 import { resolveAutoTcyDigitRange } from "../../editor-core/features/autoTcy";
+import { setParagraphPlainFormalBehaviorRuntime } from "../../editor-core/features/paragraphPlainExperiments";
 import type { FrontmatterFields } from "../../editor-core/io/frontmatter";
 import {
   resolveDocumentType,
@@ -16,6 +17,8 @@ import {
   resolveTypeRecommendedWritingMode,
 } from "../../editor-core/io/frontmatterDocumentSettings";
 import type { SavedFileStat } from "../utils/externalEditConflict";
+import type { InternalDocId } from "../internalDocs/internalDocIds";
+import type { DisplaySettingsSectionKey } from "../components/displaySettingsSectionState";
 import {
   APP_TITLE_COLOR_PRESETS,
   APP_TITLE_PRESET_TEXTS,
@@ -25,6 +28,10 @@ import {
   DEFAULT_FRONTMATTER_SHOW_TRANSLATORS,
   DEFAULT_FRONTMATTER_VISIBLE,
   DEFAULT_LINE_BREAK_POLICY,
+  DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
+  DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO,
+  DEFAULT_TYPEWRITER_MODE_ENABLED,
+  DEFAULT_TYPEWRITER_OFFSET_RATIO,
   MAX_TOOLBAR_ICON_STROKE,
   MAX_TOOLBAR_SCALE,
   MIN_TOOLBAR_ICON_STROKE,
@@ -32,6 +39,37 @@ import {
   UI_THEME_MAIN_COLORS,
 } from "../../settings/defaults";
 import { normalizeAppTitleCustomValue } from "../../settings/appTitleCustom";
+import {
+  DEFAULT_PARAGRAPH_PLAIN_BEHAVIOR,
+  normalizeParagraphPlainBehavior,
+} from "../../settings/paragraphPlainBehavior";
+import type { ParagraphPlainBehavior } from "../../settings/types";
+import {
+  normalizeTypewriterFollowBandRatio,
+  normalizeTypewriterModeEnabled,
+  normalizeTypewriterOffsetRatio,
+} from "../../settings/typewriterModeSettings";
+import {
+  DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_COLOR,
+  DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_OPACITY,
+  DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_COLOR,
+  DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_OPACITY,
+  DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_OPACITY,
+  normalizeVisualFocusBlockHighlightColor,
+  normalizeVisualFocusBlockHighlightOpacity,
+  normalizeVisualFocusCurrentLineHighlightColor,
+  normalizeVisualFocusCurrentLineHighlightOpacity,
+  normalizeVisualFocusDimNonFocusedBlocksOpacity,
+} from "../../settings/visualFocusAppearance";
+import {
+  DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_ENABLED,
+  DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_ENABLED,
+  DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_ENABLED,
+  normalizeVisualFocusBlockHighlightEnabled,
+  normalizeVisualFocusCurrentLineHighlightEnabled,
+  normalizeVisualFocusDimNonFocusedBlocksEnabled,
+} from "../../settings/visualFocusSettings";
+import { normalizeMacosArrowScrollClampEnabled } from "../../settings/macosArrowScrollClampSettings";
 import { normalizeUiLanguageMode } from "../../settings/uiLanguageMode";
 import { normalizeTheme } from "../../settings/themeUtils";
 import {
@@ -52,8 +90,10 @@ import {
   loadDocumentTheme,
   loadCaretColorMode,
   loadCaretColorCustom,
+  loadUseEditorArrowPointer,
   saveCaretColorMode,
   saveCaretColorCustom,
+  saveUseEditorArrowPointer,
   loadRegisteredFonts,
   loadRubyVisibility,
   loadSelectedFont,
@@ -224,6 +264,10 @@ export type EditorTab = {
    * to WYSIWYG, and to re-enter Source Mode at the same offset next time.
    */
   sourceModeTopOffset: number | null;
+  /** Built-in read-only help tab (not file-backed, not saved). */
+  internalDocId?: InternalDocId;
+  /** Locale bundle for shortcut-reference tab only (which static MD is shown). */
+  internalShortcutBundleKey?: "ja" | "en";
 };
 
 export type ActiveTabPatch = Partial<
@@ -248,6 +292,8 @@ export type ActiveTabPatch = Partial<
     | "viewportAnchorTextOffset"
     | "viewportAnchorTextTotal"
     | "sourceModeTopOffset"
+    | "internalDocId"
+    | "internalShortcutBundleKey"
   >
 >;
 
@@ -592,6 +638,8 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
   );
   const [displaySettingsOpen, _setDisplaySettingsOpen] = useState(false);
+  const [displaySettingsExpandSectionKey, setDisplaySettingsExpandSectionKey] =
+    useState<DisplaySettingsSectionKey | null>(null);
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(() =>
     loadDisplaySettings(),
   );
@@ -613,11 +661,19 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setLineBreakPolicyNoticeIsDirty(false);
   }, []);
   const setDisplaySettingsOpen = useCallback(
-    (open: boolean) => {
-      _setDisplaySettingsOpen(open);
-      if (!open) {
+    (
+      open: boolean,
+      options?: {
+        expandSection?: DisplaySettingsSectionKey;
+      },
+    ) => {
+      if (open) {
+        setDisplaySettingsExpandSectionKey(options?.expandSection ?? null);
+      } else {
         clearLineBreakPolicyNotice();
+        setDisplaySettingsExpandSectionKey(null);
       }
+      _setDisplaySettingsOpen(open);
     },
     [clearLineBreakPolicyNotice],
   );
@@ -745,6 +801,47 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   const [caretColorCustom, _setCaretColorCustom] = useState<string | null>(() =>
     loadCaretColorCustom(),
   );
+  const [useEditorArrowPointer, _setUseEditorArrowPointer] = useState<boolean>(() =>
+    loadUseEditorArrowPointer(),
+  );
+  const [paragraphPlainBehavior, _setParagraphPlainBehavior] =
+    useState<ParagraphPlainBehavior>(DEFAULT_PARAGRAPH_PLAIN_BEHAVIOR);
+
+  const [typewriterModeEnabled, _setTypewriterModeEnabled] = useState<boolean>(
+    () => DEFAULT_TYPEWRITER_MODE_ENABLED,
+  );
+  const [typewriterOffsetRatio, _setTypewriterOffsetRatio] = useState<number>(
+    () => DEFAULT_TYPEWRITER_OFFSET_RATIO,
+  );
+  const [typewriterFollowBandRatio, _setTypewriterFollowBandRatio] =
+    useState<number>(() => DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO);
+
+  const [visualFocusBlockHighlightEnabled, _setVisualFocusBlockHighlightEnabled] =
+    useState<boolean>(() => DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_ENABLED);
+
+  const [visualFocusDimNonFocusedBlocksEnabled, _setVisualFocusDimNonFocusedBlocksEnabled] =
+    useState<boolean>(() => DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_ENABLED);
+
+  const [visualFocusBlockHighlightColor, _setVisualFocusBlockHighlightColor] = useState<string>(
+    () => DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_COLOR,
+  );
+  const [visualFocusBlockHighlightOpacity, _setVisualFocusBlockHighlightOpacity] = useState<number>(
+    () => DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_OPACITY,
+  );
+  const [visualFocusDimNonFocusedBlocksOpacity, _setVisualFocusDimNonFocusedBlocksOpacity] =
+    useState<number>(() => DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_OPACITY);
+
+  const [visualFocusCurrentLineHighlightEnabled, _setVisualFocusCurrentLineHighlightEnabled] =
+    useState<boolean>(() => DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_ENABLED);
+
+  const [visualFocusCurrentLineHighlightColor, _setVisualFocusCurrentLineHighlightColor] =
+    useState<string>(() => DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_COLOR);
+
+  const [visualFocusCurrentLineHighlightOpacity, _setVisualFocusCurrentLineHighlightOpacity] =
+    useState<number>(() => DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_OPACITY);
+
+  const [macosArrowScrollClampEnabled, _setMacosArrowScrollClampEnabled] =
+    useState<boolean>(() => DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED);
 
   const platform = detectRuntimePlatform();
   const usesNativeWindowControls =
@@ -895,6 +992,76 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       if (settings.caretColorCustom !== undefined) {
         _setCaretColorCustom(normalizeCaretColorCustom(settings.caretColorCustom));
       }
+      if (typeof settings.useEditorArrowPointer === "boolean") {
+        _setUseEditorArrowPointer(settings.useEditorArrowPointer);
+      }
+      const nextParagraphPlainBehavior = normalizeParagraphPlainBehavior(
+        settings.paragraphPlainBehavior,
+      );
+      _setParagraphPlainBehavior(nextParagraphPlainBehavior);
+      setParagraphPlainFormalBehaviorRuntime(nextParagraphPlainBehavior);
+
+      if (settings.typewriterModeEnabled !== undefined) {
+        _setTypewriterModeEnabled(
+          normalizeTypewriterModeEnabled(settings.typewriterModeEnabled),
+        );
+      }
+      if (settings.typewriterOffsetRatio !== undefined) {
+        _setTypewriterOffsetRatio(
+          normalizeTypewriterOffsetRatio(settings.typewriterOffsetRatio),
+        );
+      }
+      if (settings.typewriterFollowBandRatio !== undefined) {
+        _setTypewriterFollowBandRatio(
+          normalizeTypewriterFollowBandRatio(settings.typewriterFollowBandRatio),
+        );
+      }
+      if (settings.visualFocusBlockHighlightEnabled !== undefined) {
+        _setVisualFocusBlockHighlightEnabled(
+          normalizeVisualFocusBlockHighlightEnabled(settings.visualFocusBlockHighlightEnabled),
+        );
+      }
+      if (settings.visualFocusDimNonFocusedBlocksEnabled !== undefined) {
+        _setVisualFocusDimNonFocusedBlocksEnabled(
+          normalizeVisualFocusDimNonFocusedBlocksEnabled(settings.visualFocusDimNonFocusedBlocksEnabled),
+        );
+      }
+      if (settings.visualFocusBlockHighlightColor !== undefined) {
+        _setVisualFocusBlockHighlightColor(
+          normalizeVisualFocusBlockHighlightColor(settings.visualFocusBlockHighlightColor),
+        );
+      }
+      if (settings.visualFocusBlockHighlightOpacity !== undefined) {
+        _setVisualFocusBlockHighlightOpacity(
+          normalizeVisualFocusBlockHighlightOpacity(settings.visualFocusBlockHighlightOpacity),
+        );
+      }
+      if (settings.visualFocusDimNonFocusedBlocksOpacity !== undefined) {
+        _setVisualFocusDimNonFocusedBlocksOpacity(
+          normalizeVisualFocusDimNonFocusedBlocksOpacity(settings.visualFocusDimNonFocusedBlocksOpacity),
+        );
+      }
+      if (settings.visualFocusCurrentLineHighlightEnabled !== undefined) {
+        _setVisualFocusCurrentLineHighlightEnabled(
+          normalizeVisualFocusCurrentLineHighlightEnabled(settings.visualFocusCurrentLineHighlightEnabled),
+        );
+      }
+      if (settings.visualFocusCurrentLineHighlightColor !== undefined) {
+        _setVisualFocusCurrentLineHighlightColor(
+          normalizeVisualFocusCurrentLineHighlightColor(settings.visualFocusCurrentLineHighlightColor),
+        );
+      }
+      if (settings.visualFocusCurrentLineHighlightOpacity !== undefined) {
+        _setVisualFocusCurrentLineHighlightOpacity(
+          normalizeVisualFocusCurrentLineHighlightOpacity(settings.visualFocusCurrentLineHighlightOpacity),
+        );
+      }
+      if (settings.macosArrowScrollClampEnabled !== undefined) {
+        _setMacosArrowScrollClampEnabled(
+          normalizeMacosArrowScrollClampEnabled(settings.macosArrowScrollClampEnabled),
+        );
+      }
+
       if (settings.lineBreakPolicy === DEFAULT_LINE_BREAK_POLICY) {
         setLineBreakPolicy(DEFAULT_LINE_BREAK_POLICY);
       }
@@ -1223,6 +1390,58 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       void patchSettingsJson({ caretColorCustom });
     }
   }, [caretColorCustom, settingsSyncReady]);
+
+  useEffect(() => {
+    saveUseEditorArrowPointer(useEditorArrowPointer);
+    if (settingsSyncReady) {
+      void patchSettingsJson({ useEditorArrowPointer });
+    }
+  }, [useEditorArrowPointer, settingsSyncReady]);
+
+  useEffect(() => {
+    setParagraphPlainFormalBehaviorRuntime(paragraphPlainBehavior);
+    if (settingsSyncReady) {
+      void patchSettingsJson({ paragraphPlainBehavior });
+    }
+  }, [paragraphPlainBehavior, settingsSyncReady]);
+
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({
+      typewriterModeEnabled,
+      typewriterOffsetRatio,
+      typewriterFollowBandRatio,
+    });
+  }, [
+    settingsSyncReady,
+    typewriterModeEnabled,
+    typewriterOffsetRatio,
+    typewriterFollowBandRatio,
+  ]);
+
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({
+      visualFocusBlockHighlightEnabled,
+      visualFocusDimNonFocusedBlocksEnabled,
+      visualFocusBlockHighlightColor,
+      visualFocusBlockHighlightOpacity,
+      visualFocusDimNonFocusedBlocksOpacity,
+      visualFocusCurrentLineHighlightEnabled,
+      visualFocusCurrentLineHighlightColor,
+      visualFocusCurrentLineHighlightOpacity,
+    });
+  }, [
+    settingsSyncReady,
+    visualFocusBlockHighlightEnabled,
+    visualFocusDimNonFocusedBlocksEnabled,
+    visualFocusBlockHighlightColor,
+    visualFocusBlockHighlightOpacity,
+    visualFocusDimNonFocusedBlocksOpacity,
+    visualFocusCurrentLineHighlightEnabled,
+    visualFocusCurrentLineHighlightColor,
+    visualFocusCurrentLineHighlightOpacity,
+  ]);
 
   // Sync effective policy to editor core on tab switch / frontmatter change
   useEffect(() => {
@@ -1708,6 +1927,10 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     [],
   );
 
+  const setParagraphPlainBehavior = useCallback((next: ParagraphPlainBehavior) => {
+    _setParagraphPlainBehavior(normalizeParagraphPlainBehavior(next));
+  }, []);
+
   const handleFullPlainEditChange = useCallback(
     (value: string) => {
       if (fullPlainEditError) setFullPlainEditError("");
@@ -1956,6 +2179,64 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
 
   const setCaretColorCustom = useCallback((value: string | null) => {
     _setCaretColorCustom(normalizeCaretColorCustom(value));
+  }, []);
+
+  const setUseEditorArrowPointer = useCallback((value: boolean) => {
+    _setUseEditorArrowPointer(value === true);
+  }, []);
+
+  const setTypewriterModeEnabled = useCallback((value: boolean) => {
+    _setTypewriterModeEnabled(value === true);
+  }, []);
+
+  const setTypewriterOffsetRatio = useCallback((value: number) => {
+    _setTypewriterOffsetRatio(normalizeTypewriterOffsetRatio(value));
+  }, []);
+
+  const setTypewriterFollowBandRatio = useCallback((value: number) => {
+    _setTypewriterFollowBandRatio(normalizeTypewriterFollowBandRatio(value));
+  }, []);
+
+  const setVisualFocusBlockHighlightEnabled = useCallback((value: boolean) => {
+    _setVisualFocusBlockHighlightEnabled(
+      normalizeVisualFocusBlockHighlightEnabled(value),
+    );
+  }, []);
+
+  const setVisualFocusDimNonFocusedBlocksEnabled = useCallback((value: boolean) => {
+    _setVisualFocusDimNonFocusedBlocksEnabled(
+      normalizeVisualFocusDimNonFocusedBlocksEnabled(value),
+    );
+  }, []);
+
+  const setVisualFocusBlockHighlightColor = useCallback((value: string) => {
+    _setVisualFocusBlockHighlightColor(normalizeVisualFocusBlockHighlightColor(value));
+  }, []);
+
+  const setVisualFocusBlockHighlightOpacity = useCallback((value: number) => {
+    _setVisualFocusBlockHighlightOpacity(normalizeVisualFocusBlockHighlightOpacity(value));
+  }, []);
+
+  const setVisualFocusDimNonFocusedBlocksOpacity = useCallback((value: number) => {
+    _setVisualFocusDimNonFocusedBlocksOpacity(
+      normalizeVisualFocusDimNonFocusedBlocksOpacity(value),
+    );
+  }, []);
+
+  const setVisualFocusCurrentLineHighlightEnabled = useCallback((value: boolean) => {
+    _setVisualFocusCurrentLineHighlightEnabled(
+      normalizeVisualFocusCurrentLineHighlightEnabled(value),
+    );
+  }, []);
+
+  const setVisualFocusCurrentLineHighlightColor = useCallback((value: string) => {
+    _setVisualFocusCurrentLineHighlightColor(normalizeVisualFocusCurrentLineHighlightColor(value));
+  }, []);
+
+  const setVisualFocusCurrentLineHighlightOpacity = useCallback((value: number) => {
+    _setVisualFocusCurrentLineHighlightOpacity(
+      normalizeVisualFocusCurrentLineHighlightOpacity(value),
+    );
   }, []);
 
   // BETA-T1: doc font is independent of presets — no detach on font change.
@@ -2375,6 +2656,8 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     frontmatterShowRoleLabels,
     setFrontmatterShowRoleLabels,
     displaySettingsOpen,
+    displaySettingsExpandSectionKey,
+    setDisplaySettingsExpandSectionKey,
     setDisplaySettingsOpen,
     displaySettings,
     setDisplaySettings,
@@ -2463,6 +2746,33 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setCaretColorMode,
     caretColorCustom,
     setCaretColorCustom,
+    useEditorArrowPointer,
+    setUseEditorArrowPointer,
+    paragraphPlainBehavior,
+    setParagraphPlainBehavior,
+    typewriterModeEnabled,
+    setTypewriterModeEnabled,
+    typewriterOffsetRatio,
+    setTypewriterOffsetRatio,
+    typewriterFollowBandRatio,
+    setTypewriterFollowBandRatio,
+    visualFocusBlockHighlightEnabled,
+    setVisualFocusBlockHighlightEnabled,
+    visualFocusDimNonFocusedBlocksEnabled,
+    setVisualFocusDimNonFocusedBlocksEnabled,
+    visualFocusBlockHighlightColor,
+    setVisualFocusBlockHighlightColor,
+    visualFocusBlockHighlightOpacity,
+    setVisualFocusBlockHighlightOpacity,
+    visualFocusDimNonFocusedBlocksOpacity,
+    setVisualFocusDimNonFocusedBlocksOpacity,
+    visualFocusCurrentLineHighlightEnabled,
+    setVisualFocusCurrentLineHighlightEnabled,
+    visualFocusCurrentLineHighlightColor,
+    setVisualFocusCurrentLineHighlightColor,
+    visualFocusCurrentLineHighlightOpacity,
+    setVisualFocusCurrentLineHighlightOpacity,
+    macosArrowScrollClampEnabled,
     registeredFonts,
     setRegisteredFonts,
     selectedFont,

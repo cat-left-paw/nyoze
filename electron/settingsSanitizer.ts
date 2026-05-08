@@ -8,6 +8,24 @@
  * This module runs in the main process (Node) and has no renderer deps.
  */
 import { resolveAutoTcyDigitRange } from "../src/editor-core/features/autoTcy";
+import { normalizeParagraphPlainBehavior } from "../src/settings/paragraphPlainBehavior";
+import {
+  normalizeTypewriterFollowBandRatio,
+  normalizeTypewriterModeEnabled,
+  normalizeTypewriterOffsetRatio,
+} from "../src/settings/typewriterModeSettings";
+import {
+  normalizeVisualFocusBlockHighlightEnabled,
+  normalizeVisualFocusCurrentLineHighlightEnabled,
+  normalizeVisualFocusDimNonFocusedBlocksEnabled,
+} from "../src/settings/visualFocusSettings";
+import {
+  normalizeVisualFocusBlockHighlightColor,
+  normalizeVisualFocusBlockHighlightOpacity,
+  normalizeVisualFocusCurrentLineHighlightColor,
+  normalizeVisualFocusCurrentLineHighlightOpacity,
+  normalizeVisualFocusDimNonFocusedBlocksOpacity,
+} from "../src/settings/visualFocusAppearance";
 import { normalizeUiLanguageMode } from "../src/settings/uiLanguageMode";
 
 // ---- Constants ----
@@ -416,6 +434,85 @@ export function sanitizeSettingsJson(
     out.frontmatterShowTranslators = raw.frontmatterShowTranslators;
   if (typeof raw.frontmatterShowRoleLabels === "boolean")
     out.frontmatterShowRoleLabels = raw.frontmatterShowRoleLabels;
+  if (typeof raw.useEditorArrowPointer === "boolean")
+    out.useEditorArrowPointer = raw.useEditorArrowPointer;
+
+  if (raw.typewriterModeEnabled !== undefined) {
+    out.typewriterModeEnabled = normalizeTypewriterModeEnabled(
+      raw.typewriterModeEnabled,
+    );
+  }
+  if (raw.typewriterOffsetRatio !== undefined) {
+    out.typewriterOffsetRatio = normalizeTypewriterOffsetRatio(
+      raw.typewriterOffsetRatio,
+    );
+  }
+  if (raw.typewriterFollowBandRatio !== undefined) {
+    out.typewriterFollowBandRatio = normalizeTypewriterFollowBandRatio(
+      raw.typewriterFollowBandRatio,
+    );
+  }
+
+  if (raw.visualFocusBlockHighlightEnabled !== undefined) {
+    out.visualFocusBlockHighlightEnabled = normalizeVisualFocusBlockHighlightEnabled(
+      raw.visualFocusBlockHighlightEnabled,
+    );
+  }
+
+  if (raw.visualFocusDimNonFocusedBlocksEnabled !== undefined) {
+    out.visualFocusDimNonFocusedBlocksEnabled = normalizeVisualFocusDimNonFocusedBlocksEnabled(
+      raw.visualFocusDimNonFocusedBlocksEnabled,
+    );
+  }
+
+  if (raw.visualFocusBlockHighlightColor !== undefined) {
+    out.visualFocusBlockHighlightColor = normalizeVisualFocusBlockHighlightColor(
+      raw.visualFocusBlockHighlightColor,
+    );
+  }
+  if (raw.visualFocusBlockHighlightOpacity !== undefined) {
+    out.visualFocusBlockHighlightOpacity = normalizeVisualFocusBlockHighlightOpacity(
+      raw.visualFocusBlockHighlightOpacity,
+    );
+  }
+  if (raw.visualFocusDimNonFocusedBlocksOpacity !== undefined) {
+    out.visualFocusDimNonFocusedBlocksOpacity = normalizeVisualFocusDimNonFocusedBlocksOpacity(
+      raw.visualFocusDimNonFocusedBlocksOpacity,
+    );
+  }
+
+  if (raw.visualFocusCurrentLineHighlightEnabled !== undefined) {
+    out.visualFocusCurrentLineHighlightEnabled = normalizeVisualFocusCurrentLineHighlightEnabled(
+      raw.visualFocusCurrentLineHighlightEnabled,
+    );
+  }
+  if (raw.visualFocusCurrentLineHighlightColor !== undefined) {
+    out.visualFocusCurrentLineHighlightColor = normalizeVisualFocusCurrentLineHighlightColor(
+      raw.visualFocusCurrentLineHighlightColor,
+    );
+  }
+  if (raw.visualFocusCurrentLineHighlightOpacity !== undefined) {
+    out.visualFocusCurrentLineHighlightOpacity = normalizeVisualFocusCurrentLineHighlightOpacity(
+      raw.visualFocusCurrentLineHighlightOpacity,
+    );
+  }
+
+  if (
+    typeof raw.macosArrowScrollClampEnabled === "boolean"
+  ) {
+    out.macosArrowScrollClampEnabled = raw.macosArrowScrollClampEnabled;
+  }
+
+  if (typeof raw.paragraphPlainBehavior === "string") {
+    const v = raw.paragraphPlainBehavior.trim();
+    if (
+      v === "fast" ||
+      v === "comfortable" ||
+      v === "comfortable-no-scroll-reposition"
+    ) {
+      out.paragraphPlainBehavior = normalizeParagraphPlainBehavior(v);
+    }
+  }
 
   // --- App title ---
   if (

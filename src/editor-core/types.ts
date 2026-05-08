@@ -272,6 +272,9 @@ export interface EditorCoreHandle {
   /** Load Markdown into the editor, replacing current content */
   loadMarkdown(md: string): void
 
+  /** Disable editing (built-in read-only help tabs). Does not remove extensions. */
+  setReadOnly(readOnly: boolean): void
+
   /** Replace only the hidden frontmatter prefix without reparsing the body or clearing history */
   setFrontmatterPrefix(prefix: string): void
 
@@ -408,6 +411,18 @@ export interface EditorCoreHandle {
 
   /** Focus the editor (BETA-A11Y1) */
   focusEditor(): void
+
+  /**
+   * Re-evaluate Typewriter scroll past end spacer vs settings / Source Mode.
+   * Safe no-op when Typewriter controller is unavailable.
+   */
+  syncTypewriterRuntimeState(): void
+
+  /** Force ProseMirror decoration pass (e.g. Visual Focus toggle without doc change). */
+  nudgeDecorationsRefresh(): void
+
+  /** Recompute Visual Focus current-line overlay (settings / mode / layout). */
+  scheduleVisualFocusCurrentLineUpdate(): void
 
   /** Clean up resources */
   destroy(): void

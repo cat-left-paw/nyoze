@@ -12,6 +12,8 @@ import {
 type SearchBarProps = {
   open: boolean
   replaceOpen: boolean
+  /** Read-only internal docs: hide replace affordances (search navigation stays enabled). */
+  replaceDisabled?: boolean
   query: string
   replacement: string
   caseSensitive: boolean
@@ -39,6 +41,7 @@ function isImeComposingEnter(event: ReactKeyboardEvent<HTMLInputElement>): boole
 export function SearchBar({
   open,
   replaceOpen,
+  replaceDisabled = false,
   query,
   replacement,
   caseSensitive,
@@ -71,8 +74,18 @@ export function SearchBar({
         <button
           className='search-bar-btn search-bar-toggle-replace'
           type='button'
-          onClick={onToggleReplace}
-          title={replaceOpen ? '置換を閉じる' : '置換を開く'}
+          disabled={replaceDisabled}
+          onClick={() => {
+            if (replaceDisabled) return
+            onToggleReplace()
+          }}
+          title={
+            replaceDisabled
+              ? '置換はこのドキュメントでは使用できません'
+              : replaceOpen
+                ? '置換を閉じる'
+                : '置換を開く'
+          }
         >
           {replaceOpen ? (
             <IconChevronUp size={14} />
@@ -156,7 +169,7 @@ export function SearchBar({
         </button>
       </div>
 
-      {replaceOpen && (
+      {replaceOpen && !replaceDisabled && (
         <div className='search-bar-row search-bar-replace-row'>
           <div className='search-bar-spacer' />
           <input

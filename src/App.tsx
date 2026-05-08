@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type {
   CommandAvailability,
@@ -27,16 +27,33 @@ import {
   DEFAULT_DISPLAY_SETTINGS,
   DEFAULT_DOC_FONT_PRESET,
   DEFAULT_DOC_HEADING_FONT,
+  DEFAULT_EDITOR_ARROW_POINTER,
   DEFAULT_FRONTMATTER_SHOW_AUTHORS,
   DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
   DEFAULT_FRONTMATTER_SHOW_TRANSLATORS,
   DEFAULT_FRONTMATTER_VISIBLE,
   DEFAULT_TOOLBAR_ICON_STROKE,
   DEFAULT_TOOLBAR_SCALE,
+  DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO,
+  DEFAULT_TYPEWRITER_MODE_ENABLED,
+  DEFAULT_TYPEWRITER_OFFSET_RATIO,
   DEFAULT_UI_FONT_SCALE,
+  DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
   DOCUMENT_THEME_COLOR_PRESETS,
   UI_THEME_DOC_COLOR_PRESETS,
 } from "./settings/defaults";
+import {
+  DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_COLOR,
+  DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_OPACITY,
+  DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_COLOR,
+  DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_OPACITY,
+  DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_OPACITY,
+} from "./settings/visualFocusAppearance";
+import {
+  DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_ENABLED,
+  DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_ENABLED,
+  DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_ENABLED,
+} from "./settings/visualFocusSettings";
 import type {
   DocumentColorSettings,
   DocumentTheme,
@@ -45,6 +62,8 @@ import type {
 import { usePaneLayout } from "./ui/hooks/usePaneLayout";
 import { useFileExplorer } from "./ui/hooks/useFileExplorer";
 import { useEditorCoreBridge } from "./ui/hooks/useEditorCoreBridge";
+import type { TypewriterRuntimeSnapshot } from "./ui/hooks/typewriterRuntimeRef";
+import { applyVisualFocusCssVariables } from "./ui/utils/syncVisualFocusCssVariables";
 import { useRubyBoutenPrompt } from "./ui/hooks/useRubyBoutenPrompt";
 import { useEditorContextMenu } from "./ui/hooks/useEditorContextMenu";
 import { useSearchUiState } from "./ui/hooks/useSearchUiState";
@@ -82,6 +101,7 @@ import {
   pasteFromClipboard,
   pasteFromClipboardPlainOnly,
 } from "./ui/utils/nativeEditCommands";
+import { clampCommandAvailabilityForInternalDoc } from "./ui/utils/clampCommandAvailabilityForInternalDoc";
 import { getPathBaseName } from "./ui/utils/path";
 import {
   formatDocumentTypeLabel,
@@ -128,12 +148,17 @@ import { resolveCaretColor } from "./theme/caretColor";
 import { PromptModal } from "./ui/components/PromptModal";
 import { SearchBar } from "./ui/components/SearchBar";
 import { ImeProfilerHud } from "./ui/components/ImeProfilerHud";
+import { createUiTextGetter } from "./ui/i18n/uiText";
+import { getShortcutReferenceContent } from "./ui/internalDocs/getShortcutReferenceContent";
 
 const BUG_REPORT_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLScBnYx3xCLDvjyApXNyWuzJmIk9N74r4s-zOz0xTmE3IGX2Ww/viewform?usp=publish-editor";
 const FEEDBACK_URL =
   "https://docs.google.com/forms/d/e/1FAIpQLScKH53jmuErA91Z19iO67AU5iet448XbqpRdaKb7Dj2mQW3jg/viewform?usp=dialog";
 const REPOSITORY_URL = "https://github.com/cat-left-paw/nyoze";
+/** Fixed HTTPS URL for online MANUAL — opened via renderer shell.openExternal (SEC validation). */
+const MANUAL_GITHUB_URL =
+  "https://github.com/cat-left-paw/nyoze/blob/main/MANUAL.md";
 
 type UnsavedContinueAction = "cancel" | "save" | "discard";
 type FileStatInfo = {
@@ -322,6 +347,25 @@ function isSameCommandAvailability(
 
 function App() {
   const coreRef = useRef<EditorCoreHandle | null>(null);
+  const typewriterRuntimeRef = useRef<TypewriterRuntimeSnapshot>({
+    enabled: DEFAULT_TYPEWRITER_MODE_ENABLED,
+    offsetRatio: DEFAULT_TYPEWRITER_OFFSET_RATIO,
+    followBandRatio: DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO,
+    sourceModeActive: false,
+    macosArrowScrollClampEnabled: DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
+    visualFocusBlockHighlightEnabled: DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_ENABLED,
+    visualFocusDimNonFocusedBlocksEnabled:
+      DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_ENABLED,
+    visualFocusBlockHighlightColor: DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_COLOR,
+    visualFocusBlockHighlightOpacity: DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_OPACITY,
+    visualFocusDimNonFocusedBlocksOpacity:
+      DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_OPACITY,
+    visualFocusCurrentLineHighlightEnabled:
+      DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_ENABLED,
+    visualFocusCurrentLineHighlightColor: DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_COLOR,
+    visualFocusCurrentLineHighlightOpacity:
+      DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_OPACITY,
+  });
   const rubyVisibleRef = useRef(true);
   const editorDivRef = useRef<HTMLDivElement | null>(null);
   const sourceModeController = useSourceModeController();
@@ -340,6 +384,23 @@ function App() {
   } = usePaneLayout();
 
   const ui = useAppUiState({ coreRef });
+
+  typewriterRuntimeRef.current = {
+    enabled: ui.typewriterModeEnabled,
+    offsetRatio: ui.typewriterOffsetRatio,
+    followBandRatio: ui.typewriterFollowBandRatio,
+    sourceModeActive: ui.fullPlainEditActive,
+    macosArrowScrollClampEnabled: ui.macosArrowScrollClampEnabled,
+    visualFocusBlockHighlightEnabled: ui.visualFocusBlockHighlightEnabled,
+    visualFocusDimNonFocusedBlocksEnabled: ui.visualFocusDimNonFocusedBlocksEnabled,
+    visualFocusBlockHighlightColor: ui.visualFocusBlockHighlightColor,
+    visualFocusBlockHighlightOpacity: ui.visualFocusBlockHighlightOpacity,
+    visualFocusDimNonFocusedBlocksOpacity: ui.visualFocusDimNonFocusedBlocksOpacity,
+    visualFocusCurrentLineHighlightEnabled: ui.visualFocusCurrentLineHighlightEnabled,
+    visualFocusCurrentLineHighlightColor: ui.visualFocusCurrentLineHighlightColor,
+    visualFocusCurrentLineHighlightOpacity: ui.visualFocusCurrentLineHighlightOpacity,
+  };
+
   const imeProfilerBuildType: "dev" | "prod" = import.meta.env.DEV
     ? "dev"
     : "prod";
@@ -441,6 +502,21 @@ function App() {
   );
 
   const search = useSearchUiState({ coreRef });
+  const handleOpenSearchReplaceShortcut = useCallback(() => {
+    if (ui.activeTab.internalDocId) {
+      search.openSearch();
+      return;
+    }
+    search.openSearchReplace();
+  }, [search, ui.activeTab.internalDocId]);
+
+  useEffect(() => {
+    if (ui.activeTab.internalDocId) {
+      search.setReplaceOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only stable setter + tab switch; avoid `search` snapshot churn
+  }, [ui.activeTab.internalDocId, search.setReplaceOpen]);
+
   const largeDocGuard = useLargeDocumentGuard();
   const [unsavedModalOpen, setUnsavedModalOpen] = useState(false);
   const [activeDocumentCharacterCount, setActiveDocumentCharacterCount] =
@@ -479,6 +555,7 @@ function App() {
 
   const toggleParagraphPlainMode = useCallback(() => {
     if (ui.fullPlainEditActive) return;
+    if (ui.activeTab.internalDocId) return;
     const core = coreRef.current;
     if (!core) return;
     const next = core.toggleParagraphPlainMode();
@@ -492,37 +569,24 @@ function App() {
     setRightPaneOpen((v) => !v);
   }, [setRightPaneOpen]);
 
-  // Global keyboard shortcuts (marks, headings, list move, outline, search)
-  useGlobalShortcuts({
-    coreRef,
-    sourceModeController,
-    writingMode: ui.writingMode,
-    getPlainModeKind,
-    onOpenSearch: search.openSearch,
-    onOpenSearchReplace: search.openSearchReplace,
-    onOpenLinkPrompt: openLinkPrompt,
-    onOpenRubyPrompt: openRubyBoutenPrompt,
-    onShowEditorInlineHint: ui.showEditorInlineHint,
-    onToggleParagraphPlainMode: toggleParagraphPlainMode,
-    onToggleLeftPane: handleToggleLeftPane,
-    onToggleRightPane: handleToggleRightPane,
-  });
-
   const handleCtxHeading = useCallback(
-    (level: number) => coreRef.current?.toggleHeading(level),
-    [],
+    (level: number) => {
+      if (ui.activeTab.internalDocId) return;
+      coreRef.current?.toggleHeading(level);
+    },
+    [ui.activeTab.internalDocId],
   );
   const handleCtxSelectAll = useCallback(() => {
     coreRef.current?.selectAll();
   }, []);
-  const handleCtxMoveUp = useCallback(
-    () => coreRef.current?.moveListItemUp(),
-    [],
-  );
-  const handleCtxMoveDown = useCallback(
-    () => coreRef.current?.moveListItemDown(),
-    [],
-  );
+  const handleCtxMoveUp = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    coreRef.current?.moveListItemUp();
+  }, [ui.activeTab.internalDocId]);
+  const handleCtxMoveDown = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    coreRef.current?.moveListItemDown();
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleHeadingFold = useCallback(
     (pos: number) => {
@@ -723,13 +787,14 @@ function App() {
     handleCopySelectedFile,
     handlePasteIntoSelection,
     resolveTransferConflictByOverwrite,
-    resolveTransferConflictByRename,
+    resolveTransferConflictKeepBoth,
     cancelTransferConflict,
     cancelNamePrompt: cancelFileExplorerNamePrompt,
     submitNamePrompt: submitFileExplorerNamePrompt,
     clearOperationError: clearFileExplorerOperationError,
     notifyFileSaved: notifyFileExplorerFileSaved,
   } = useFileExplorer({
+    uiLanguageMode: ui.uiLanguageMode,
     onFileContentLoaded: async (filePath, content) => {
       flushImeCompositionSideEffects("file-load-active-tab");
       const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
@@ -771,6 +836,7 @@ function App() {
     coreRef,
     editorDivRef,
     initialLineBreakPolicy: ui.initialLineBreakPolicy,
+    typewriterRuntimeRef,
     onLog: handleCoreLog,
     onSelectionUpdate: handleCoreSelectionUpdate,
     onParagraphPlainModeChange: ui.onCoreParagraphPlainModeChange,
@@ -780,6 +846,83 @@ function App() {
     openExternalUrl: openExternalEditorLink,
     onReady: handleCoreReady,
   });
+
+  useEffect(() => {
+    coreRef.current?.syncTypewriterRuntimeState();
+    coreRef.current?.nudgeDecorationsRefresh();
+    coreRef.current?.scheduleVisualFocusCurrentLineUpdate();
+  }, [
+    ui.typewriterModeEnabled,
+    ui.fullPlainEditActive,
+    ui.paragraphPlainModeActive,
+  ]);
+
+  useEffect(() => {
+    applyVisualFocusCssVariables(document.documentElement, {
+      visualFocusBlockHighlightColor: ui.visualFocusBlockHighlightColor,
+      visualFocusBlockHighlightOpacity: ui.visualFocusBlockHighlightOpacity,
+      visualFocusDimNonFocusedBlocksOpacity: ui.visualFocusDimNonFocusedBlocksOpacity,
+      visualFocusCurrentLineHighlightColor: ui.visualFocusCurrentLineHighlightColor,
+      visualFocusCurrentLineHighlightOpacity: ui.visualFocusCurrentLineHighlightOpacity,
+    });
+  }, [
+    ui.visualFocusBlockHighlightColor,
+    ui.visualFocusBlockHighlightOpacity,
+    ui.visualFocusDimNonFocusedBlocksOpacity,
+    ui.visualFocusCurrentLineHighlightColor,
+    ui.visualFocusCurrentLineHighlightOpacity,
+  ]);
+
+  useEffect(() => {
+    coreRef.current?.nudgeDecorationsRefresh();
+  }, [ui.visualFocusBlockHighlightEnabled, ui.visualFocusDimNonFocusedBlocksEnabled]);
+
+  useEffect(() => {
+    coreRef.current?.scheduleVisualFocusCurrentLineUpdate();
+  }, [
+    ui.visualFocusCurrentLineHighlightEnabled,
+    ui.visualFocusCurrentLineHighlightColor,
+    ui.visualFocusCurrentLineHighlightOpacity,
+  ]);
+
+  // Frontmatter view mount/unmount and field changes shift the body's offset inside
+  // `.editor-surface`. None of the controller's own triggers (PM transactions, scroll,
+  // resize) fire on these React-side layout changes — so the overlay keeps stale coords
+  // until the next user-driven update. Re-schedule a single update after the DOM commit
+  // so the new layout is read before paint. No persistent observers; the dependency list
+  // is intentionally narrow to the fields that `FrontmatterView` actually renders.
+  const frontmatterFields = ui.activeTab?.frontmatterFields;
+  const frontmatterTitle = frontmatterFields?.title;
+  const frontmatterOriginalTitle = frontmatterFields?.original_title;
+  const frontmatterSubtitle = frontmatterFields?.subtitle;
+  const frontmatterAuthor = frontmatterFields?.author;
+  const frontmatterCoAuthorsKey = (frontmatterFields?.co_authors ?? []).join("\u0000");
+  const frontmatterTranslator = frontmatterFields?.translator;
+  const frontmatterCoTranslatorsKey = (frontmatterFields?.co_translators ?? []).join(
+    "\u0000",
+  );
+  useEffect(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    // One rAF gives the FrontmatterView mount/unmount layout shift time to commit
+    // before the controller's own rAF-debounced scheduleUpdate reads coords.
+    const raf = window.requestAnimationFrame(() => {
+      core.scheduleVisualFocusCurrentLineUpdate();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [
+    ui.frontmatterVisible,
+    ui.frontmatterShowAuthors,
+    ui.frontmatterShowTranslators,
+    ui.frontmatterShowRoleLabels,
+    frontmatterTitle,
+    frontmatterOriginalTitle,
+    frontmatterSubtitle,
+    frontmatterAuthor,
+    frontmatterCoAuthorsKey,
+    frontmatterTranslator,
+    frontmatterCoTranslatorsKey,
+  ]);
 
   useEffect(() => {
     if (!ui.imePhaseAEnabled && !ui.imePhaseBRubySuspendEnabled) return;
@@ -974,6 +1117,10 @@ function App() {
       // go to the tab that initiated the save, not whatever tab is active
       // at the time async operations complete.
       const targetTabId = targetTabOverride?.id ?? ui.activeTabId;
+      const tabForSave = ui.tabs.find((t) => t.id === targetTabId);
+      if (tabForSave?.internalDocId) {
+        return true;
+      }
       const currentFilePath =
         targetTabOverride?.filePath ?? ui.activeTab.filePath;
       const currentTabTitle = targetTabOverride?.title ?? ui.activeTab.title;
@@ -1449,6 +1596,16 @@ function App() {
     }
   }, []);
 
+  const openManualFromMenu = useCallback(async () => {
+    const ok = await window.nyozeBridge?.shell?.openExternal(MANUAL_GITHUB_URL);
+    if (ok === false) {
+      window.alert(
+        "MANUAL を開けませんでした。\nブラウザ連携を確認してください。\n\n" +
+          MANUAL_GITHUB_URL,
+      );
+    }
+  }, []);
+
   const sendFeedback = useCallback(async () => {
     const ok = await window.nyozeBridge?.shell?.openExternal(FEEDBACK_URL);
     if (ok === false) {
@@ -1482,13 +1639,52 @@ function App() {
     }, 4000);
   }, []);
 
+  const openShortcutReferenceFromMenu = useCallback(async () => {
+    const t = createUiTextGetter(ui.uiLanguageMode);
+    const title = t("help.shortcutsReference");
+    const { markdown, bundleKey } = getShortcutReferenceContent(ui.uiLanguageMode);
+    const result = await tabManager.openOrFocusShortcutReferenceTab({
+      title,
+      markdown,
+      bundleKey,
+    });
+    if (result === "tab-limit") showTabLimitNotice();
+  }, [tabManager, ui.uiLanguageMode, showTabLimitNotice]);
+
+  useEffect(() => {
+    if (!ui.activeTab.internalDocId) return;
+    const { markdown, bundleKey } = getShortcutReferenceContent(ui.uiLanguageMode);
+    const title = createUiTextGetter(ui.uiLanguageMode)("help.shortcutsReference");
+    if (
+      ui.activeTab.internalShortcutBundleKey === bundleKey &&
+      ui.activeTab.markdownSnapshot === markdown &&
+      ui.activeTab.title === title
+    ) {
+      return;
+    }
+    void tabManager.openOrFocusShortcutReferenceTab({
+      title,
+      markdown,
+      bundleKey,
+    });
+  }, [
+    tabManager,
+    ui.activeTab.internalDocId,
+    ui.activeTab.internalShortcutBundleKey,
+    ui.activeTab.markdownSnapshot,
+    ui.activeTab.title,
+    ui.uiLanguageMode,
+  ]);
+
   useE2eBridge({
     loadIntoActiveTab: tabManager.loadIntoActiveTab,
     openFileInNewTab: tabManager.openFileInTab,
     flushImeCompositionSideEffects,
     showTabLimitNotice,
+    setExplorerRootForE2e: setFileExplorerDir,
     inspectSpecialInlineAdjacentCaretPm: () =>
       coreRef.current?.inspectSpecialInlineAdjacentCaretPm() ?? null,
+    openOrFocusShortcutReferenceTab: tabManager.openOrFocusShortcutReferenceTab,
   });
 
   // --- Menu command listener (macOS menu bar / Win+Linux popup menu) ---
@@ -1522,6 +1718,13 @@ function App() {
         case "menu:view-settings":
           ui.setDisplaySettingsOpen(true);
           break;
+        case "menu:open-manual":
+          void openManualFromMenu();
+          break;
+        case "menu:show-shortcuts":
+          flushImeCompositionSideEffects("menu-show-shortcuts");
+          void openShortcutReferenceFromMenu();
+          break;
         case "menu:bug-report":
           void sendBugReport();
           break;
@@ -1533,6 +1736,8 @@ function App() {
   }, [
     confirmContinueWithUnsavedChanges,
     flushImeCompositionSideEffects,
+    openManualFromMenu,
+    openShortcutReferenceFromMenu,
     saveDocument,
     sendBugReport,
     sendFeedback,
@@ -1760,13 +1965,6 @@ function App() {
     notifyFileExplorerFileSaved,
   ]);
 
-  const runMarkCommand = useCallback(
-    (commandName: "bold" | "italic" | "strike" | "highlight") => {
-      coreRef.current?.execute(commandName);
-    },
-    [],
-  );
-
   // BETA-C1: Centralized Undo/Redo routing — toolbar, shortcuts, and availability
   // all derive from the same source via useUndoRedoRouting.
   const { handleUndo, handleRedo, effectiveAvailability } = useUndoRedoRouting({
@@ -1778,41 +1976,118 @@ function App() {
     commandAvailability,
   });
 
+  const internalShortcutDocActive = Boolean(ui.activeTab.internalDocId);
+
+  const headerCommandAvailability = useMemo(
+    () =>
+      internalShortcutDocActive
+        ? clampCommandAvailabilityForInternalDoc(effectiveAvailability)
+        : effectiveAvailability,
+    [internalShortcutDocActive, effectiveAvailability],
+  );
+
+  const contextMenuCommandAvailability = useMemo(
+    () =>
+      internalShortcutDocActive
+        ? clampCommandAvailabilityForInternalDoc(ctxMenu.availability)
+        : ctxMenu.availability,
+    [internalShortcutDocActive, ctxMenu.availability],
+  );
+
+  const guardedUndo = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    handleUndo();
+  }, [handleUndo, ui.activeTab.internalDocId]);
+
+  const guardedRedo = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    handleRedo();
+  }, [handleRedo, ui.activeTab.internalDocId]);
+
+  const runMarkCommand = useCallback(
+    (commandName: "bold" | "italic" | "strike" | "highlight") => {
+      if (ui.activeTab.internalDocId) return;
+      coreRef.current?.execute(commandName);
+    },
+    [ui.activeTab.internalDocId],
+  );
+
   const handleToggleInlineCode = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleInlineCode();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleClearFormat = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.clearFormat();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleInsertHorizontalRule = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.insertHorizontalRule();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleHeading = useCallback((level: number) => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleHeading(level);
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleBulletList = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleBulletList();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleOrderedList = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleOrderedList();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleChecklist = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleChecklist();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleBlockquote = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleBlockquote();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleToggleCodeBlock = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleCodeBlock();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
+
+  const guardedOpenLinkPrompt = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    openLinkPrompt();
+  }, [openLinkPrompt, ui.activeTab.internalDocId]);
+
+  const guardedOpenImagePrompt = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    openImagePrompt();
+  }, [openImagePrompt, ui.activeTab.internalDocId]);
+
+  const guardedOpenRubyBoutenPrompt = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
+    openRubyBoutenPrompt();
+  }, [openRubyBoutenPrompt, ui.activeTab.internalDocId]);
+
+  // Global keyboard shortcuts (marks, headings, list move, outline, search)
+  useGlobalShortcuts({
+    coreRef,
+    sourceModeController,
+    writingMode: ui.writingMode,
+    getPlainModeKind,
+    getInternalDocActive: () => Boolean(ui.activeTab.internalDocId),
+    onOpenSearch: search.openSearch,
+    onOpenSearchReplace: handleOpenSearchReplaceShortcut,
+    onOpenLinkPrompt: guardedOpenLinkPrompt,
+    onOpenRubyPrompt: guardedOpenRubyBoutenPrompt,
+    onShowEditorInlineHint: ui.showEditorInlineHint,
+    onToggleParagraphPlainMode: toggleParagraphPlainMode,
+    onToggleLeftPane: handleToggleLeftPane,
+    onToggleRightPane: handleToggleRightPane,
+  });
 
   const handleWindowMinimize = useCallback(() => {
     const minimize = window.nyozeBridge?.windowControls?.minimize;
@@ -1909,8 +2184,9 @@ function App() {
   );
 
   const handleToggleTcy = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleTcy();
-  }, []);
+  }, [ui.activeTab.internalDocId]);
 
   const handleCut = useCallback(() => {
     cutSelection();
@@ -2128,6 +2404,7 @@ function App() {
     !documentSettingsSplit.hasFrontmatter;
   const canEditDocumentSettings =
     !ui.fullPlainEditActive &&
+    !ui.activeTab.internalDocId &&
     !documentSettingsHasMalformedLeadingFence &&
     canSafelyPatchFrontmatter(documentSettingsSplit.frontmatterPrefix);
 
@@ -2140,6 +2417,7 @@ function App() {
       author: string;
       translator: string;
     }) => {
+      if (ui.activeTab.internalDocId) return;
       if (ui.fullPlainEditActive) return;
 
       const core = coreRef.current;
@@ -2240,6 +2518,7 @@ function App() {
   );
 
   const openFullPlainEdit = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     const core = coreRef.current;
     if (!core) return;
     core.setParagraphPlainMode(false);
@@ -2371,6 +2650,7 @@ function App() {
   }, [applyFullPlainEdit, closeFullPlainEdit]);
 
   const handleToggleWritingMode = useCallback(() => {
+    if (ui.activeTab.internalDocId) return;
     // Writing-mode toggle flips the scroll axis and changes layout entirely,
     // so raw scrollTop/scrollLeft restore lands on the wrong spot (usually
     // snapped to 0). Use a layout-independent PM viewport anchor instead:
@@ -2462,13 +2742,32 @@ function App() {
         onToolbarOffsetReset={ui.resetToolbarOffset}
         rubyVisible={ui.rubyVisible}
         writingMode={ui.writingMode}
-        availability={effectiveAvailability}
+        availability={headerCommandAvailability}
         paragraphPlainModeActive={ui.paragraphPlainModeActive}
         fullPlainEditActive={ui.fullPlainEditActive}
+        internalDocActive={Boolean(ui.activeTab.internalDocId)}
         displaySettingsOpen={ui.displaySettingsOpen}
+        typewriterModeEnabled={ui.typewriterModeEnabled}
+        onTypewriterModeEnabledChange={ui.setTypewriterModeEnabled}
+        visualFocusBlockHighlightEnabled={ui.visualFocusBlockHighlightEnabled}
+        onVisualFocusBlockHighlightEnabledChange={
+          ui.setVisualFocusBlockHighlightEnabled
+        }
+        visualFocusDimNonFocusedBlocksEnabled={
+          ui.visualFocusDimNonFocusedBlocksEnabled
+        }
+        onVisualFocusDimNonFocusedBlocksEnabledChange={
+          ui.setVisualFocusDimNonFocusedBlocksEnabled
+        }
+        visualFocusCurrentLineHighlightEnabled={
+          ui.visualFocusCurrentLineHighlightEnabled
+        }
+        onVisualFocusCurrentLineHighlightEnabledChange={
+          ui.setVisualFocusCurrentLineHighlightEnabled
+        }
         onRunMarkCommand={runMarkCommand}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
+        onUndo={guardedUndo}
+        onRedo={guardedRedo}
         onToggleInlineCode={handleToggleInlineCode}
         onInsertHorizontalRule={handleInsertHorizontalRule}
         onToggleHeading={handleToggleHeading}
@@ -2478,9 +2777,9 @@ function App() {
         onToggleBlockquote={handleToggleBlockquote}
         onToggleCodeBlock={handleToggleCodeBlock}
         onClearFormat={handleClearFormat}
-        onSetOrUnsetLink={openLinkPrompt}
-        onInsertImage={openImagePrompt}
-        onInsertRubyBouten={openRubyBoutenPrompt}
+        onSetOrUnsetLink={guardedOpenLinkPrompt}
+        onInsertImage={guardedOpenImagePrompt}
+        onInsertRubyBouten={guardedOpenRubyBoutenPrompt}
         onToggleTcy={handleToggleTcy}
         onToggleRubyVisible={() => {
           const charCount = activeDocumentCharacterCount;
@@ -2497,6 +2796,9 @@ function App() {
         onToggleParagraphPlainMode={toggleParagraphPlainMode}
         onToggleFullPlainEdit={toggleFullPlainEdit}
         onOpenDisplaySettings={() => ui.setDisplaySettingsOpen(true)}
+        onOpenDisplaySettingsForTypewriter={() =>
+          ui.setDisplaySettingsOpen(true, { expandSection: "typewriter" })
+        }
         onShowEditorInlineHint={ui.showEditorInlineHint}
         searchOpen={search.state.open}
         onOpenSearch={search.openSearch}
@@ -2592,6 +2894,8 @@ function App() {
           ui.caretColorCustom,
           ui.docColorSettings.pageColor,
         )}
+        useEditorArrowPointer={ui.useEditorArrowPointer}
+        typewriterRuntimeRef={typewriterRuntimeRef}
         onEmptyUntitledSurfaceClick={() => {
           if (
             ui.activeTab.filePath === null &&
@@ -2606,6 +2910,7 @@ function App() {
           <SearchBar
             open={search.state.open}
             replaceOpen={search.state.replaceOpen}
+            replaceDisabled={Boolean(ui.activeTab.internalDocId)}
             query={search.state.query}
             replacement={search.state.replacement}
             caseSensitive={search.state.caseSensitive}
@@ -2625,33 +2930,41 @@ function App() {
           />
         }
         documentSettingsSlot={
-          <DocumentSettingsPanel
-            canEdit={canEditDocumentSettings}
-            fullPlainEditActive={ui.fullPlainEditActive}
-            uiLanguageMode={ui.uiLanguageMode}
-            documentType={resolvedDocumentType}
-            preserveEmptyParagraphs={
-              ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs
-            }
-            preserveEmptyParagraphsAutoDetected={
-              autoProtectedPreserveEmptyParagraphs
-            }
-            title={ui.activeTab.frontmatterFields.title ?? ""}
-            author={ui.activeTab.frontmatterFields.author ?? ""}
-            translator={ui.activeTab.frontmatterFields.translator ?? ""}
-            hasDocumentBehaviorOverride={
-              ui.lineBreakPolicyLockReason === "frontmatter"
-            }
-            writingMode={ui.writingMode}
-            recommendedWritingMode={ui.typeRecommendedWritingMode}
-            writingModeFollowsTypeRecommendation={
-              ui.writingModeFollowsTypeRecommendation
-            }
-            onChangeSettings={handleDocumentSettingsChange}
-            onResetWritingModeToRecommendation={
-              ui.resetWritingModeToTypeRecommendation
-            }
-          />
+          ui.activeTab.internalDocId ? (
+            <p className="pane-placeholder">
+              {createUiTextGetter(ui.uiLanguageMode)(
+                "workspace.document.internalShortcutUnavailable",
+              )}
+            </p>
+          ) : (
+            <DocumentSettingsPanel
+              canEdit={canEditDocumentSettings}
+              fullPlainEditActive={ui.fullPlainEditActive}
+              uiLanguageMode={ui.uiLanguageMode}
+              documentType={resolvedDocumentType}
+              preserveEmptyParagraphs={
+                ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs
+              }
+              preserveEmptyParagraphsAutoDetected={
+                autoProtectedPreserveEmptyParagraphs
+              }
+              title={ui.activeTab.frontmatterFields.title ?? ""}
+              author={ui.activeTab.frontmatterFields.author ?? ""}
+              translator={ui.activeTab.frontmatterFields.translator ?? ""}
+              hasDocumentBehaviorOverride={
+                ui.lineBreakPolicyLockReason === "frontmatter"
+              }
+              writingMode={ui.writingMode}
+              recommendedWritingMode={ui.typeRecommendedWritingMode}
+              writingModeFollowsTypeRecommendation={
+                ui.writingModeFollowsTypeRecommendation
+              }
+              onChangeSettings={handleDocumentSettingsChange}
+              onResetWritingModeToRecommendation={
+                ui.resetWritingModeToTypeRecommendation
+              }
+            />
+          )
         }
         themeStudioSlot={
           <ThemeStudioPanel
@@ -2699,26 +3012,26 @@ function App() {
         visible={ctxMenu.visible}
         x={ctxMenu.x}
         y={ctxMenu.y}
-        availability={ctxMenu.availability}
+        availability={contextMenuCommandAvailability}
         writingMode={ui.writingMode}
         uiLanguageMode={ui.uiLanguageMode}
         menuRef={ctxMenuRef}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
+        onUndo={guardedUndo}
+        onRedo={guardedRedo}
         onCut={handleCut}
         onCopy={handleCopy}
         onPaste={handlePaste}
         onPastePlain={handlePastePlain}
         onSelectAll={handleCtxSelectAll}
-        onBold={() => coreRef.current?.execute("bold")}
-        onItalic={() => coreRef.current?.execute("italic")}
-        onStrike={() => coreRef.current?.execute("strike")}
-        onHighlight={() => coreRef.current?.execute("highlight")}
+        onBold={() => runMarkCommand("bold")}
+        onItalic={() => runMarkCommand("italic")}
+        onStrike={() => runMarkCommand("strike")}
+        onHighlight={() => runMarkCommand("highlight")}
         onHeading={handleCtxHeading}
         onBulletList={handleToggleBulletList}
         onOrderedList={handleToggleOrderedList}
         onChecklist={handleToggleChecklist}
-        onRuby={openRubyBoutenPrompt}
+        onRuby={guardedOpenRubyBoutenPrompt}
         onTcy={handleToggleTcy}
         onClearFormat={handleClearFormat}
         onMoveListUp={handleCtxMoveUp}
@@ -2727,10 +3040,11 @@ function App() {
       />
 
       <FileTransferConflictModal
+        uiLanguageMode={ui.uiLanguageMode}
         conflict={transferConflict}
         onCancel={cancelTransferConflict}
         onOverwrite={resolveTransferConflictByOverwrite}
-        onRename={resolveTransferConflictByRename}
+        onKeepBoth={resolveTransferConflictKeepBoth}
       />
 
       <FileExplorerNamePromptModal
@@ -2763,6 +3077,8 @@ function App() {
 
       <DisplaySettingsModal
         open={ui.displaySettingsOpen}
+        expandSectionOnOpen={ui.displaySettingsExpandSectionKey}
+        onExpandSectionOnOpenConsumed={() => ui.setDisplaySettingsExpandSectionKey(null)}
         displaySettings={ui.displaySettings}
         writingMode={ui.writingMode}
         uiLanguageMode={ui.uiLanguageMode}
@@ -2814,6 +3130,29 @@ function App() {
           ui.setFrontmatterShowAuthors(DEFAULT_FRONTMATTER_SHOW_AUTHORS);
           ui.setFrontmatterShowTranslators(DEFAULT_FRONTMATTER_SHOW_TRANSLATORS);
           ui.setFrontmatterShowRoleLabels(DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS);
+          ui.setUseEditorArrowPointer(DEFAULT_EDITOR_ARROW_POINTER);
+          ui.setParagraphPlainBehavior("fast");
+          ui.setTypewriterModeEnabled(DEFAULT_TYPEWRITER_MODE_ENABLED);
+          ui.setTypewriterOffsetRatio(DEFAULT_TYPEWRITER_OFFSET_RATIO);
+          ui.setTypewriterFollowBandRatio(DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO);
+          ui.setVisualFocusBlockHighlightEnabled(
+            DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_ENABLED,
+          );
+          ui.setVisualFocusDimNonFocusedBlocksEnabled(
+            DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_ENABLED,
+          );
+          ui.setVisualFocusBlockHighlightColor(DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_COLOR);
+          ui.setVisualFocusBlockHighlightOpacity(DEFAULT_VISUAL_FOCUS_BLOCK_HIGHLIGHT_OPACITY);
+          ui.setVisualFocusDimNonFocusedBlocksOpacity(
+            DEFAULT_VISUAL_FOCUS_DIM_NON_FOCUSED_BLOCKS_OPACITY,
+          );
+          ui.setVisualFocusCurrentLineHighlightEnabled(
+            DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_ENABLED,
+          );
+          ui.setVisualFocusCurrentLineHighlightColor(DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_COLOR);
+          ui.setVisualFocusCurrentLineHighlightOpacity(
+            DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_OPACITY,
+          );
         }}
         onSetDisplayNumber={ui.setDisplayNumber}
         onAutoTcyEnabledChange={ui.setAutoTcyEnabled}
@@ -2848,8 +3187,48 @@ function App() {
         onFrontmatterShowRoleLabelsChange={ui.setFrontmatterShowRoleLabels}
         caretColorMode={ui.caretColorMode}
         caretColorCustom={ui.caretColorCustom}
+        useEditorArrowPointer={ui.useEditorArrowPointer}
         onCaretColorModeChange={ui.setCaretColorMode}
         onCaretColorCustomChange={ui.setCaretColorCustom}
+        onUseEditorArrowPointerChange={ui.setUseEditorArrowPointer}
+        paragraphPlainBehavior={ui.paragraphPlainBehavior}
+        onParagraphPlainBehaviorChange={ui.setParagraphPlainBehavior}
+        typewriterModeEnabled={ui.typewriterModeEnabled}
+        typewriterOffsetRatio={ui.typewriterOffsetRatio}
+        typewriterFollowBandRatio={ui.typewriterFollowBandRatio}
+        onTypewriterModeEnabledChange={ui.setTypewriterModeEnabled}
+        onTypewriterOffsetRatioChange={ui.setTypewriterOffsetRatio}
+        onTypewriterFollowBandRatioChange={ui.setTypewriterFollowBandRatio}
+        visualFocusBlockHighlightEnabled={ui.visualFocusBlockHighlightEnabled}
+        onVisualFocusBlockHighlightEnabledChange={
+          ui.setVisualFocusBlockHighlightEnabled
+        }
+        visualFocusDimNonFocusedBlocksEnabled={ui.visualFocusDimNonFocusedBlocksEnabled}
+        onVisualFocusDimNonFocusedBlocksEnabledChange={
+          ui.setVisualFocusDimNonFocusedBlocksEnabled
+        }
+        visualFocusBlockHighlightColor={ui.visualFocusBlockHighlightColor}
+        onVisualFocusBlockHighlightColorChange={ui.setVisualFocusBlockHighlightColor}
+        visualFocusBlockHighlightOpacity={ui.visualFocusBlockHighlightOpacity}
+        onVisualFocusBlockHighlightOpacityChange={
+          ui.setVisualFocusBlockHighlightOpacity
+        }
+        visualFocusDimNonFocusedBlocksOpacity={ui.visualFocusDimNonFocusedBlocksOpacity}
+        onVisualFocusDimNonFocusedBlocksOpacityChange={
+          ui.setVisualFocusDimNonFocusedBlocksOpacity
+        }
+        visualFocusCurrentLineHighlightEnabled={ui.visualFocusCurrentLineHighlightEnabled}
+        onVisualFocusCurrentLineHighlightEnabledChange={
+          ui.setVisualFocusCurrentLineHighlightEnabled
+        }
+        visualFocusCurrentLineHighlightColor={ui.visualFocusCurrentLineHighlightColor}
+        onVisualFocusCurrentLineHighlightColorChange={
+          ui.setVisualFocusCurrentLineHighlightColor
+        }
+        visualFocusCurrentLineHighlightOpacity={ui.visualFocusCurrentLineHighlightOpacity}
+        onVisualFocusCurrentLineHighlightOpacityChange={
+          ui.setVisualFocusCurrentLineHighlightOpacity
+        }
         onOpenThemeStudio={handleOpenThemeStudioPane}
         onSendBugReport={() => void sendBugReport()}
         onSendFeedback={() => void sendFeedback()}

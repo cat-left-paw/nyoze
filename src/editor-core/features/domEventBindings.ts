@@ -8,7 +8,7 @@ type EditorDomEventHandlers = {
   onClick: (event: MouseEvent) => void
   onMouseOver: (event: MouseEvent) => void
   onMouseOut: (event: MouseEvent) => void
-  onWheel: (event: WheelEvent) => void
+  onWheel?: (event: WheelEvent) => void
   onPointerDown?: (event: PointerEvent) => void
   onPointerUp?: (event: PointerEvent) => void
 }
@@ -28,7 +28,9 @@ export function bindEditorDomEvents(
   dom.addEventListener('click', handlers.onClick)
   dom.addEventListener('mouseover', handlers.onMouseOver)
   dom.addEventListener('mouseout', handlers.onMouseOut)
-  dom.addEventListener('wheel', handlers.onWheel, { passive: false })
+  if (handlers.onWheel) {
+    dom.addEventListener('wheel', handlers.onWheel, { passive: false })
+  }
   if (handlers.onPointerDown) dom.addEventListener('pointerdown', handlers.onPointerDown)
   if (handlers.onPointerUp) dom.addEventListener('pointerup', handlers.onPointerUp)
 
@@ -42,7 +44,7 @@ export function bindEditorDomEvents(
     dom.removeEventListener('click', handlers.onClick)
     dom.removeEventListener('mouseover', handlers.onMouseOver)
     dom.removeEventListener('mouseout', handlers.onMouseOut)
-    dom.removeEventListener('wheel', handlers.onWheel)
+    if (handlers.onWheel) dom.removeEventListener('wheel', handlers.onWheel)
     if (handlers.onPointerDown) dom.removeEventListener('pointerdown', handlers.onPointerDown)
     if (handlers.onPointerUp) dom.removeEventListener('pointerup', handlers.onPointerUp)
   }

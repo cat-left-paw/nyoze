@@ -76,12 +76,42 @@ export {
   editorClipboardCopyCutDOMHandlers,
   handleEditorClipboardCopyOrCut,
 } from './editorPropsClipboardCopy'
-export { createVerticalWheelScrollController } from './verticalWheelScroll'
+export {
+  createEditorSurfaceWheelController,
+  createHorizontalEditorSurfaceWheelApplier,
+  createVerticalWheelScrollController,
+  shouldApplyHorizontalEditorSurfaceWheel,
+} from './verticalWheelScroll'
+export {
+  applyMacosArrowScrollClampAfterNative,
+  computeMacosArrowScrollClampOffsets,
+  isBareArrowKey,
+  isMacOsRenderer,
+  maybeScheduleMacosArrowScrollClamp,
+  MACOS_ARROW_SCROLL_CLAMP_JUMP_THRESHOLD,
+  MACOS_ARROW_SCROLL_CLAMP_STEP_FRACTION,
+  MACOS_ARROW_SCROLL_MANUAL_WHEEL_SUPPRESS_MS,
+  MACOS_ARROW_SCROLL_POINTER_DRAG_SUPPRESS_MS,
+  readSinceLastInteractionMs,
+  registerMacosArrowScrollClampHostInteractions,
+  shouldGateMacosArrowScrollClamp,
+  noteMacosArrowScrollClampWheel,
+} from './macosArrowScrollClamp'
+export type { MacosArrowScrollClampGateInput, ClampedScrollOffsets } from './macosArrowScrollClamp'
 export { createCoreNotifiers } from './coreNotifiers'
 export { createLineBreakPolicyController } from './lineBreakPolicyController'
 export { createMarkdownIoController } from './markdownIoController'
 export { createListenerSubscriptions } from './listenerSubscriptions'
 export { createOutlineNavigationController } from './outlineNavigationController'
+export { createTypewriterModeController, resolveTypewriterScrollHost, resolveTypewriterWritingMode } from './typewriterMode'
+export {
+  TYPEWRITER_JUMP_NAVIGATION_SUPPRESS_MS,
+  TYPEWRITER_MANUAL_SCROLL_SUPPRESS_MS,
+  TYPEWRITER_POINTER_CLICK_SUPPRESS_MS,
+  shouldRunTypewriterFollowNow,
+  shouldScheduleTypewriterFollowOnUpdate,
+} from './typewriterSuppression'
+export type { TypewriterJumpNavigationSource } from './typewriterSuppression'
 export {
   captureViewportAnchor,
   restoreViewportAnchor,
@@ -99,3 +129,4 @@ export {
   replaceMatchInDoc,
 } from './searchReplace'
 export type { SearchMatch } from './searchReplace'
+export { createVisualFocusCurrentLineController } from './visualFocusCurrentLine'

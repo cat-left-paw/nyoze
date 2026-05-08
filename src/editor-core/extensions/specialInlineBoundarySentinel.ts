@@ -265,6 +265,44 @@ function resolveBoundaryInsertPos(
   return null
 }
 
+function findBoundarySentinelAtPos(
+  view: EditorView,
+  nodeTypeName: string,
+  insertPos: number,
+): HTMLElement | null {
+  const sentinels = [...view.dom.querySelectorAll<HTMLElement>(SENTINEL_SELECTOR)]
+  const exact = view.dom.querySelector<HTMLElement>(
+    `${SENTINEL_SELECTOR}[data-nyoze-special-inline-node="${nodeTypeName}"][data-nyoze-special-inline-boundary-pos="${insertPos}"]`,
+  )
+  if (exact && isBoundarySentinel(exact)) return exact
+
+  for (const sentinel of sentinels) {
+    if (!isBoundarySentinel(sentinel)) continue
+    if ((sentinel.dataset.nyozeSpecialInlineNode ?? '') !== nodeTypeName) continue
+    if (resolveBoundaryInsertPos(view, sentinel) === insertPos) return sentinel
+  }
+
+  return null
+}
+
+export function mirrorSpecialInlineBoundaryCompositionPayload(
+  view: EditorView,
+  nodeTypeName: string,
+  insertPos: number,
+  text: string,
+): boolean {
+  if (!SPECIAL_INLINE_NODE_TYPES.has(nodeTypeName)) return false
+  const sentinel = findBoundarySentinelAtPos(view, nodeTypeName, insertPos)
+  if (!sentinel) return false
+
+  const key = sentinelCompositionPendingKey(sentinel)
+  clearBoundarySentinelPostEscapeSuppression(sentinel, key)
+  boundarySentinelGlobalPostEscapeSuppressUntil = 0
+  resetBoundarySentinel(sentinel)
+  boundarySentinelCompositionPending.set(key, text)
+  return true
+}
+
 function collectBoundarySentinelsToInspect(
   view: EditorView,
   target: EventTarget | null,
@@ -351,6 +389,33 @@ export function transferSpecialInlineBoundarySentinelText(
 ): boolean {
   const synthetic = new Event('synthetic')
   return transferBoundarySentinelFromEvent(view, target, synthetic)
+}
+
+export function transferSpecialInlineBoundarySentinelTextAtPos(
+  view: EditorView,
+  nodeTypeName: string,
+  insertPos: number,
+  compositionEndPayload?: string | null,
+): boolean {
+  if (!SPECIAL_INLINE_NODE_TYPES.has(nodeTypeName)) return false
+  const sentinel = findBoundarySentinelAtPos(view, nodeTypeName, insertPos)
+  if (!sentinel) return false
+
+  if (typeof compositionEndPayload === 'string' && compositionEndPayload.length > 0) {
+    boundarySentinelCompositionPending.set(
+      sentinelCompositionPendingKey(sentinel),
+      compositionEndPayload,
+    )
+  }
+
+  const syntheticEvent =
+    typeof CompositionEvent !== 'undefined'
+      ? new CompositionEvent('compositionend', {
+          bubbles: false,
+          data: typeof compositionEndPayload === 'string' ? compositionEndPayload : '',
+        })
+      : new Event('compositionend')
+  return transferBoundarySentinelFromEvent(view, sentinel, syntheticEvent)
 }
 
 export function buildSpecialInlineBoundarySentinelDecorations(

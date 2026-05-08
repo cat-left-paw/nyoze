@@ -10,6 +10,8 @@ export type DisplaySettingsSectionKey =
   | 'toolbar'
   | 'appLogo'
   | 'documentTheme'
+  | 'paragraphPlain'
+  | 'typewriter'
   | 'support'
 
 export type DisplaySettingsSectionOpenState = Record<DisplaySettingsSectionKey, boolean>
@@ -26,6 +28,8 @@ export const DEFAULT_DISPLAY_SETTINGS_SECTION_OPEN_STATE: DisplaySettingsSection
   toolbar: false,
   appLogo: false,
   documentTheme: false,
+  paragraphPlain: false,
+  typewriter: false,
   support: false,
 }
 

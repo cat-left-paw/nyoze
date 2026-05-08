@@ -6,6 +6,7 @@ import {
   IconBold,
   IconChevronDown,
   IconSquareCheck,
+  IconCheck,
   IconCode,
   IconCodeDots,
   IconDeviceFloppy,
@@ -28,6 +29,7 @@ import {
   IconItalic,
   IconList,
   IconListNumbers,
+  IconListTree,
   IconLink,
   IconPhoto,
   IconSeparatorHorizontal,
@@ -131,6 +133,35 @@ export function Toolbar({
     { id: "h5", label: t("editor.heading.level5"), level: 5, icon: IconH5 },
     { id: "h6", label: t("editor.heading.level6"), level: 6, icon: IconH6 },
   ] as const;
+  const listMenuItems = [
+    {
+      id: "bullet",
+      icon: IconList,
+      label: t("editor.bulletList"),
+      selected: availability.isBulletList,
+      onSelect: onToggleBulletList,
+    },
+    {
+      id: "ordered",
+      icon: IconListNumbers,
+      label: t("editor.orderedList"),
+      selected: availability.isOrderedList,
+      onSelect: onToggleOrderedList,
+    },
+    {
+      id: "checklist",
+      icon: IconSquareCheck,
+      label: t("editor.checklist"),
+      selected: availability.isChecklist,
+      onSelect: onToggleChecklist,
+    },
+  ];
+  const listMenuTriggerActive =
+    availability.isBulletList ||
+    availability.isOrderedList ||
+    availability.isChecklist;
+  const [listMenuOpen, setListMenuOpen] = useState(false);
+  const listMenuRef = useRef<HTMLDivElement | null>(null);
   const plainModeKind = resolvePlainModeKind({
     paragraphPlainModeActive,
     fullPlainEditActive,
@@ -141,17 +172,20 @@ export function Toolbar({
     : "";
 
   useEffect(() => {
-    if (!headingMenuOpen) return;
+    if (!headingMenuOpen && !listMenuOpen) return;
 
     const onMouseDown = (event: MouseEvent) => {
-      if (!headingMenuRef.current) return;
-      if (headingMenuRef.current.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      if (headingMenuRef.current?.contains(target)) return;
+      if (listMenuRef.current?.contains(target)) return;
       setHeadingMenuOpen(false);
+      setListMenuOpen(false);
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setHeadingMenuOpen(false);
+      setListMenuOpen(false);
     };
 
     document.addEventListener("mousedown", onMouseDown, true);
@@ -160,17 +194,19 @@ export function Toolbar({
       document.removeEventListener("mousedown", onMouseDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [headingMenuOpen]);
+  }, [headingMenuOpen, listMenuOpen]);
 
   useEffect(() => {
     if (!plainFormattingBlocked) return;
     setHeadingMenuOpen(false);
+    setListMenuOpen(false);
   }, [plainFormattingBlocked]);
 
   const withPlainFormattingGuard = (action: () => void) => () => {
     if (plainModeKind) {
       onShowEditorInlineHint?.(plainFormattingTooltip);
       setHeadingMenuOpen(false);
+      setListMenuOpen(false);
       return;
     }
     action();
@@ -297,9 +333,13 @@ export function Toolbar({
       <div className="toolbar-heading-menu-wrap" ref={headingMenuRef}>
         <button
           className={`toolbar-btn-iconized toolbar-btn-icon-only toolbar-heading-trigger${headingMenuOpen ? " open" : ""}`}
-          onClick={withPlainFormattingGuard(() =>
-            setHeadingMenuOpen((prev) => !prev),
-          )}
+          onClick={withPlainFormattingGuard(() => {
+            setHeadingMenuOpen((prev) => {
+              const next = !prev;
+              if (next) setListMenuOpen(false);
+              return next;
+            });
+          })}
           disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
           type="button"
           aria-label={t("editor.heading")}
@@ -312,16 +352,17 @@ export function Toolbar({
         </button>
         {headingMenuOpen && (
           <div
-            className="toolbar-heading-menu"
+            className="toolbar-select-menu"
             role="menu"
             aria-label={t("editor.headingMenu")}
           >
             {headingItems.map((item) => {
               const Icon = item.icon;
+              const rowSelected = availability.isHeading === item.level;
               return (
                 <button
                   key={item.id}
-                  className={`toolbar-heading-menu-item${availability.isHeading === item.level ? " active" : ""}`}
+                  className={`toolbar-select-menu-item${rowSelected ? " toolbar-select-menu-item--selected" : ""}`}
                   type="button"
                   role="menuitem"
                   disabled={plainFormattingBlocked}
@@ -331,12 +372,22 @@ export function Toolbar({
                   })}
                 >
                   <Icon size={16} stroke={TOOLBAR_ICON_STROKE} />
-                  <span>{item.label}</span>
+                  <span className="toolbar-select-menu-label">{item.label}</span>
+                  <span className="toolbar-select-menu-check-slot" aria-hidden>
+                    {rowSelected ? (
+                      <IconCheck
+                        className="toolbar-select-menu-check"
+                        size={14}
+                        stroke={2}
+                      />
+                    ) : null}
+                  </span>
                 </button>
               );
             })}
+            <div className="toolbar-heading-menu-separator" role="separator" />
             <button
-              className={`toolbar-heading-menu-item${availability.isHeading === false ? " active" : ""}`}
+              className={`toolbar-select-menu-item${availability.isHeading === false ? " toolbar-select-menu-item--selected" : ""}`}
               type="button"
               role="menuitem"
               disabled={plainFormattingBlocked}
@@ -346,47 +397,79 @@ export function Toolbar({
               })}
             >
               <IconHeadingOff size={16} stroke={TOOLBAR_ICON_STROKE} />
-              <span>{t("editor.heading.clear")}</span>
+              <span className="toolbar-select-menu-label">
+                {t("editor.heading.clear")}
+              </span>
+              <span className="toolbar-select-menu-check-slot" aria-hidden>
+                {availability.isHeading === false ? (
+                  <IconCheck
+                    className="toolbar-select-menu-check"
+                    size={14}
+                    stroke={2}
+                  />
+                ) : null}
+              </span>
             </button>
           </div>
         )}
       </div>
-      <button
-        className={`toolbar-btn-iconized toolbar-btn-icon-only${availability.isBulletList ? " toggle-active" : ""}`}
-        onClick={withPlainFormattingGuard(onToggleBulletList)}
-        disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
-        type="button"
-        aria-label={t("editor.bulletList")}
-        {...getFormattingButtonProps(t("editor.bulletList"))}
-      >
-        <IconList size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
-      </button>
-      <button
-        className={`toolbar-btn-iconized toolbar-btn-icon-only${availability.isOrderedList ? " toggle-active" : ""}`}
-        onClick={withPlainFormattingGuard(onToggleOrderedList)}
-        disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
-        type="button"
-        aria-label={t("editor.orderedList")}
-        {...getFormattingButtonProps(t("editor.orderedList"))}
-      >
-        <IconListNumbers
-          size={TOOLBAR_ICON_SIZE}
-          stroke={TOOLBAR_ICON_STROKE}
-        />
-      </button>
-      <button
-        className={`toolbar-btn-iconized toolbar-btn-icon-only${availability.isChecklist ? " toggle-active" : ""}`}
-        onClick={withPlainFormattingGuard(onToggleChecklist)}
-        disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
-        type="button"
-        aria-label={t("editor.checklist")}
-        {...getFormattingButtonProps(t("editor.checklist"))}
-      >
-        <IconSquareCheck
-          size={TOOLBAR_ICON_SIZE}
-          stroke={TOOLBAR_ICON_STROKE}
-        />
-      </button>
+      <div className="toolbar-list-menu-wrap" ref={listMenuRef}>
+        <button
+          className={`toolbar-btn-iconized toolbar-btn-icon-only toolbar-list-trigger${listMenuOpen ? " open" : ""}${listMenuTriggerActive ? " toggle-active" : ""}`}
+          onClick={withPlainFormattingGuard(() => {
+            setListMenuOpen((prev) => {
+              const next = !prev;
+              if (next) setHeadingMenuOpen(false);
+              return next;
+            });
+          })}
+          disabled={!plainFormattingBlocked && !availability.canBlockTransforms}
+          type="button"
+          aria-label={t("editor.listMenu")}
+          aria-haspopup="menu"
+          aria-expanded={listMenuOpen}
+          {...getFormattingButtonProps(t("editor.listMenu"))}
+        >
+          <IconListTree size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
+          <IconChevronDown size={12} stroke={TOOLBAR_ICON_STROKE} />
+        </button>
+        {listMenuOpen && (
+          <div
+            className="toolbar-select-menu"
+            role="menu"
+            aria-label={t("editor.listMenu")}
+          >
+            {listMenuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  className={`toolbar-select-menu-item${item.selected ? " toolbar-select-menu-item--selected" : ""}`}
+                  type="button"
+                  role="menuitem"
+                  disabled={plainFormattingBlocked}
+                  onClick={withPlainFormattingGuard(() => {
+                    item.onSelect();
+                    setListMenuOpen(false);
+                  })}
+                >
+                  <Icon size={16} stroke={TOOLBAR_ICON_STROKE} />
+                  <span className="toolbar-select-menu-label">{item.label}</span>
+                  <span className="toolbar-select-menu-check-slot" aria-hidden>
+                    {item.selected ? (
+                      <IconCheck
+                        className="toolbar-select-menu-check"
+                        size={14}
+                        stroke={2}
+                      />
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
       <button
         className={`toolbar-btn-iconized toolbar-btn-icon-only${availability.isBlockquote ? " toggle-active" : ""}`}
         onClick={withPlainFormattingGuard(onToggleBlockquote)}

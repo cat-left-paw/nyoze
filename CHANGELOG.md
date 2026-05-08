@@ -3,6 +3,18 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
+2026-05-06 時点では、GitHub Releases の latest は `0.2.0-beta.1` です。Windows 版は Microsoft Store でも公開済みで、Store 上の初回 package version は `1.2.0.0` です。
+
+## 0.2.1-beta.1
+
+- Typewriter Mode を本実装し、Typewriter scroll、scroll past end、Visual Focus、current line highlight、toolbar quick toggle を追加
+- Visual Focus の current line overlay を縦書き中心に安定化し、frontmatter 表示直後の再 anchor 漏れも修正
+- `Paragraph Plain` の click 遅延を追加最適化し、pane 開閉時の overlay 追従、空段落境界ナビゲーションなどの回帰を修正
+- ルビ / 明示 TCY 直後の日本語 IME 入力を boundary sentinel bridge で改善し、論理行頭 ruby 前入力や後方 composition の崩れを抑制
+- Help メニューに `MANUAL を開く` と `ショートカットキー一覧` を追加し、read-only internal shortcut doc を実装
+- Windows の一部 AMD GPU + Chromium 系環境で I-beam カーソルが白く見える問題に対し、`エディタで矢印ポインターを使う` 回避設定を追加
+- README / INSTALL / Release Notes / 配布手順を更新し、Store と GitHub zip の更新方針、SAC 注意、Store 版の更新導線、共存可否を整理
+
 ## 0.2.0-beta.1
 
 - Electron を `41.3.0` へ更新し、縦書き・scroll restore・shortcut E2E と macOS arm64 / Windows x64 package の確認を実施

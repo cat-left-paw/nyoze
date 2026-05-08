@@ -5,11 +5,21 @@ import { EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
+import {
+  isBareArrowKey,
+  isMacOsRenderer,
+  maybeScheduleMacosArrowScrollClamp,
+  readSinceLastInteractionMs,
+  registerMacosArrowScrollClampHostInteractions,
+} from '../../editor-core/features/macosArrowScrollClamp'
 import type { SourceModeController } from '../hooks/useSourceModeController'
+import type { TypewriterRuntimeRef } from '../hooks/typewriterRuntimeRef'
 import { sourceModeHighlightStyle } from './sourceModeHighlightStyle'
 
 type SourceModeEditorProps = {
   controller: SourceModeController
+  /** Optional: Typewriter + macOS clamp snapshot (defaults to clamp on / typewriter off). */
+  editorRuntimeRef?: TypewriterRuntimeRef
   initialValue: string
   /** Document offset to scroll near on mount. Null or out-of-range keeps the top. */
   initialScrollOffset?: number | null
@@ -28,6 +38,7 @@ function buildSourceModeExtensions(options: {
   onChangeRef: MutableRefObject<(value: string) => void>
   onApplyRef: MutableRefObject<() => void>
   onCloseRef: MutableRefObject<() => void>
+  editorRuntimeRef?: TypewriterRuntimeRef
 }): Extension[] {
   const selectWholeDocument = (view: EditorView) => {
     view.dispatch({
@@ -82,6 +93,27 @@ function buildSourceModeExtensions(options: {
       options.controller.notifyStateChange()
       options.onChangeRef.current(update.state.doc.toString())
     }),
+    EditorView.domEventHandlers({
+      keydown: (event, view) => {
+        if (!isBareArrowKey(event)) return false
+        const host = view.scrollDOM
+        const { sinceLastWheelMs, sinceLastPointerDragMs } = readSinceLastInteractionMs(host)
+        const rt = options.editorRuntimeRef?.current
+        maybeScheduleMacosArrowScrollClamp(host, event, {
+          clampSettingEnabled: rt?.macosArrowScrollClampEnabled !== false,
+          isMacOS: isMacOsRenderer(),
+          typewriterEnabled: rt?.enabled === true,
+          wysiwygSuppressForSourceMode: false,
+          paragraphPlainActive: false,
+          composing: event.isComposing,
+          selectionCollapsed: view.state.selection.main.empty,
+          defaultPrevented: event.defaultPrevented,
+          sinceLastWheelMs,
+          sinceLastPointerDragMs,
+        })
+        return false
+      },
+    }),
   ]
 }
 
@@ -99,6 +131,7 @@ function createSourceModeState(
 
 export function SourceModeEditor({
   controller,
+  editorRuntimeRef,
   initialValue,
   initialScrollOffset,
   onChange,
@@ -127,6 +160,7 @@ export function SourceModeEditor({
       onChangeRef,
       onApplyRef,
       onCloseRef,
+      editorRuntimeRef,
     })
     const createState = (
       doc: string,
@@ -138,6 +172,9 @@ export function SourceModeEditor({
     })
 
     controller.attachEditor({ view, createState })
+    let unregisterClampHost: (() => void) | null = registerMacosArrowScrollClampHostInteractions(
+      view.scrollDOM,
+    )
     // Defer the initial scroll by two animation frames so CodeMirror finishes
     // its first measure pass before we request scrollIntoView. Running too
     // early lands on a zero-height viewport and silently no-ops.
@@ -150,15 +187,19 @@ export function SourceModeEditor({
       })
       return () => {
         window.cancelAnimationFrame(raf1)
+        unregisterClampHost?.()
+        unregisterClampHost = null
         controller.attachEditor(null)
         view.destroy()
       }
     }
     return () => {
+      unregisterClampHost?.()
+      unregisterClampHost = null
       controller.attachEditor(null)
       view.destroy()
     }
-  }, [controller])
+  }, [controller, editorRuntimeRef])
 
   return (
     <div className='source-mode-overlay' data-writing-mode='horizontal-tb'>

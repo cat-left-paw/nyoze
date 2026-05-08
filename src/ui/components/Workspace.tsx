@@ -17,6 +17,7 @@ import type { FileExplorerVisibleEntry } from "../hooks/useFileExplorer";
 import type { EditorTab } from "../hooks/useAppUiState";
 import { createUiTextGetter } from "../i18n/uiText";
 import type { SourceModeController } from "../hooks/useSourceModeController";
+import type { TypewriterRuntimeRef } from "../hooks/typewriterRuntimeRef";
 import { resolveVisibleOutlineItems } from "../utils/outlineVisibility";
 import { FileExplorerPane } from "./FileExplorerPane";
 import { FrontmatterView } from "./FrontmatterView";
@@ -118,6 +119,9 @@ type WorkspaceProps = {
   onEmptyUntitledSurfaceClick?: () => void;
   /** BETA-DISP1: resolved caret color string for --editor-caret-color */
   caretColor: string;
+  useEditorArrowPointer: boolean;
+  /** Live Typewriter + hidden macOS clamp flags for Source Mode (CodeMirror). */
+  typewriterRuntimeRef?: TypewriterRuntimeRef;
   searchBarSlot?: ReactNode;
   documentSettingsSlot?: ReactNode;
   themeStudioSlot?: ReactNode;
@@ -190,6 +194,8 @@ export function Workspace({
   frontmatterFields,
   onEmptyUntitledSurfaceClick,
   caretColor,
+  useEditorArrowPointer,
+  typewriterRuntimeRef,
   searchBarSlot,
   documentSettingsSlot,
   themeStudioSlot,
@@ -487,6 +493,7 @@ export function Workspace({
           className="editor-panel"
           data-ruby-visible={rubyVisible ? "1" : "0"}
           data-writing-mode={writingMode}
+          data-editor-pointer-mode={useEditorArrowPointer ? "arrow" : "text"}
           data-line-break-policy={effectiveLineBreakPolicy}
           data-doc-theme={documentTheme}
           data-doc-font={docFontAttr}
@@ -544,6 +551,7 @@ export function Workspace({
             <>
               <SourceModeEditor
                 controller={sourceModeController}
+                editorRuntimeRef={typewriterRuntimeRef}
                 initialValue={fullPlainEditValue}
                 initialScrollOffset={fullPlainEditInitialScrollOffset}
                 onChange={onFullPlainEditChange}

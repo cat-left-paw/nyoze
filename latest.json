@@ -1,5 +1,5 @@
 {
-  "version": "0.2.0-beta.1",
-  "releaseUrl": "https://github.com/cat-left-paw/nyoze/releases/tag/v0.2.0-beta.1",
-  "notes": "Update to Electron 41, improve paragraph plain block reparse, and harden special inline IME boundaries"
+  "version": "0.2.1-beta.1",
+  "releaseUrl": "https://github.com/cat-left-paw/nyoze/releases/tag/v0.2.1-beta.1",
+  "notes": "Add Typewriter Mode and Visual Focus, stabilize current-line highlight and Paragraph Plain, and improve IME boundaries and Windows distribution guidance"
 }

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { UiLanguageMode } from '../../settings/types'
 import { FILE_EXPLORER_DIR_STORAGE_KEY } from '../../settings/defaults'
+import { getUiText } from '../i18n/uiText'
 import { getParentPath, getPathBaseName, joinPath } from '../utils/path'
 
 const MD_EXTENSIONS = new Set(['.md', '.markdown', '.txt'])
@@ -36,7 +38,6 @@ export type FileTransferConflictState = {
   sourcePath: string
   destinationDir: string
   targetPath: string
-  suggestedName: string
   errorMessage: string | null
 }
 
@@ -48,6 +49,7 @@ export type FileExplorerNamePromptState = {
 }
 
 type UseFileExplorerOptions = {
+  uiLanguageMode: UiLanguageMode
   onFileContentLoaded: (filePath: string, content: string) => void
   onOpenFileInNewTab?: (filePath: string, content: string) => void
   onFileMoved?: (fromPath: string, toPath: string) => void
@@ -80,12 +82,14 @@ export function getExplorerFileIconKind(name: string): ExplorerFileIconKind {
   return 'default'
 }
 
-export function suggestRenamedFileName(fileName: string): string {
-  const dotIndex = fileName.lastIndexOf('.')
-  if (dotIndex <= 0) return `${fileName} copy`
-  const base = fileName.slice(0, dotIndex)
-  const ext = fileName.slice(dotIndex)
-  return `${base} copy${ext}`
+/**
+ * After a failed non-overwriting copy/move to a candidate path: if that path
+ * now exists, another writer likely won a race — advance to the next index.
+ */
+export function shouldRetryKeepBothAfterFailedTransfer(
+  candidateExistsAfterFailure: boolean,
+): boolean {
+  return candidateExistsAfterFailure
 }
 
 export function getRenamePromptConfig(name: string, isDirectory: boolean): {
@@ -230,6 +234,7 @@ export function shouldResetExplorerRootAfterLoadFailure(
 }
 
 export function useFileExplorer({
+  uiLanguageMode,
   onFileContentLoaded,
   onOpenFileInNewTab,
   onFileMoved,
@@ -369,7 +374,7 @@ export function useFileExplorer({
   const executeTransfer = useCallback(
     async (
       transfer: PendingTransfer,
-      options: { overwrite: boolean },
+      options: { overwrite: boolean; suppressOperationError?: boolean },
     ): Promise<boolean> => {
       if (!bridge?.moveFile || !bridge?.copyFile) return false
 
@@ -386,7 +391,9 @@ export function useFileExplorer({
           : await bridge.copyFile(sourcePath, targetPath, options.overwrite)
 
       if (!ok) {
-        setOperationError('ファイル操作に失敗しました。パスと権限を確認してください。')
+        if (!options.suppressOperationError) {
+          setOperationError('ファイル操作に失敗しました。パスと権限を確認してください。')
+        }
         return false
       }
 
@@ -775,7 +782,6 @@ export function useFileExplorer({
       sourcePath: clipboard.sourcePath,
       destinationDir,
       targetPath,
-      suggestedName: suggestRenamedFileName(fileName),
       errorMessage: null,
     })
   }, [bridge, clipboard, executeTransfer, fileExplorerDir, selectedEntry])
@@ -788,57 +794,66 @@ export function useFileExplorer({
     setTransferConflict(null)
   }, [executeTransfer, pendingTransfer])
 
-  const resolveTransferConflictByRename = useCallback(
-    async (newName: string) => {
-      const transfer = pendingTransfer
-      if (!transfer || !bridge?.pathExists) return
+  const resolveTransferConflictKeepBoth = useCallback(async () => {
+    const transfer = pendingTransfer
+    if (!transfer || !bridge?.pathExists) return
 
-      const trimmedName = newName.trim()
-      if (!isValidRenameName(trimmedName)) {
-        setTransferConflict((prev) =>
-          prev
-            ? {
-                ...prev,
-                errorMessage: '別名には空文字・スラッシュ・先頭ピリオドは使えません。',
-              }
-            : prev,
-        )
-        return
-      }
+    setTransferConflict((prev) => (prev ? { ...prev, errorMessage: null } : prev))
 
-      const nextTargetPath = joinPath(transfer.destinationDir, trimmedName)
-      const alreadyExists = await bridge.pathExists(nextTargetPath)
-      if (alreadyExists) {
-        setTransferConflict((prev) =>
-          prev
-            ? {
-                ...prev,
-                suggestedName: trimmedName,
-                errorMessage: '同名ファイルが既に存在します。別名を指定してください。',
-              }
-            : prev,
-        )
-        return
-      }
+    const baseName = getPathBaseName(transfer.targetPath)
+    const destDir = transfer.destinationDir
 
+    const tryTransferTo = async (
+      targetPath: string,
+    ): Promise<'ok' | 'race' | 'fail'> => {
+      if (await bridge.pathExists(targetPath)) return 'race'
       const ok = await executeTransfer(
-        {
-          ...transfer,
-          targetPath: nextTargetPath,
-        },
-        { overwrite: false },
+        { ...transfer, targetPath },
+        { overwrite: false, suppressOperationError: true },
       )
-      if (!ok) return
+      if (ok) return 'ok'
+      const existsAfter = await bridge.pathExists(targetPath)
+      return shouldRetryKeepBothAfterFailedTransfer(existsAfter) ? 'race' : 'fail'
+    }
 
+    for (let index = 2; index < 1000; index += 1) {
+      const candidateName = appendIndexToName(baseName, index)
+      const candidatePath = joinPath(destDir, candidateName)
+      const outcome = await tryTransferTo(candidatePath)
+      if (outcome === 'ok') {
+        setPendingTransfer(null)
+        setTransferConflict(null)
+        return
+      }
+      if (outcome === 'race') continue
       setPendingTransfer(null)
       setTransferConflict(null)
-    },
-    [bridge, executeTransfer, pendingTransfer],
-  )
+      setOperationError(
+        getUiText(uiLanguageMode, 'explorer.transferConflict.errorKeepBothUnexpected'),
+      )
+      return
+    }
+
+    const fallbackPath = joinPath(destDir, `${Date.now()}-${baseName}`)
+    const fallbackOutcome = await tryTransferTo(fallbackPath)
+    if (fallbackOutcome === 'ok') {
+      setPendingTransfer(null)
+      setTransferConflict(null)
+      return
+    }
+    setPendingTransfer(null)
+    setTransferConflict(null)
+    setOperationError(
+      getUiText(uiLanguageMode, 'explorer.transferConflict.errorKeepBothExhausted'),
+    )
+  }, [bridge, executeTransfer, pendingTransfer, uiLanguageMode])
 
   const cancelTransferConflict = useCallback(() => {
     setPendingTransfer(null)
     setTransferConflict(null)
+    // Abandon the in-flight paste (incl. cut "move" intent) so the tree does not
+    // keep showing the cut source as pending after the user cancels the dialog.
+    setClipboard(null)
   }, [])
 
   const clearOperationError = useCallback(() => {
@@ -947,7 +962,7 @@ export function useFileExplorer({
     handleCopySelectedFile,
     handlePasteIntoSelection,
     resolveTransferConflictByOverwrite,
-    resolveTransferConflictByRename,
+    resolveTransferConflictKeepBoth,
     cancelTransferConflict,
     cancelNamePrompt,
     submitNamePrompt,

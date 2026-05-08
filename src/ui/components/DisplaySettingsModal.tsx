@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   IconAdjustmentsHorizontal,
+  IconAlignBoxLeftMiddle,
   IconArrowsMoveHorizontal,
+  IconArrowsVertical,
   IconBrandGithub,
   IconChevronRight,
   IconDeviceImacHeart,
@@ -9,7 +11,10 @@ import {
   IconFileText,
   IconHeading,
   IconHighlight,
+  IconLicense,
   IconNumbers,
+  IconPencilStar,
+  IconShadowOff,
   IconThumbUp,
   IconTool,
   IconTypography,
@@ -26,6 +31,7 @@ import type {
   DocumentHeadingFont,
   DocumentTheme,
   HeadingAlign,
+  ParagraphPlainBehavior,
   Theme,
   UiFont,
   UiLanguageMode,
@@ -43,10 +49,15 @@ import {
   MIN_TOOLBAR_ICON_STROKE,
   MIN_TOOLBAR_SCALE,
   THEME_LABELS,
+  TYPEWRITER_FOLLOW_BAND_RATIO_MAX,
+  TYPEWRITER_FOLLOW_BAND_RATIO_MIN,
+  TYPEWRITER_OFFSET_RATIO_MAX,
+  TYPEWRITER_OFFSET_RATIO_MIN,
   UI_THEME_FONT_PRESETS,
   UI_THEME_TEXT_PRIMARY_PRESETS,
 } from "../../settings/defaults";
 import { getAppTitleCustomDisplayWidth } from "../../settings/appTitleCustom";
+import { expandHexForColorInput, expandHexForCurrentLineColorInput } from "../../settings/visualFocusAppearance";
 import {
   isBundledDocThemePreset,
   isBundledUiThemePreset,
@@ -150,13 +161,42 @@ type DisplaySettingsModalProps = {
   onFrontmatterShowRoleLabelsChange: (value: boolean) => void;
   caretColorMode: CaretColorMode;
   caretColorCustom: string | null;
+  useEditorArrowPointer: boolean;
   onCaretColorModeChange: (mode: CaretColorMode) => void;
   onCaretColorCustomChange: (color: string | null) => void;
+  onUseEditorArrowPointerChange: (value: boolean) => void;
+  paragraphPlainBehavior: ParagraphPlainBehavior;
+  onParagraphPlainBehaviorChange: (value: ParagraphPlainBehavior) => void;
+  typewriterModeEnabled: boolean;
+  typewriterOffsetRatio: number;
+  typewriterFollowBandRatio: number;
+  onTypewriterModeEnabledChange: (enabled: boolean) => void;
+  onTypewriterOffsetRatioChange: (value: number) => void;
+  onTypewriterFollowBandRatioChange: (value: number) => void;
+  visualFocusBlockHighlightEnabled: boolean;
+  onVisualFocusBlockHighlightEnabledChange: (enabled: boolean) => void;
+  visualFocusDimNonFocusedBlocksEnabled: boolean;
+  onVisualFocusDimNonFocusedBlocksEnabledChange: (enabled: boolean) => void;
+  visualFocusBlockHighlightColor: string;
+  onVisualFocusBlockHighlightColorChange: (color: string) => void;
+  visualFocusBlockHighlightOpacity: number;
+  onVisualFocusBlockHighlightOpacityChange: (value: number) => void;
+  visualFocusDimNonFocusedBlocksOpacity: number;
+  onVisualFocusDimNonFocusedBlocksOpacityChange: (value: number) => void;
+  visualFocusCurrentLineHighlightEnabled: boolean;
+  onVisualFocusCurrentLineHighlightEnabledChange: (enabled: boolean) => void;
+  visualFocusCurrentLineHighlightColor: string;
+  onVisualFocusCurrentLineHighlightColorChange: (color: string) => void;
+  visualFocusCurrentLineHighlightOpacity: number;
+  onVisualFocusCurrentLineHighlightOpacityChange: (value: number) => void;
   /** Phase5-H Slice1: open the Theme Studio modal */
   onOpenThemeStudio: () => void;
   onSendBugReport: () => void;
   onSendFeedback: () => void;
   onOpenRepository: () => void;
+  /** 表示設定を開く直前の要求: 該当セクションを展開（ツールバー Typewriter 導線など） */
+  expandSectionOnOpen?: DisplaySettingsSectionKey | null;
+  onExpandSectionOnOpenConsumed?: () => void;
 };
 
 type SectionHeadingProps = {
@@ -265,12 +305,40 @@ export function DisplaySettingsModal({
   onFrontmatterShowRoleLabelsChange,
   caretColorMode,
   caretColorCustom,
+  useEditorArrowPointer,
   onCaretColorModeChange,
   onCaretColorCustomChange,
+  onUseEditorArrowPointerChange,
+  paragraphPlainBehavior,
+  onParagraphPlainBehaviorChange,
+  typewriterModeEnabled,
+  typewriterOffsetRatio,
+  typewriterFollowBandRatio,
+  onTypewriterModeEnabledChange,
+  onTypewriterOffsetRatioChange,
+  onTypewriterFollowBandRatioChange,
+  visualFocusBlockHighlightEnabled,
+  onVisualFocusBlockHighlightEnabledChange,
+  visualFocusDimNonFocusedBlocksEnabled,
+  onVisualFocusDimNonFocusedBlocksEnabledChange,
+  visualFocusBlockHighlightColor,
+  onVisualFocusBlockHighlightColorChange,
+  visualFocusBlockHighlightOpacity,
+  onVisualFocusBlockHighlightOpacityChange,
+  visualFocusDimNonFocusedBlocksOpacity,
+  onVisualFocusDimNonFocusedBlocksOpacityChange,
+  visualFocusCurrentLineHighlightEnabled,
+  onVisualFocusCurrentLineHighlightEnabledChange,
+  visualFocusCurrentLineHighlightColor,
+  onVisualFocusCurrentLineHighlightColorChange,
+  visualFocusCurrentLineHighlightOpacity,
+  onVisualFocusCurrentLineHighlightOpacityChange,
   onOpenThemeStudio,
   onSendBugReport,
   onSendFeedback,
   onOpenRepository,
+  expandSectionOnOpen,
+  onExpandSectionOnOpenConsumed,
 }: DisplaySettingsModalProps) {
   const t = createUiTextGetter(uiLanguageMode);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -447,15 +515,23 @@ export function DisplaySettingsModal({
   );
 
   useEffect(() => {
-    setSectionOpenState((currentState) =>
-      resolveDisplaySettingsSectionOpenStateForVisibilityChange(
-        previousOpenRef.current,
+    const previousWasOpen = previousOpenRef.current;
+    setSectionOpenState((currentState) => {
+      let next = resolveDisplaySettingsSectionOpenStateForVisibilityChange(
+        previousWasOpen,
         open,
         currentState,
-      ),
-    );
+      );
+      if (!previousWasOpen && open && expandSectionOnOpen) {
+        next = { ...next, [expandSectionOnOpen]: true };
+      }
+      return next;
+    });
+    if (!previousWasOpen && open && expandSectionOnOpen) {
+      onExpandSectionOnOpenConsumed?.();
+    }
     previousOpenRef.current = open;
-  }, [open]);
+  }, [open, expandSectionOnOpen, onExpandSectionOnOpenConsumed]);
 
   const toggleSection = useCallback((key: DisplaySettingsSectionKey) => {
     setSectionOpenState((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -486,6 +562,7 @@ export function DisplaySettingsModal({
   }, []);
 
   if (!open) return null;
+  const isWindowsStoreBuild = Boolean(window.nyozeBridge?.appInfo?.windowsStore);
   const TOP_PADDING_BASE = 22;
   const paddingTopUiValue = Math.max(
     0,
@@ -1993,6 +2070,309 @@ export function DisplaySettingsModal({
                     </div>
                   </div>
                 )}
+
+                {platform === "win32" && (
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.editorArrowPointer")}
+                      </div>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.editorArrowPointer", "helper")}
+                      </div>
+                    </div>
+                    <div className="setting-item-control">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={useEditorArrowPointer}
+                          onChange={(e) =>
+                            onUseEditorArrowPointerChange(e.target.checked)
+                          }
+                        />
+                        {t("common.enable")}
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Paragraph Plain: app-wide behavior (not per-document) */}
+          <div className="settings-section">
+            <SectionHeading
+              title={t("displaySettings.section.paragraphPlain")}
+              icon={IconFileText}
+              isOpen={sectionOpenState.paragraphPlain}
+              onToggle={() => toggleSection("paragraphPlain")}
+            />
+            {sectionOpenState.paragraphPlain && (
+              <div className="settings-section-body">
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.paragraphPlainBehavior")}
+                    </div>
+                    <div className="setting-item-desc">
+                      {t("displaySettings.paragraphPlainBehavior", "helper")}
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <select
+                      className="setting-select"
+                      value={paragraphPlainBehavior}
+                      onChange={(e) =>
+                        onParagraphPlainBehaviorChange(
+                          e.target.value as ParagraphPlainBehavior,
+                        )
+                      }
+                    >
+                      <option value="fast">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.paragraphPlainBehavior.fast"),
+                          paragraphPlainBehavior === "fast",
+                          platform,
+                        )}
+                      </option>
+                      <option value="comfortable">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.paragraphPlainBehavior.comfortable"),
+                          paragraphPlainBehavior === "comfortable",
+                          platform,
+                        )}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Typewriter Mode — Typewriter Scroll + Visual Focus */}
+          <div className="settings-section">
+            <SectionHeading
+              title={t("displaySettings.section.typewriter")}
+              icon={IconLicense}
+              isOpen={sectionOpenState.typewriter}
+              onToggle={() => toggleSection("typewriter")}
+            />
+            {sectionOpenState.typewriter && (
+              <div className="settings-section-body">
+                <div className="settings-subsection settings-subsection-typewriter-scroll">
+                  <div className="setting-item setting-item-subheading">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.typewriter.scrollHeading")}
+                      </div>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.typewriter.scrollHeading", "helper")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={typewriterModeEnabled}
+                          onChange={(e) =>
+                            onTypewriterModeEnabledChange(e.target.checked)
+                          }
+                        />
+                        <IconArrowsVertical size={16} stroke={1.75} aria-hidden />
+                        {t("displaySettings.typewriter.enabled")}
+                      </label>
+                    </div>
+                  </div>
+                  <DisplayNumberSlider
+                    label={t("displaySettings.typewriter.followPosition")}
+                    value={typewriterOffsetRatio}
+                    min={TYPEWRITER_OFFSET_RATIO_MIN}
+                    max={TYPEWRITER_OFFSET_RATIO_MAX}
+                    step={0.01}
+                    valueText={typewriterOffsetRatio.toFixed(2)}
+                    description={t(
+                      "displaySettings.typewriter.followPosition",
+                      "helper",
+                    )}
+                    disabled={!typewriterModeEnabled}
+                    onChange={onTypewriterOffsetRatioChange}
+                  />
+                  <DisplayNumberSlider
+                    label={t("displaySettings.typewriter.followBandWidth")}
+                    value={typewriterFollowBandRatio}
+                    min={TYPEWRITER_FOLLOW_BAND_RATIO_MIN}
+                    max={TYPEWRITER_FOLLOW_BAND_RATIO_MAX}
+                    step={0.01}
+                    valueText={typewriterFollowBandRatio.toFixed(2)}
+                    description={t(
+                      "displaySettings.typewriter.followBandWidth",
+                      "helper",
+                    )}
+                    disabled={!typewriterModeEnabled}
+                    onChange={onTypewriterFollowBandRatioChange}
+                  />
+                </div>
+
+                <div className="settings-subsection settings-subsection-vf-panel">
+                  <div className="setting-item setting-item-subheading">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.section.visualFocus")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={visualFocusCurrentLineHighlightEnabled}
+                          onChange={(e) =>
+                            onVisualFocusCurrentLineHighlightEnabledChange(
+                              e.target.checked,
+                            )
+                          }
+                        />
+                        <IconPencilStar size={16} stroke={1.75} aria-hidden />
+                        {t("displaySettings.visualFocus.currentLineHighlight")}
+                      </label>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.visualFocus.currentLineHighlight", "helper")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.visualFocus.currentLineColor")}
+                      </div>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.visualFocus.currentLineColor", "helper")}
+                      </div>
+                    </div>
+                    <div className="setting-item-control">
+                      <div className="color-control">
+                        <input
+                          type="color"
+                          value={expandHexForCurrentLineColorInput(visualFocusCurrentLineHighlightColor)}
+                          onChange={(e) =>
+                            onVisualFocusCurrentLineHighlightColorChange(e.target.value)
+                          }
+                          aria-label={t("displaySettings.visualFocus.currentLineColor")}
+                        />
+                        <span className="color-hex">
+                          {expandHexForCurrentLineColorInput(visualFocusCurrentLineHighlightColor)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <DisplayNumberSlider
+                    label={t("displaySettings.visualFocus.currentLineOpacity")}
+                    value={visualFocusCurrentLineHighlightOpacity}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    valueText={`${Math.round(visualFocusCurrentLineHighlightOpacity * 100)}%`}
+                    description={t(
+                      "displaySettings.visualFocus.currentLineOpacity",
+                      "helper",
+                    )}
+                    onChange={onVisualFocusCurrentLineHighlightOpacityChange}
+                  />
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={visualFocusBlockHighlightEnabled}
+                          onChange={(e) =>
+                            onVisualFocusBlockHighlightEnabledChange(
+                              e.target.checked,
+                            )
+                          }
+                        />
+                        <IconAlignBoxLeftMiddle size={16} stroke={1.75} aria-hidden />
+                        {t("displaySettings.visualFocus.editBlockHighlight")}
+                      </label>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.visualFocus.editBlockHighlight", "helper")}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.visualFocus.blockHighlightColor")}
+                      </div>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.visualFocus.blockHighlightColor", "helper")}
+                      </div>
+                    </div>
+                    <div className="setting-item-control">
+                      <div className="color-control">
+                        <input
+                          type="color"
+                          value={expandHexForColorInput(visualFocusBlockHighlightColor)}
+                          onChange={(e) =>
+                            onVisualFocusBlockHighlightColorChange(e.target.value)
+                          }
+                          aria-label={t("displaySettings.visualFocus.blockHighlightColor")}
+                        />
+                        <span className="color-hex">
+                          {expandHexForColorInput(visualFocusBlockHighlightColor)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <DisplayNumberSlider
+                    label={t("displaySettings.visualFocus.blockHighlightOpacity")}
+                    value={visualFocusBlockHighlightOpacity}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    valueText={`${Math.round(visualFocusBlockHighlightOpacity * 100)}%`}
+                    description={t(
+                      "displaySettings.visualFocus.blockHighlightOpacity",
+                      "helper",
+                    )}
+                    onChange={onVisualFocusBlockHighlightOpacityChange}
+                  />
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={visualFocusDimNonFocusedBlocksEnabled}
+                          onChange={(e) =>
+                            onVisualFocusDimNonFocusedBlocksEnabledChange(
+                              e.target.checked,
+                            )
+                          }
+                        />
+                        <IconShadowOff size={16} stroke={1.75} aria-hidden />
+                        {t("displaySettings.visualFocus.dimNonFocusedBlocks")}
+                      </label>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.visualFocus.dimNonFocusedBlocks", "helper")}
+                      </div>
+                    </div>
+                  </div>
+                  <DisplayNumberSlider
+                    label={t("displaySettings.visualFocus.dimNonFocusedOpacity")}
+                    value={visualFocusDimNonFocusedBlocksOpacity}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    valueText={`${Math.round(visualFocusDimNonFocusedBlocksOpacity * 100)}%`}
+                    description={t(
+                      "displaySettings.visualFocus.dimNonFocusedOpacity",
+                      "helper",
+                    )}
+                    onChange={onVisualFocusDimNonFocusedBlocksOpacityChange}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -2045,33 +2425,35 @@ export function DisplaySettingsModal({
                     </button>
                   </div>
                 </div>
-                <div className="setting-item">
-                  <div className="setting-item-info">
-                    <div className="setting-item-name">
-                      {t("displaySettings.support.updateCheck")}
+                {!isWindowsStoreBuild && (
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.support.updateCheck")}
+                      </div>
+                      <div className="setting-item-desc">
+                        GitHub Releases の公開版を確認します
+                        <br />
+                        ※主に GitHub zip 版など、Store 版以外の更新確認向けです
+                      </div>
                     </div>
-                    <div className="setting-item-desc">
-                      GitHub Releases の公開版を確認します
-                      <br />
-                      ※Microsoft Store 版は Store から更新されます
+                    <div className="setting-item-control">
+                      <button
+                        type="button"
+                        className="font-register-btn"
+                        onClick={() => void handleCheckForUpdate()}
+                        disabled={updateCheckLoading}
+                      >
+                        {updateCheckLoading
+                          ? t("displaySettings.support.checking")
+                          : t("displaySettings.support.checkNow")}
+                      </button>
+                      {updateCheckResult && (
+                        <span className="slider-value">{updateCheckResult}</span>
+                      )}
                     </div>
                   </div>
-                  <div className="setting-item-control">
-                    <button
-                      type="button"
-                      className="font-register-btn"
-                      onClick={() => void handleCheckForUpdate()}
-                      disabled={updateCheckLoading}
-                    >
-                      {updateCheckLoading
-                        ? t("displaySettings.support.checking")
-                        : t("displaySettings.support.checkNow")}
-                    </button>
-                    {updateCheckResult && (
-                      <span className="slider-value">{updateCheckResult}</span>
-                    )}
-                  </div>
-                </div>
+                )}
                 <div className="setting-item">
                   <div className="setting-item-info">
                     <div className="setting-item-name">
@@ -2080,7 +2462,7 @@ export function DisplaySettingsModal({
                     <div className="setting-item-desc">
                       ソースコードと GitHub 配布ページを開きます
                       <br />
-                      ※Microsoft Store 版の通常更新は Store を使ってください
+                      ※Microsoft Store 版は Store アプリのライブラリから更新できます
                     </div>
                   </div>
                   <div className="setting-item-control">

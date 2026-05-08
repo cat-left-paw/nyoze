@@ -3,12 +3,42 @@
 Nyoze は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 版です。
 この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行公開版は `0.2.0-beta.1` です。
 
+2026-05-06 時点の配布状況:
+
+- GitHub Releases の latest は `0.2.0-beta.1` です。
+- Windows 版は Microsoft Store でも公開済みです。
+- Microsoft Store 上の初回 package version は `1.2.0.0` です。
+- GitHub Releases の Windows zip は、Store を使えない環境向けの代替配布として継続します。
+
 - 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
 
+## 0.2.1-beta.1
+
+Nyoze 0.2.1-beta.1 は、`0.2.0-beta.1` 公開後の追加安定化と執筆補助 polish をまとめた beta 更新候補です。主に Typewriter / Visual Focus の本実装、Paragraph Plain の回帰修正、日本語 IME 境界入力の改善、Help / 配布文書の整理を含みます。
+
+### 今回の更新
+
+- Typewriter Mode を本実装し、Typewriter scroll、scroll past end、Visual Focus、current line highlight、toolbar quick toggle を追加しました。
+- current line overlay を縦書き中心に安定化し、空行補正、fallback anchoring、frontmatter 表示直後の再 anchor 漏れを改善しました。
+- `Paragraph Plain` の click 遅延を追加最適化し、pane 開閉時の overlay 再配置、空段落境界ナビゲーション、境界 E2E の flaky を修正しました。
+- ルビ / 明示 TCY 直後の日本語 IME 入力を boundary sentinel bridge で改善し、論理行頭 ruby 前入力や後方 composition の崩れを抑制しました。
+- Help メニューに `MANUAL を開く` と `ショートカットキー一覧` を追加し、現在の UI 言語に応じた read-only internal shortcut doc を開けるようにしました。
+- Windows の一部 AMD GPU + Chromium 系環境で I-beam カーソルが白く見える問題に対し、`エディタで矢印ポインターを使う` 回避設定を追加しました。
+- README / INSTALL / Release Notes / 配布手順を更新し、Store と GitHub zip の更新方針、Smart App Control の注意、Store 版の更新導線、共存可否を整理しました。
+
+### Windows 配布と Store 状況
+
+- GitHub Releases の Windows 配布物は引き続き zip 版です。
+- Microsoft Store 版は通常利用の推奨導線ですが、審査を伴うため、小さな beta 修正を毎回すぐ反映するとは限りません。
+- GitHub zip は Store を使えない環境向けの代替配布であると同時に、Store 版より細かい beta 修正を先に含むことがあります。
+- Windows 実機では、Store 版と GitHub zip 版の共存および起動を確認しています。ただし設定は共有されるため、通常利用ではどちらか一方へ寄せることを推奨します。
+- 現行 `0.2.0` 系では single-instance により両方の同時起動は抑止されます。旧版どうしでは同時起動できる場合がありますが、同じ設定を共有するため推奨しません。
+- Smart App Control により、zip 展開後の `Nyoze.exe` も実行を拒否される場合があります。Windows で確実に使いたい場合は Microsoft Store 版を優先してください。
+
 ## 0.2.0-beta.1
 
-Nyoze 0.2.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 更新版です。Windows では引き続き GitHub Releases の zip 配布を継続しつつ、Microsoft Store / MSIX 申請準備を進めています。
+Nyoze 0.2.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 更新版です。GitHub Releases ではこの版が latest として公開されており、Windows では GitHub zip 配布を継続しつつ Microsoft Store 版も公開済みです。
 
 ### 今回の更新
 
@@ -21,12 +51,16 @@ Nyoze 0.2.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown 
 - App icon を円形シンプルアイコンへ差し替え、開発起動時の icon も更新しました。
 - Microsoft Store / MSIX 配布準備として、`package:win:store`、Store 専用 AppX config、privacy policy、Partner Center 入力方針を追加しました。
 
-### Windows 配布と Store 準備
+### Windows 配布と Store 状況
 
 - GitHub Releases の Windows 配布物は引き続き `Nyoze-Windows-0.2.0-beta.1-x64.zip` です。
 - Microsoft Store 向けには `npm run package:win:store` を追加し、Store 用 identity / publisher / AppX version の分離管理を入れています。
-- Partner Center では検証用 `0.1.1-beta.1` appx の validation と申請フォーム入力を完了済みで、最終送信前に `0.2.0-beta.1` appx へ差し替える前提です。
-- Store 版公開後も、GitHub zip は Store を使えない環境向けの代替配布として残す予定です。
+- Microsoft Store 版は 2026-05-06 時点で公開済みで、Store 上の初回 package version は `1.2.0.0` です。
+- Store 版は審査を伴うため、緊急度の低い小修正を毎回すぐ反映するとは限りません。ある程度まとまった単位で更新することがあります。
+- GitHub zip は、Store を使えない環境向けの代替配布として残すだけでなく、Store 版より細かい beta 修正を先に含むことがあります。
+- Store 版は Microsoft Store アプリのライブラリ画面から更新できます。
+- Store 版と GitHub zip 版は、Windows 実機で共存と起動を確認しています。ただし設定は共有されるため、通常利用ではどちらか一方へ寄せることを推奨します。
+- 現行 `0.2.0` 系では多重起動を抑止しているため、両方を同時には起動できません。旧版どうしでは同時起動できる場合がありますが、同じ設定を共有するため推奨しません。
 
 ## 0.1.1-beta.1
 
@@ -131,16 +165,17 @@ beta で実用上対応している文字コードは UTF-8 のみです。非 U
 
 beta では、長大文書に対する仮想化や表示範囲に応じた描画最適化はまだ入れていません。
 
-ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目で入力が進まない状態になることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます。
+ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます。
 
 縦書きでルビ直後に句読点が続き、ちょうど行頭 / 行末の境界にかかる場合、Chromium 系では句読点が行頭側に表示されることがあります。頻度は高くありませんが、現行 beta では既知制限として扱います。
+
+`Paragraph Plain` は通常表示と近い折り返しを目指していますが、ウィンドウ幅やペイン幅の微妙な境界では、まれに overlay textarea 側だけ 1 文字ぶん多く、または少なく折り返されて見えることがあります。保存内容や block 構造には影響しません。
 
 ## まだ対応していない導線
 
 - OS からの drag and drop 読み込み
 - Open With からの起動引き渡し
 - `.md` の OS 全体関連付け
-- Windows Microsoft Store / MSIX 配布（`0.2.0-beta` 向けに準備中）
 - frontmatter の一般編集 UI
 - 高度な競合解決 / merge UI
 - autosave / crash recovery journal

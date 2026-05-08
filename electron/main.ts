@@ -895,6 +895,27 @@ ipcMain.handle(
   },
 );
 
+/** E2E only: establish trusted workspace root without a dialog (mirrors dialog:openFolder post-path). */
+ipcMain.handle(
+  "e2e:establishWorkspaceRoot",
+  async (_event, dirPath: unknown): Promise<string | null> => {
+    if (!MAIN_E2E_ENABLED) return null;
+    const validPath = validatePathArg(dirPath);
+    if (!validPath) return null;
+    const realRoot = await realpathExisting(validPath);
+    if (!realRoot) return null;
+    try {
+      const stat = await fs.promises.stat(realRoot);
+      if (!stat.isDirectory()) return null;
+    } catch {
+      return null;
+    }
+    activeWorkspaceRoot = realRoot;
+    persistWorkspaceRoot(realRoot);
+    return realRoot;
+  },
+);
+
 ipcMain.handle(
   "fs:pathExists",
   async (_event, filePath: unknown): Promise<boolean> => {
@@ -1630,6 +1651,19 @@ function buildAppMenuTemplate(
   }
 
   const helpSubmenu: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: t("help.openManual"),
+      click: (_item, focusedWindow) => {
+        sendToRenderer(focusedWindow, "menu:open-manual");
+      },
+    },
+    {
+      label: t("help.shortcutsReference"),
+      click: (_item, focusedWindow) => {
+        sendToRenderer(focusedWindow, "menu:show-shortcuts");
+      },
+    },
+    { type: "separator" },
     {
       label: t("displaySettings.support.reportBug"),
       click: (_item, focusedWindow) => {

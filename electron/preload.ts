@@ -11,6 +11,10 @@ const e2eBridge =
               savedStat: { mtimeMs: number; size: number } | null
             } | null
           >,
+        establishWorkspaceRoot: (dirPath: string) =>
+          ipcRenderer.invoke('e2e:establishWorkspaceRoot', dirPath) as Promise<
+            string | null
+          >,
       }
     : undefined
 
@@ -131,6 +135,8 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
         'menu:save',
         'menu:save-as',
         'menu:view-settings',
+        'menu:open-manual',
+        'menu:show-shortcuts',
         'menu:bug-report',
         'menu:feedback',
       ] as const
@@ -152,6 +158,9 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
       ipcRenderer.invoke('settings:read') as Promise<Record<string, unknown> | null>,
     write: (data: Record<string, unknown>) =>
       ipcRenderer.invoke('settings:write', data) as Promise<boolean>,
+  },
+  appInfo: {
+    windowsStore: Boolean(process.windowsStore),
   },
   update: {
     checkForUpdate: () =>

@@ -5,9 +5,16 @@ import {
   setSpecialInlineBoundaryDiagEnabled,
 } from "../../editor-core/features/specialInlineBoundaryDiagnostics";
 import type { SpecialInlineAdjacentPmInspection } from "../../editor-core/types";
+import {
+  computeMacosArrowScrollClampOffsets,
+  shouldGateMacosArrowScrollClamp,
+} from "../../editor-core/features/macosArrowScrollClamp";
+import type { MacosArrowScrollClampGateInput } from "../../editor-core/features/macosArrowScrollClamp";
 import type { SavedFileStat } from "../utils/externalEditConflict";
 import { getPathBaseName } from "../utils/path";
 import type { ActiveTabLoadResult, TabAddResult } from "./useTabManager";
+import { getUiText } from "../i18n/uiText";
+import { getShortcutReferenceContent } from "../internalDocs/getShortcutReferenceContent";
 
 type UseE2eBridgeOptions = {
   loadIntoActiveTab: (
@@ -24,7 +31,15 @@ type UseE2eBridgeOptions = {
   ) => Promise<TabAddResult>;
   flushImeCompositionSideEffects: (reason: string) => void;
   showTabLimitNotice: () => void;
+  /** When set, E2E can open a fixture directory as the File Explorer root (NYOZE_E2E only). */
+  setExplorerRootForE2e?: (rootDir: string) => void;
   inspectSpecialInlineAdjacentCaretPm?: () => SpecialInlineAdjacentPmInspection | null;
+  /** Opens or focuses the fixed shortcut-reference tab (NYOZE_E2E). */
+  openOrFocusShortcutReferenceTab?: (args: {
+    title: string;
+    markdown: string;
+    bundleKey: "ja" | "en";
+  }) => Promise<TabAddResult>;
 };
 
 export function useE2eBridge({
@@ -32,7 +47,9 @@ export function useE2eBridge({
   openFileInNewTab,
   flushImeCompositionSideEffects,
   showTabLimitNotice,
+  setExplorerRootForE2e,
   inspectSpecialInlineAdjacentCaretPm,
+  openOrFocusShortcutReferenceTab,
 }: UseE2eBridgeOptions) {
   useEffect(() => {
     const bridge = window.nyozeBridge?.e2e;
@@ -60,6 +77,14 @@ export function useE2eBridge({
       flushSpecialInlineBoundaryDiagLogs: () => consumeSpecialInlineDiagLines(),
       inspectSpecialInlineAdjacentCaretPm:
         inspectSpecialInlineAdjacentCaretPm ?? (() => null),
+      establishFixtureWorkspace: async (dir: string) => {
+        const establish = window.nyozeBridge?.e2e?.establishWorkspaceRoot;
+        if (!establish || !setExplorerRootForE2e) return false;
+        const root = await establish(dir);
+        if (!root) return false;
+        setExplorerRootForE2e(root);
+        return true;
+      },
       loadFileIntoActiveTab: async (filePath: string) => {
         const fixture = await readDocumentFixture(filePath);
         if (!fixture) return false;
@@ -87,6 +112,48 @@ export function useE2eBridge({
         await waitForNextPaint();
         return result;
       },
+      openShortcutReferenceDoc:
+        openOrFocusShortcutReferenceTab === undefined
+          ? undefined
+          : async () => {
+              flushImeCompositionSideEffects("e2e-shortcut-reference");
+              const title = getUiText("en", "help.shortcutsReference");
+              const { markdown, bundleKey } =
+                getShortcutReferenceContent("en");
+              const result = await openOrFocusShortcutReferenceTab({
+                title,
+                markdown,
+                bundleKey,
+              });
+              if (result === "tab-limit") showTabLimitNotice();
+              await waitForNextPaint();
+              return result;
+            },
+      macosArrowScrollClampE2eEvaluate: (payload: {
+        gate: MacosArrowScrollClampGateInput;
+        beforeTop: number;
+        beforeLeft: number;
+        afterTop: number;
+        afterLeft: number;
+        clientWidth: number;
+        clientHeight: number;
+      }) => {
+        const host = {
+          scrollTop: payload.afterTop,
+          scrollLeft: payload.afterLeft,
+          clientWidth: payload.clientWidth,
+          clientHeight: payload.clientHeight,
+        } as HTMLElement;
+        const offsets = computeMacosArrowScrollClampOffsets(
+          host,
+          payload.beforeTop,
+          payload.beforeLeft,
+        );
+        return {
+          shouldGate: shouldGateMacosArrowScrollClamp(payload.gate),
+          ...offsets,
+        };
+      },
     };
 
     return () => {
@@ -97,6 +164,8 @@ export function useE2eBridge({
     inspectSpecialInlineAdjacentCaretPm,
     loadIntoActiveTab,
     openFileInNewTab,
+    openOrFocusShortcutReferenceTab,
+    setExplorerRootForE2e,
     showTabLimitNotice,
   ]);
 }

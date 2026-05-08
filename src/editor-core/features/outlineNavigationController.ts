@@ -16,6 +16,10 @@ type CreateOutlineNavigationControllerOptions = {
   getIsComposing: () => boolean
   pushLog: LogPush
   emitFoldChange: () => void
+  /** scrollToPos / 検索ジャンプ等のプログラム選択の直前 */
+  noteTypewriterProgrammaticJump?: () => void
+  /** 見出し折りたたみトグル直前（UI / shortcut / クリック） */
+  noteTypewriterFoldToggleJump?: () => void
 }
 
 export function createOutlineNavigationController({
@@ -23,6 +27,8 @@ export function createOutlineNavigationController({
   getIsComposing,
   pushLog,
   emitFoldChange,
+  noteTypewriterProgrammaticJump,
+  noteTypewriterFoldToggleJump,
 }: CreateOutlineNavigationControllerOptions): {
   toggleHeading: (level: number) => void
   getHeadings: () => HeadingInfo[]
@@ -70,6 +76,7 @@ export function createOutlineNavigationController({
   }
 
   function toggleHeadingFold(pos: number): void {
+    noteTypewriterFoldToggleJump?.()
     editor.commands.toggleHeadingFold(pos)
     pushLog('command', `toggleHeadingFold pos=${pos}`)
     emitFoldChange()
@@ -87,6 +94,7 @@ export function createOutlineNavigationController({
   }
 
   function scrollToPos(pos: number): void {
+    noteTypewriterProgrammaticJump?.()
     const docSize = editor.state.doc.content.size
     const safePos = Math.max(0, Math.min(pos, docSize))
 

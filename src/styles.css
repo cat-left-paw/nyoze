@@ -1130,7 +1130,8 @@ body.is-resizing-pane {
 }
 
 .unified-header button,
-.unified-header .toolbar-heading-menu-wrap {
+.unified-header .toolbar-heading-menu-wrap,
+.unified-header .toolbar-list-menu-wrap {
   -webkit-app-region: no-drag;
 }
 
@@ -1492,7 +1493,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .unified-header-center
-  button:not(.toolbar-btn-icon-only):not(.toolbar-heading-trigger) {
+  button:not(.toolbar-btn-icon-only):not(.toolbar-heading-trigger):not(.toolbar-list-trigger) {
   padding: 4px 10px;
 }
 
@@ -1578,25 +1579,42 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   stroke-width: 2.5;
 }
 
-.toolbar-heading-menu-wrap {
+.toolbar-heading-menu-wrap,
+.toolbar-list-menu-wrap {
   display: inline-flex;
   align-items: center;
   position: relative;
 }
 
-.toolbar-heading-trigger {
+.toolbar-heading-trigger,
+.toolbar-list-trigger {
   width: auto;
   padding: 0 6px;
   gap: 2px;
 }
 
-.toolbar-heading-trigger.open {
+/* Wider triggers (keyboard+chevron): override fixed square .toolbar-btn-icon-only */
+.unified-header-center button.toolbar-btn-icon-only.toolbar-heading-trigger,
+.unified-header-center button.toolbar-btn-icon-only.toolbar-list-trigger,
+.unified-header-center button.toolbar-btn-icon-only.toolbar-tw-vf-menu-trigger {
+  width: auto;
+  min-width: var(--toolbar-btn-size);
+  height: var(--toolbar-btn-size);
+  padding: 0 6px;
+  gap: 2px;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.toolbar-heading-trigger.open,
+.toolbar-list-trigger.open {
   background: var(--bg-button) !important;
   border-color: var(--border-main) !important;
   color: var(--text-primary);
 }
 
-.toolbar-heading-menu {
+/* Toolbar dropdown menus (heading / list): shared panel + selectable rows */
+.toolbar-select-menu {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
@@ -1610,10 +1628,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   z-index: 1000;
 }
 
-.toolbar-heading-menu .toolbar-heading-menu-item {
+.toolbar-select-menu-item {
   width: 100%;
-  display: grid;
-  grid-template-columns: 16px 1fr;
+  display: flex;
   align-items: center;
   gap: 7px;
   border: none !important;
@@ -1631,26 +1648,75 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
     color 0.12s;
 }
 
-.toolbar-heading-menu-item:hover {
+.toolbar-select-menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-select-menu-check-slot {
+  flex: 0 0 18px;
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.toolbar-select-menu-check {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.toolbar-select-menu-item:hover {
   background: var(--bg-button-hover) !important;
   color: var(--text-primary);
 }
 
-.toolbar-heading-menu-item:disabled {
+.toolbar-select-menu-item:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.toolbar-heading-menu-item.active {
-  color: var(--accent);
-  background: transparent;
-  font-weight: 500;
+.toolbar-select-menu-item.toolbar-select-menu-item--selected {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.toolbar-select-menu-item.toolbar-select-menu-item--selected:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent) !important;
 }
 
 .toolbar-heading-menu-separator {
   height: 1px;
   margin: 3px 6px;
   background: var(--border-divider);
+}
+
+.toolbar-tw-vf-menu-wrap {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+
+.toolbar-tw-vf-menu-trigger {
+  /* sizing comes from .unified-header-center … .toolbar-tw-vf-menu-trigger rule above */
+  gap: 2px;
+}
+
+.toolbar-tw-vf-menu-trigger.open {
+  background: var(--bg-button) !important;
+  border-color: var(--border-main) !important;
+  color: var(--text-primary);
+}
+
+/* Typewriter menu panel (portal): shares toolbar-select-menu rows; wider labels */
+.toolbar-select-menu.toolbar-select-menu--typewriter {
+  min-width: min(280px, calc(100vw - 16px));
+  max-width: min(340px, calc(100vw - 16px));
+}
+
+.unified-header .toolbar-tw-vf-menu-wrap {
+  flex-shrink: 0;
 }
 
 .unified-header-center button.toolbar-btn-icon-only:hover,
@@ -2337,6 +2403,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+/* Cut の移動元のみ（Copy のコピー元には付けない） */
 .file-explorer-tree-item.is-clipboard-source {
   opacity: 0.64;
 }
@@ -3016,11 +3083,24 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .editor-surface {
+  position: relative;
   width: 100%;
   height: 100%;
   writing-mode: var(--editor-writing-mode, horizontal-tb);
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.editor-surface[data-typewriter-scroll-past-end="true"] {
+  --typewriter-scroll-past-end-ratio: 0.85;
+}
+
+.editor-surface [data-typewriter-scroll-past-end-spacer="true"] {
+  display: block;
+  inline-size: 100%;
+  block-size: calc(100% * var(--typewriter-scroll-past-end-ratio));
+  pointer-events: none;
+  user-select: none;
 }
 
 .editor-core-host {
@@ -3595,6 +3675,16 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   cursor: pointer;
 }
 
+.editor-panel[data-editor-pointer-mode="arrow"] .editor-core-host .ProseMirror,
+.editor-panel[data-editor-pointer-mode="arrow"] .tategaki-plain-overlay,
+.editor-panel[data-editor-pointer-mode="arrow"] .source-mode-host,
+.editor-panel[data-editor-pointer-mode="arrow"] .source-mode-host .cm-editor,
+.editor-panel[data-editor-pointer-mode="arrow"] .source-mode-host .cm-scroller,
+.editor-panel[data-editor-pointer-mode="arrow"] .source-mode-host .cm-content,
+.editor-panel[data-editor-pointer-mode="arrow"] .source-mode-host .cm-line {
+  cursor: default;
+}
+
 .source-mode-overlay {
   position: absolute;
   inset: 0;
@@ -3676,10 +3766,11 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .tategaki-plain-overlay {
   position: absolute;
   z-index: 30;
-  border: 2px solid color-mix(in srgb, var(--text-primary) 25%, transparent);
+  /* border は box-sizing:border-box で内容幅を狭めるため使わず、外側リングのみ */
+  border: none;
   border-radius: 4px;
   box-sizing: border-box;
-  box-shadow: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-primary) 25%, transparent);
   background-color: color-mix(
     in srgb,
     var(--bg-surface) 85%,
@@ -4201,6 +4292,10 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   line-height: 1.5;
 }
 
+.file-transfer-conflict-note--secondary {
+  margin-top: 6px;
+}
+
 .setting-row {
   display: grid;
   grid-template-columns: 130px 1fr 80px;
@@ -4211,20 +4306,11 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   color: var(--text-secondary);
 }
 
-.file-transfer-conflict-row {
-  margin-top: 14px;
-  grid-template-columns: auto 1fr;
-}
-
-.file-transfer-conflict-row input[type="text"] {
-  width: 100%;
-  border: 1px solid var(--border-input);
-  border-radius: 3px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-  padding: 5px 8px;
-  font-size: calc(12px * var(--ui-font-scale));
-  font-family: inherit;
+.file-transfer-conflict-hint {
+  margin: 10px 0 0;
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  line-height: 1.45;
 }
 
 .file-transfer-conflict-error {
@@ -4235,13 +4321,6 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .file-transfer-conflict-buttons {
   margin-top: 14px;
-}
-
-.file-transfer-conflict-hint {
-  margin: 6px 0 0;
-  font-size: calc(10px * var(--ui-font-scale));
-  color: var(--text-secondary);
-  text-align: end;
 }
 
 /* --- Display Settings Dialog (Obsidian-style layout) --- */
@@ -4385,6 +4464,27 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-bottom: none;
 }
 
+.setting-item-visual-focus-heading {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-bottom: none;
+}
+
+.settings-subsection-vf-panel {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-input);
+}
+
+.setting-item-subheading {
+  align-items: flex-start;
+  border-bottom: none;
+}
+
+.setting-item-subheading .setting-item-info {
+  margin-right: 0;
+}
+
 .setting-item-info {
   flex: 1;
   min-width: 0;
@@ -4401,6 +4501,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .setting-item-desc {
   font-size: calc(11px * var(--ui-font-scale));
   color: var(--text-muted);
+  white-space: pre-line;
 }
 
 .setting-item-control {
@@ -5258,6 +5359,35 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .editor-context-menu-item.has-submenu:hover > .editor-context-submenu,
 .editor-context-menu-item.has-submenu:focus-within > .editor-context-submenu {
   display: block;
+}
+
+/* ----------------------------------------------------------
+   Visual Focus Phase 1 — active block decoration (WYSIWYG)
+   ---------------------------------------------------------- */
+
+.ProseMirror .nyoze-visual-focus-active-block {
+  border-radius: 4px;
+  background-color: var(
+    --nyoze-visual-focus-block-highlight-bg,
+    color-mix(in srgb, var(--accent) 12%, transparent)
+  );
+}
+
+.ProseMirror .nyoze-visual-focus-dim-block {
+  opacity: var(--nyoze-visual-focus-dim-opacity, 0.45);
+}
+
+/* Visual Focus Phase 5 — current visual line overlay (WYSIWYG; sibling before .editor-core-host) */
+.editor-surface > .nyoze-visual-focus-current-line-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 3px;
+  box-sizing: border-box;
+  background: var(
+    --nyoze-visual-focus-current-line-bg,
+    rgba(30, 144, 255, 0.28)
+  );
 }
 
 /* ----------------------------------------------------------

@@ -25,6 +25,12 @@ import {
   type GuardResult,
 } from "./sourceModeDraftGuard";
 import { detectEol } from "../../editor-core/io/eolHelper";
+import {
+  createShortcutReferenceEditorTab,
+  deriveShortcutReferenceTabCore,
+} from "../internalDocs/createShortcutReferenceTab";
+import { SHORTCUT_REFERENCE_INTERNAL_DOC_ID } from "../internalDocs/internalDocIds";
+import type { ShortcutBundleKey } from "../internalDocs/resolveShortcutBundleKey";
 
 export type TabManagerDeps = {
   coreRef: RefObject<EditorCoreHandle | null>;
@@ -222,6 +228,7 @@ export function useTabManager(deps: TabManagerDeps) {
     });
     core.loadMarkdown(tab.markdownSnapshot);
     core.clearHistory();
+    core.setReadOnly(Boolean(tab.internalDocId));
     d.closePlainEditModes();
     d.refreshHeadings();
     d.onTabContentLoaded(
@@ -241,7 +248,10 @@ export function useTabManager(deps: TabManagerDeps) {
    * BETA-SP1: Source Mode ガードを snapshotActiveTab() の前に実行する。
    */
   const switchTab = useCallback(
-    async (targetTabId: string): Promise<TabSwitchResult> => {
+    async (targetTabId: string,
+      /** When the tab row is patched in the same tick, pass the resolved row for restore. */
+      overrideTargetTab?: EditorTab,
+    ): Promise<TabSwitchResult> => {
       const d = depsRef.current;
       if (targetTabId === d.activeTabId) return "switched";
       if (switchingRef.current) return "cancelled";
@@ -250,7 +260,10 @@ export function useTabManager(deps: TabManagerDeps) {
         const smResult = await d.guardSourceModeDraft();
         if (smResult === "cancelled") return "cancelled";
         if (!snapshotActiveTab()) return "cancelled";
-        const targetTab = d.tabs.find((t) => t.id === targetTabId);
+        const targetTab =
+          overrideTargetTab && overrideTargetTab.id === targetTabId
+            ? overrideTargetTab
+            : d.tabs.find((t) => t.id === targetTabId);
         if (!targetTab) return "cancelled";
         d.setActiveTabId(targetTabId);
         restoreTab(targetTab);
@@ -288,6 +301,7 @@ export function useTabManager(deps: TabManagerDeps) {
         d.setSuppressNextDirty(true);
         core.loadMarkdown(newTab.markdownSnapshot);
         core.clearHistory();
+        core.setReadOnly(false);
         d.closePlainEditModes();
         d.refreshHeadings();
         d.onTabContentLoaded(
@@ -491,6 +505,7 @@ export function useTabManager(deps: TabManagerDeps) {
         });
         core.loadMarkdown(content);
         core.clearHistory();
+        core.setReadOnly(false);
         d.closePlainEditModes();
         d.refreshHeadings();
         d.onTabContentLoaded(
@@ -579,6 +594,8 @@ export function useTabManager(deps: TabManagerDeps) {
         viewportAnchorTextOffset: null,
         viewportAnchorTextTotal: null,
         sourceModeTopOffset: null,
+        internalDocId: undefined,
+        internalShortcutBundleKey: undefined,
       });
 
       // Load into editor
@@ -595,6 +612,7 @@ export function useTabManager(deps: TabManagerDeps) {
         });
         core.loadMarkdown(content);
         core.clearHistory();
+        core.setReadOnly(false);
         d.closePlainEditModes();
         d.refreshHeadings();
         d.onTabContentLoaded(
@@ -610,6 +628,74 @@ export function useTabManager(deps: TabManagerDeps) {
     [commitParagraphPlainBeforeLeavingCurrentDocument, switchTab],
   );
 
+  const openOrFocusShortcutReferenceTab = useCallback(
+    async (args: {
+      title: string;
+      markdown: string;
+      bundleKey: ShortcutBundleKey;
+    }): Promise<TabAddResult> => {
+      const d = depsRef.current;
+      const existing = d.tabs.find(
+        (t) => t.internalDocId === SHORTCUT_REFERENCE_INTERNAL_DOC_ID,
+      );
+      if (existing) {
+        const needsContentRefresh =
+          existing.internalShortcutBundleKey !== args.bundleKey ||
+          existing.markdownSnapshot !== args.markdown ||
+          existing.title !== args.title;
+
+        if (needsContentRefresh) {
+          const core = deriveShortcutReferenceTabCore(
+            args.title,
+            args.markdown,
+            existing.lineBreakPolicy,
+            args.bundleKey,
+          );
+          const merged: EditorTab = {
+            ...existing,
+            ...core,
+            dirty: false,
+          };
+          d.patchTab(existing.id, {
+            ...core,
+            dirty: false,
+          });
+
+          if (d.activeTabId === existing.id) {
+            restoreTab(merged);
+            return "added";
+          }
+
+          const r = await switchTab(existing.id, merged);
+          return r === "cancelled" ? "cancelled" : "added";
+        }
+
+        if (d.activeTabId === existing.id) {
+          return "added";
+        }
+
+        const r = await switchTab(existing.id);
+        return r === "cancelled" ? "cancelled" : "added";
+      }
+
+      if (d.tabs.length >= MAX_OPEN_TABS) return "tab-limit";
+      const smResult = await d.guardSourceModeDraft();
+      if (smResult === "cancelled") return "cancelled";
+      if (!snapshotActiveTab()) return "cancelled";
+      const newTab = createShortcutReferenceEditorTab(
+        args.title,
+        args.markdown,
+        d.defaultLineBreakPolicy,
+        args.bundleKey,
+      );
+      d.addTab(newTab);
+      d.setActiveTabId(newTab.id);
+      restoreTab(newTab);
+      return "added";
+    },
+    [restoreTab, snapshotActiveTab, switchTab],
+  );
+
   return {
     switchTab,
     addNewTab,
@@ -617,5 +703,6 @@ export function useTabManager(deps: TabManagerDeps) {
     openFileInTab,
     loadIntoActiveTab,
     snapshotActiveTab,
+    openOrFocusShortcutReferenceTab,
   };
 }

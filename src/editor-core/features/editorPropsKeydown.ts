@@ -13,6 +13,26 @@ type LogPush = (event: string, detail: string) => void
 
 type CreateEditorPropsKeyDownHandlerOptions = {
   getIsComposing: (viewComposing: boolean) => boolean
+  /**
+   * bare Arrow が上記の特殊 handler に掴まれず既定処理へ流れる直前に 1 回だけ呼ぶ。
+   * macOS Arrow scroll clamp など、preventDefault しない観測用途。
+   */
+  onBareArrowNavigationKeydown?: (view: EditorView, event: KeyboardEvent) => void
+  noteTypewriterKeyboardNavigationIntent?: (
+    event: KeyboardEvent,
+    view: EditorView,
+  ) => void
+  /** Typewriter のジャンプ抑制（値は typewriterSuppression と同期） */
+  noteTypewriterJumpNavigationSuppress?: (
+    source:
+      | 'home-end-page'
+      | 'page-up-down'
+      | 'outline-search-scroll'
+      | 'pointer-click'
+      | 'fold-toggle'
+      | 'viewport-restore'
+      | 'programmatic-scroll',
+  ) => void
   getLineBreakPolicy: () => LineBreakPolicy
   deleteHorizontalRuleWithKey: (
     state: EditorState,
@@ -32,6 +52,9 @@ type CreateEditorPropsKeyDownHandlerOptions = {
 
 export function createEditorPropsKeyDownHandler({
   getIsComposing,
+  onBareArrowNavigationKeydown,
+  noteTypewriterKeyboardNavigationIntent,
+  noteTypewriterJumpNavigationSuppress,
   getLineBreakPolicy,
   deleteHorizontalRuleWithKey,
   shouldBlockShiftEnterInRegularBody,
@@ -39,12 +62,18 @@ export function createEditorPropsKeyDownHandler({
   pushLog,
 }: CreateEditorPropsKeyDownHandlerOptions): (view: EditorView, event: KeyboardEvent) => boolean {
   return (view: EditorView, event: KeyboardEvent): boolean => {
+    noteTypewriterKeyboardNavigationIntent?.(event, view)
+
     // Home / End 2段階移動（通常エディタ専用）
     if (event.key === 'Home' || event.key === 'End') {
-      return handleHomeEndKey(view, event, {
+      const handled = handleHomeEndKey(view, event, {
         getIsComposing: () => getIsComposing(view.composing),
         pushLog,
       })
+      if (handled) {
+        noteTypewriterJumpNavigationSuppress?.('home-end-page')
+      }
+      return handled
     }
     // Home/End 以外のキーで2段階状態をリセット
     resetHomeEndState()
@@ -59,6 +88,7 @@ export function createEditorPropsKeyDownHandler({
         pushLog,
       })
     ) {
+      noteTypewriterJumpNavigationSuppress?.('page-up-down')
       return true
     }
 
@@ -139,6 +169,19 @@ export function createEditorPropsKeyDownHandler({
         pushLog('lineBreakGuard', 'blocked Shift+Enter in regular paragraph/heading')
         return true
       }
+    }
+
+    if (
+      (event.key === 'ArrowUp' ||
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowLeft' ||
+        event.key === 'ArrowRight') &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      onBareArrowNavigationKeydown?.(view, event)
     }
 
     return false

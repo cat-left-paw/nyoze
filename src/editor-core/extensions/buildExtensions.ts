@@ -15,6 +15,8 @@ import { AutoTcyDecoration } from './autoTcyDecoration'
 import { HeadingFold } from './headingFold'
 import { SearchHighlight } from './searchHighlight'
 import { SpecialInlineBoundarySentinel } from './specialInlineBoundarySentinel'
+import { VisualFocusBlockDecoration } from './visualFocusBlockDecoration'
+import type { VisualFocusBlockDecorationOptions } from './visualFocusBlockDecoration'
 
 export const DEFAULT_EDITOR_CONTENT = `
   <p></p>
@@ -26,6 +28,7 @@ export type BuildExtensionsOptions = {
     getDigitRange: () => { minDigits: number; maxDigits: number }
     getNumbersOnly?: () => boolean
   }
+  visualFocus?: VisualFocusBlockDecorationOptions
 }
 
 export function buildExtensions(options?: BuildExtensionsOptions) {
@@ -110,5 +113,8 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
     options?.autoTcy ? AutoTcyDecoration.configure(options.autoTcy) : AutoTcyDecoration,
     HeadingFold,
     SearchHighlight,
+    ...(options?.visualFocus
+      ? [VisualFocusBlockDecoration.configure(options.visualFocus)]
+      : []),
   ]
 }
