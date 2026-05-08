@@ -156,7 +156,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windows では、GitHub Releases の最新公開版は `0.2.0-beta.1` です。Microsoft Store 版も 2026-05-06 に公開開始しており、Store 上の package version は `1.2.0.0` です。通常の Windows 利用では Store 版を優先し、GitHub zip は Store を使えない環境や検証用の代替配布として残します。
+Windows では、GitHub Releases の最新公開版は `0.2.1-beta.1` です。Microsoft Store 版も 2026-05-06 に公開開始しており、現在公開中の Store package version は `1.2.0.0` です。通常の Windows 利用では Store 版を優先し、GitHub zip は Store を使えない環境や検証用の代替配布として残します。
 
 macOS 版は 2 種類あります。
 

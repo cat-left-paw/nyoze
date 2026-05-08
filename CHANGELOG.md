@@ -3,7 +3,7 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
-2026-05-06 時点では、GitHub Releases の latest は `0.2.0-beta.1` です。Windows 版は Microsoft Store でも公開済みで、Store 上の初回 package version は `1.2.0.0` です。
+2026-05-08 時点では、GitHub Releases の latest は `0.2.1-beta.1` です。Windows 版は Microsoft Store でも公開済みで、現在公開中の Store package version は `1.2.0.0` です。
 
 ## 0.2.1-beta.1
 

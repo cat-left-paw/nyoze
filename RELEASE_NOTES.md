@@ -1,11 +1,11 @@
 # Nyoze Beta Release Notes
 
 Nyoze は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 版です。
-この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行公開版は `0.2.0-beta.1` です。
+この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行公開版は `0.2.1-beta.1` です。
 
-2026-05-06 時点の配布状況:
+2026-05-08 時点の配布状況:
 
-- GitHub Releases の latest は `0.2.0-beta.1` です。
+- GitHub Releases の latest は `0.2.1-beta.1` です。
 - Windows 版は Microsoft Store でも公開済みです。
 - Microsoft Store 上の初回 package version は `1.2.0.0` です。
 - GitHub Releases の Windows zip は、Store を使えない環境向けの代替配布として継続します。
