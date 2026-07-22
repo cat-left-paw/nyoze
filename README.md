@@ -2,6 +2,8 @@
 
 [日本語](./README.md) | [English](./README.en.md)
 
+公式サイト: [Nyoze](https://cat-left-paw.github.io/nyoze/)
+
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
