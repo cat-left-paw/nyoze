@@ -131,6 +131,11 @@ const DOC_DETACHED_PRESET_VALUE = "__doc-detached__";
 const ACTION_ICON_SIZE = 18;
 const ACTION_ICON_STROKE = 1.9;
 
+const THEME_STUDIO_SETTING_STACKED =
+  "setting-item theme-studio-setting-item theme-studio-setting-item--stacked";
+const THEME_STUDIO_SETTING_INLINE_COLOR =
+  "setting-item theme-studio-setting-item theme-studio-setting-item--inline-color";
+
 function ActionIconChipButton({
   label,
   icon,
@@ -765,7 +770,7 @@ export function ThemeStudioPanel({
       <div className="theme-studio-body">
         {tab === "ui" && (
           <div className="theme-studio-pane">
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">
                   {t("themeStudio.preset")}
@@ -913,7 +918,7 @@ export function ThemeStudioPanel({
               })}
             </div>
 
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">
                   {t("themeStudio.baseTheme")}
@@ -985,7 +990,7 @@ export function ThemeStudioPanel({
                 value={uiColors.paneBorder}
                 onChange={(v) => setUiColors((c) => ({ ...c, paneBorder: v }))}
               />
-              <div className="setting-item">
+              <div className={THEME_STUDIO_SETTING_STACKED}>
                 <div className="setting-item-info">
                   <div className="setting-item-name">
                     {t("themeStudio.color.paneBgOptional")}
@@ -1023,7 +1028,7 @@ export function ThemeStudioPanel({
               />
             </div>
 
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">{t("themeStudio.uiFont")}</div>
               </div>
@@ -1060,7 +1065,7 @@ export function ThemeStudioPanel({
               </div>
             </div>
 
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">{t("themeStudio.uiScale")}</div>
               </div>
@@ -1141,7 +1146,7 @@ export function ThemeStudioPanel({
 
         {tab === "doc" && (
           <div className="theme-studio-pane">
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">
                   {t("themeStudio.preset")}
@@ -1325,7 +1330,7 @@ export function ThemeStudioPanel({
               />
             </div>
 
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">
                   {t("themeStudio.documentFont")}
@@ -1375,7 +1380,7 @@ export function ThemeStudioPanel({
               </div>
             </div>
 
-            <div className="setting-item">
+            <div className={THEME_STUDIO_SETTING_STACKED}>
               <div className="setting-item-info">
                 <div className="setting-item-name">
                   {t("themeStudio.headingFont")}
@@ -1429,6 +1434,7 @@ export function ThemeStudioPanel({
             </div>
 
             <DisplayNumberSlider
+              itemClassName={THEME_STUDIO_SETTING_STACKED}
               label={t("displaySettings.fontSize")}
               min={14}
               max={36}
@@ -1441,6 +1447,7 @@ export function ThemeStudioPanel({
             />
 
             <DisplayNumberSlider
+              itemClassName={THEME_STUDIO_SETTING_STACKED}
               label={t("displaySettings.lineHeight")}
               min={1.2}
               max={2.8}
@@ -1618,7 +1625,7 @@ function ColorRow({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="setting-item">
+    <div className={THEME_STUDIO_SETTING_INLINE_COLOR}>
       <div className="setting-item-info">
         <div className="setting-item-name">{label}</div>
       </div>

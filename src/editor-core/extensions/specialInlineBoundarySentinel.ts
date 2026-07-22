@@ -2,6 +2,16 @@ import { Extension } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view'
+import {
+  classifySpecialInlineStoredMarksState,
+  emitSpecialInlineSentinelDecisionDiag,
+  isSpecialInlineBoundaryDiagEnabled,
+  selectionTouchesSpecialInlineNode,
+  type SpecialInlineSentinelDecision,
+  type SpecialInlineSentinelDecisionOrigin,
+  type SpecialInlineSentinelPayloadSource,
+  type SpecialInlineStoredMarksState,
+} from '../features/specialInlineBoundaryDiagnostics'
 
 const SPECIAL_INLINE_NODE_TYPES = new Set(['aozoraRuby', 'aozoraTcy'])
 const SENTINEL_SELECTOR = '[data-nyoze-special-inline-boundary="after"]'
@@ -93,6 +103,68 @@ function shouldSuppressBoundarySentinelPostEscapeEvent(
     (event instanceof InputEvent && event.type === 'input' && !event.isComposing)
 }
 
+// --- IME-B1 診断（挙動非変更・診断 OFF 時はフラグ確認のみ） ---
+
+/** sentinel が canonical（WORD JOINER 単独）か。診断の読み取り専用チェック */
+function isSentinelCanonicalForDiag(sentinel: HTMLElement): boolean {
+  return sentinel.textContent === SPECIAL_INLINE_BOUNDARY_SENTINEL_TEXT
+}
+
+function readSentinelBoundaryPosForDiag(sentinel: HTMLElement): number | null {
+  const pos = Number(sentinel.dataset.nyozeSpecialInlineBoundaryPos)
+  return Number.isInteger(pos) ? pos : null
+}
+
+type SentinelDecisionDiagInput = {
+  origin: SpecialInlineSentinelDecisionOrigin
+  decision: SpecialInlineSentinelDecision
+  event: Event | null
+  directSentinelTarget: boolean
+  alreadyHandled: boolean
+  viewComposingBefore?: boolean
+  viewComposingAfter?: boolean | null
+  storedMarksState?: SpecialInlineStoredMarksState
+  payloadSource?: SpecialInlineSentinelPayloadSource
+  payloadLength?: number
+  pendingLength?: number
+  insertPos?: number | null
+  sentinelCanonicalBeforeReset?: boolean | null
+  sentinelNodeType?: string | null
+}
+
+/**
+ * IME-B1: sentinel の入口(origin)と分岐(decision)を診断 ring へ記録する。
+ * `__NYOZE_DIAG_SPECIAL_INLINE__` が無効なら何もしない。
+ * payload / pending は本文を載せず長さのみ。DOM・selection・PM state は変更しない。
+ */
+function emitSentinelDecisionDiag(
+  view: EditorView,
+  input: SentinelDecisionDiagInput,
+): void {
+  if (!isSpecialInlineBoundaryDiagEnabled()) return
+  const event = input.event
+  emitSpecialInlineSentinelDecisionDiag({
+    origin: input.origin,
+    decision: input.decision,
+    eventType: event?.type ?? 'none',
+    eventIsComposing: event instanceof InputEvent ? event.isComposing : null,
+    eventCancelable: event?.cancelable ?? false,
+    directSentinelTarget: input.directSentinelTarget,
+    alreadyHandled: input.alreadyHandled,
+    viewComposingBefore: input.viewComposingBefore ?? view.composing,
+    viewComposingAfter: input.viewComposingAfter ?? null,
+    storedMarksState:
+      input.storedMarksState ??
+      classifySpecialInlineStoredMarksState(view.state.storedMarks),
+    payloadSource: input.payloadSource ?? 'none',
+    payloadLength: input.payloadLength ?? 0,
+    pendingLength: input.pendingLength ?? 0,
+    insertPos: input.insertPos ?? null,
+    sentinelCanonicalBeforeReset: input.sentinelCanonicalBeforeReset ?? null,
+    sentinelNodeType: input.sentinelNodeType ?? null,
+  })
+}
+
 function sentinelHasRecoverableBoundaryBuffer(sentinel: HTMLElement): boolean {
   const key = sentinelCompositionPendingKey(sentinel)
   const pending = boundarySentinelCompositionPending.get(key)
@@ -119,6 +191,28 @@ function handleEscapeSpecialInlineBoundaryRecovery(
     if (sentinelHasRecoverableBoundaryBuffer(el)) stuck.push(el)
   }
   if (stuck.length === 0) return false
+
+  if (isSpecialInlineBoundaryDiagEnabled()) {
+    for (const sentinel of stuck) {
+      const key = sentinelCompositionPendingKey(sentinel)
+      const pendingLength = boundarySentinelCompositionPending.get(key)?.length ?? 0
+      const domPayloadLength =
+        extractSpecialInlineBoundarySentinelPayload(sentinel).length
+      emitSentinelDecisionDiag(view, {
+        origin: 'escape-keydown',
+        decision: 'escape-recovery',
+        event,
+        directSentinelTarget: Boolean(closestBoundarySentinel(event.target)),
+        alreadyHandled: false,
+        payloadSource: pendingLength > 0 ? 'pending' : domPayloadLength > 0 ? 'dom' : 'none',
+        payloadLength: domPayloadLength,
+        pendingLength,
+        insertPos: readSentinelBoundaryPosForDiag(sentinel),
+        sentinelCanonicalBeforeReset: isSentinelCanonicalForDiag(sentinel),
+        sentinelNodeType: sentinel.dataset.nyozeSpecialInlineNode ?? null,
+      })
+    }
+  }
 
   for (const sentinel of stuck) {
     const key = sentinelCompositionPendingKey(sentinel)
@@ -186,15 +280,45 @@ function resetBoundarySentinel(sentinel: HTMLElement): void {
   sentinel.textContent = SPECIAL_INLINE_BOUNDARY_SENTINEL_TEXT
 }
 
-function resolveCompositionEndPayload(event: Event, sentinel: HTMLElement): string {
-  if (event instanceof CompositionEvent && typeof event.data === 'string') {
-    const fromEvent = event.data
-    if (fromEvent.length > 0) return fromEvent
+export type SpecialInlineBoundaryCompositionEndPayloadPick = {
+  payload: string
+  source: 'compositionend-data' | 'pending' | 'dom' | 'none'
+}
+
+/**
+ * compositionend payload の優先順位（event.data → pending → DOM）を、
+ * IME-B1 診断用の payload source 付きで返す純関数。優先順位は従来と同一。
+ */
+export function pickSpecialInlineBoundaryCompositionEndPayload(
+  eventData: string | null,
+  pending: string | null,
+  domPayload: string,
+): SpecialInlineBoundaryCompositionEndPayloadPick {
+  if (eventData != null && eventData.length > 0) {
+    return { payload: eventData, source: 'compositionend-data' }
   }
+  if (pending != null && pending.length > 0) {
+    return { payload: pending, source: 'pending' }
+  }
+  if (domPayload.length > 0) return { payload: domPayload, source: 'dom' }
+  return { payload: '', source: 'none' }
+}
+
+function resolveCompositionEndPayloadPick(
+  event: Event,
+  sentinel: HTMLElement,
+): SpecialInlineBoundaryCompositionEndPayloadPick {
+  const eventData =
+    event instanceof CompositionEvent && typeof event.data === 'string'
+      ? event.data
+      : null
   const key = sentinelCompositionPendingKey(sentinel)
-  const pending = boundarySentinelCompositionPending.get(key)
-  if (pending != null && pending.length > 0) return pending
-  return extractSpecialInlineBoundarySentinelPayload(sentinel)
+  const pending = boundarySentinelCompositionPending.get(key) ?? null
+  return pickSpecialInlineBoundaryCompositionEndPayload(
+    eventData,
+    pending,
+    extractSpecialInlineBoundarySentinelPayload(sentinel),
+  )
 }
 
 function resolveBoundaryInsertPosFromCandidate(
@@ -293,13 +417,40 @@ export function mirrorSpecialInlineBoundaryCompositionPayload(
 ): boolean {
   if (!SPECIAL_INLINE_NODE_TYPES.has(nodeTypeName)) return false
   const sentinel = findBoundarySentinelAtPos(view, nodeTypeName, insertPos)
-  if (!sentinel) return false
+  if (!sentinel) {
+    emitSentinelDecisionDiag(view, {
+      origin: 'ruby-bridge-mirror',
+      decision: 'no-sentinel',
+      event: null,
+      directSentinelTarget: false,
+      alreadyHandled: false,
+      insertPos,
+      sentinelNodeType: nodeTypeName,
+    })
+    return false
+  }
 
+  const sentinelCanonicalBeforeReset = isSpecialInlineBoundaryDiagEnabled()
+    ? isSentinelCanonicalForDiag(sentinel)
+    : null
   const key = sentinelCompositionPendingKey(sentinel)
   clearBoundarySentinelPostEscapeSuppression(sentinel, key)
   boundarySentinelGlobalPostEscapeSuppressUntil = 0
   resetBoundarySentinel(sentinel)
   boundarySentinelCompositionPending.set(key, text)
+  emitSentinelDecisionDiag(view, {
+    origin: 'ruby-bridge-mirror',
+    decision: 'mirror',
+    event: null,
+    directSentinelTarget: false,
+    alreadyHandled: false,
+    payloadSource: text.length > 0 ? 'input-data' : 'none',
+    payloadLength: text.length,
+    pendingLength: text.length,
+    insertPos,
+    sentinelCanonicalBeforeReset,
+    sentinelNodeType: nodeTypeName,
+  })
   return true
 }
 
@@ -326,12 +477,24 @@ function collectBoundarySentinelsToInspect(
   return [...picked]
 }
 
+type SentinelTransferDiagContext = {
+  origin: SpecialInlineSentinelDecisionOrigin
+  alreadyHandled: boolean
+}
+
 function transferBoundarySentinelFromEvent(
   view: EditorView,
   target: EventTarget | null,
   event: Event,
+  diagCtx: SentinelTransferDiagContext,
 ): boolean {
   const useCompositionEndPayload = event.type === 'compositionend'
+  const diagEnabled = isSpecialInlineBoundaryDiagEnabled()
+  const viewComposingBefore = view.composing
+  const directSentinelTarget = diagEnabled
+    ? Boolean(closestBoundarySentinel(target))
+    : false
+  let emittedSentinelDecision = false
 
   for (const sentinel of collectBoundarySentinelsToInspect(view, target, event)) {
     if (!isBoundarySentinel(sentinel)) continue
@@ -339,7 +502,24 @@ function transferBoundarySentinelFromEvent(
     if (!SPECIAL_INLINE_NODE_TYPES.has(nodeTypeName)) continue
 
     const pendingKey = sentinelCompositionPendingKey(sentinel)
+    const diagPendingLength = diagEnabled
+      ? boundarySentinelCompositionPending.get(pendingKey)?.length ?? 0
+      : 0
     if (shouldSuppressBoundarySentinelPostEscapeEvent(sentinel, pendingKey, event)) {
+      if (diagEnabled) {
+        emittedSentinelDecision = true
+        emitSentinelDecisionDiag(view, {
+          origin: diagCtx.origin,
+          decision: 'suppressed',
+          event,
+          directSentinelTarget,
+          alreadyHandled: diagCtx.alreadyHandled,
+          viewComposingBefore,
+          pendingLength: diagPendingLength,
+          sentinelCanonicalBeforeReset: isSentinelCanonicalForDiag(sentinel),
+          sentinelNodeType: nodeTypeName,
+        })
+      }
       boundarySentinelCompositionPending.delete(pendingKey)
       if (event instanceof InputEvent && event.type === 'input' && !event.isComposing) {
         clearBoundarySentinelPostEscapeSuppression(sentinel, pendingKey)
@@ -349,11 +529,33 @@ function transferBoundarySentinelFromEvent(
       return true
     }
 
-    const payload = useCompositionEndPayload
-      ? resolveCompositionEndPayload(event, sentinel)
-      : extractSpecialInlineBoundarySentinelPayload(sentinel)
+    let payloadPick: SpecialInlineBoundaryCompositionEndPayloadPick
+    if (useCompositionEndPayload) {
+      payloadPick = resolveCompositionEndPayloadPick(event, sentinel)
+    } else {
+      const domPayload = extractSpecialInlineBoundarySentinelPayload(sentinel)
+      payloadPick =
+        domPayload.length > 0
+          ? { payload: domPayload, source: 'dom' }
+          : { payload: '', source: 'none' }
+    }
+    const payload = payloadPick.payload
 
     if (!payload) {
+      if (diagEnabled) {
+        emittedSentinelDecision = true
+        emitSentinelDecisionDiag(view, {
+          origin: diagCtx.origin,
+          decision: 'no-payload',
+          event,
+          directSentinelTarget,
+          alreadyHandled: diagCtx.alreadyHandled,
+          viewComposingBefore,
+          pendingLength: diagPendingLength,
+          sentinelCanonicalBeforeReset: isSentinelCanonicalForDiag(sentinel),
+          sentinelNodeType: nodeTypeName,
+        })
+      }
       if (useCompositionEndPayload) boundarySentinelCompositionPending.delete(pendingKey)
       if (sentinel.textContent !== SPECIAL_INLINE_BOUNDARY_SENTINEL_TEXT) {
         resetBoundarySentinel(sentinel)
@@ -363,10 +565,32 @@ function transferBoundarySentinelFromEvent(
 
     const insertPos = resolveBoundaryInsertPos(view, sentinel)
     if (insertPos === null) {
+      if (diagEnabled) {
+        emittedSentinelDecision = true
+        emitSentinelDecisionDiag(view, {
+          origin: diagCtx.origin,
+          decision: 'no-insert-pos',
+          event,
+          directSentinelTarget,
+          alreadyHandled: diagCtx.alreadyHandled,
+          viewComposingBefore,
+          payloadSource: payloadPick.source,
+          payloadLength: payload.length,
+          pendingLength: diagPendingLength,
+          sentinelCanonicalBeforeReset: isSentinelCanonicalForDiag(sentinel),
+          sentinelNodeType: nodeTypeName,
+        })
+      }
       if (useCompositionEndPayload) boundarySentinelCompositionPending.delete(pendingKey)
       continue
     }
 
+    const diagStoredMarksState = diagEnabled
+      ? classifySpecialInlineStoredMarksState(view.state.storedMarks)
+      : null
+    const sentinelCanonicalBeforeReset = diagEnabled
+      ? isSentinelCanonicalForDiag(sentinel)
+      : null
     const textNode = view.state.schema.text(payload)
     resetBoundarySentinel(sentinel)
 
@@ -377,7 +601,41 @@ function transferBoundarySentinelFromEvent(
       .scrollIntoView()
     view.dispatch(tr)
     boundarySentinelCompositionPending.delete(pendingKey)
+    if (diagEnabled) {
+      emitSentinelDecisionDiag(view, {
+        origin: diagCtx.origin,
+        decision: 'transfer',
+        event,
+        directSentinelTarget,
+        alreadyHandled: diagCtx.alreadyHandled,
+        viewComposingBefore,
+        viewComposingAfter: view.composing,
+        storedMarksState: diagStoredMarksState ?? undefined,
+        payloadSource: payloadPick.source,
+        payloadLength: payload.length,
+        pendingLength: diagPendingLength,
+        insertPos,
+        sentinelCanonicalBeforeReset,
+        sentinelNodeType: nodeTypeName,
+      })
+    }
     return true
+  }
+
+  if (
+    diagEnabled &&
+    !emittedSentinelDecision &&
+    (directSentinelTarget ||
+      (useCompositionEndPayload && selectionTouchesSpecialInlineNode(view.state)))
+  ) {
+    emitSentinelDecisionDiag(view, {
+      origin: diagCtx.origin,
+      decision: 'ignored',
+      event,
+      directSentinelTarget,
+      alreadyHandled: diagCtx.alreadyHandled,
+      viewComposingBefore,
+    })
   }
 
   return false
@@ -388,7 +646,10 @@ export function transferSpecialInlineBoundarySentinelText(
   target: EventTarget | null,
 ): boolean {
   const synthetic = new Event('synthetic')
-  return transferBoundarySentinelFromEvent(view, target, synthetic)
+  return transferBoundarySentinelFromEvent(view, target, synthetic, {
+    origin: 'synthetic-transfer',
+    alreadyHandled: false,
+  })
 }
 
 export function transferSpecialInlineBoundarySentinelTextAtPos(
@@ -399,7 +660,18 @@ export function transferSpecialInlineBoundarySentinelTextAtPos(
 ): boolean {
   if (!SPECIAL_INLINE_NODE_TYPES.has(nodeTypeName)) return false
   const sentinel = findBoundarySentinelAtPos(view, nodeTypeName, insertPos)
-  if (!sentinel) return false
+  if (!sentinel) {
+    emitSentinelDecisionDiag(view, {
+      origin: 'ruby-bridge-transfer',
+      decision: 'no-sentinel',
+      event: null,
+      directSentinelTarget: false,
+      alreadyHandled: false,
+      insertPos,
+      sentinelNodeType: nodeTypeName,
+    })
+    return false
+  }
 
   if (typeof compositionEndPayload === 'string' && compositionEndPayload.length > 0) {
     boundarySentinelCompositionPending.set(
@@ -415,7 +687,10 @@ export function transferSpecialInlineBoundarySentinelTextAtPos(
           data: typeof compositionEndPayload === 'string' ? compositionEndPayload : '',
         })
       : new Event('compositionend')
-  return transferBoundarySentinelFromEvent(view, sentinel, syntheticEvent)
+  return transferBoundarySentinelFromEvent(view, sentinel, syntheticEvent, {
+    origin: 'ruby-bridge-transfer',
+    alreadyHandled: false,
+  })
 }
 
 export function buildSpecialInlineBoundarySentinelDecorations(
@@ -454,8 +729,24 @@ export function createSpecialInlineBoundarySentinelPlugin(): Plugin {
   const handledEvents = new WeakSet<Event>()
   let transferring = false
 
-  const transferFromEvent = (view: EditorView, event: Event): boolean => {
-    if (transferring) return false
+  const transferFromEvent = (
+    view: EditorView,
+    event: Event,
+    origin: SpecialInlineSentinelDecisionOrigin,
+  ): boolean => {
+    const diagEnabled = isSpecialInlineBoundaryDiagEnabled()
+    if (transferring) {
+      if (diagEnabled) {
+        emitSentinelDecisionDiag(view, {
+          origin,
+          decision: 'reentrant',
+          event,
+          directSentinelTarget: Boolean(closestBoundarySentinel(event.target)),
+          alreadyHandled: handledEvents.has(event),
+        })
+      }
+      return false
+    }
 
     // OS IME: composing 中の payload（ASCII / 非 ASCII を問わず）は PM doc に入れない。
     // compositionend の確定文字列だけを一度移送する。
@@ -464,6 +755,10 @@ export function createSpecialInlineBoundarySentinelPlugin(): Plugin {
     if (event instanceof InputEvent && event.type === 'input' && event.isComposing) {
       const sentinel = closestBoundarySentinel(event.target)
       if (sentinel) {
+        const wasHandledForDiag = diagEnabled ? handledEvents.has(event) : false
+        const sentinelCanonicalForDiag = diagEnabled
+          ? isSentinelCanonicalForDiag(sentinel)
+          : null
         clearBoundarySentinelPostEscapeSuppression(
           sentinel,
           sentinelCompositionPendingKey(sentinel),
@@ -475,6 +770,22 @@ export function createSpecialInlineBoundarySentinelPlugin(): Plugin {
         if (merged.length > 0) {
           boundarySentinelCompositionPending.set(sentinelCompositionPendingKey(sentinel), merged)
         }
+        if (diagEnabled) {
+          emitSentinelDecisionDiag(view, {
+            origin,
+            decision: 'mirror',
+            event,
+            directSentinelTarget: true,
+            alreadyHandled: wasHandledForDiag,
+            payloadSource:
+              fromEvent.length > 0 ? 'input-data' : merged.length > 0 ? 'dom' : 'none',
+            payloadLength: merged.length,
+            pendingLength: merged.length,
+            insertPos: readSentinelBoundaryPosForDiag(sentinel),
+            sentinelCanonicalBeforeReset: sentinelCanonicalForDiag,
+            sentinelNodeType: sentinel.dataset.nyozeSpecialInlineNode ?? null,
+          })
+        }
         if (!handledEvents.has(event)) handledEvents.add(event)
         return true
       }
@@ -482,11 +793,32 @@ export function createSpecialInlineBoundarySentinelPlugin(): Plugin {
       return false
     }
 
-    if (handledEvents.has(event)) return false
+    if (handledEvents.has(event)) {
+      if (diagEnabled) {
+        const directSentinelTarget = Boolean(closestBoundarySentinel(event.target))
+        if (
+          directSentinelTarget ||
+          (event.type === 'compositionend' &&
+            selectionTouchesSpecialInlineNode(view.state))
+        ) {
+          emitSentinelDecisionDiag(view, {
+            origin,
+            decision: 'already-handled',
+            event,
+            directSentinelTarget,
+            alreadyHandled: true,
+          })
+        }
+      }
+      return false
+    }
 
     transferring = true
     try {
-      const transferred = transferBoundarySentinelFromEvent(view, event.target, event)
+      const transferred = transferBoundarySentinelFromEvent(view, event.target, event, {
+        origin,
+        alreadyHandled: false,
+      })
       handledEvents.add(event)
       return transferred
     } finally {
@@ -509,10 +841,10 @@ export function createSpecialInlineBoundarySentinelPlugin(): Plugin {
     view(view) {
       pluginView = view
       const handleInput = (event: Event) => {
-        transferFromEvent(view, event)
+        transferFromEvent(view, event, 'native-capture-input')
       }
       const handleCompositionEnd = (event: Event) => {
-        transferFromEvent(view, event)
+        transferFromEvent(view, event, 'native-capture-compositionend')
       }
       const handleKeyDown = (event: KeyboardEvent) => {
         handleEscapeSpecialInlineBoundaryRecovery(view, event)
@@ -532,8 +864,12 @@ export function createSpecialInlineBoundarySentinelPlugin(): Plugin {
     },
     props: {
       handleDOMEvents: {
-        compositionend: transferFromEvent,
-        input: transferFromEvent,
+        compositionend(view, event) {
+          return transferFromEvent(view, event, 'pm-handle-dom-compositionend')
+        },
+        input(view, event) {
+          return transferFromEvent(view, event, 'pm-handle-dom-input')
+        },
         keydown(view, event) {
           if (!(event instanceof KeyboardEvent)) return false
           return handleEscapeSpecialInlineBoundaryRecovery(view, event)

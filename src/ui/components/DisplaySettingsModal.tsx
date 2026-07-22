@@ -4,7 +4,7 @@ import {
   IconAlignBoxLeftMiddle,
   IconArrowsMoveHorizontal,
   IconArrowsVertical,
-  IconBrandGithub,
+  IconColumns,
   IconChevronRight,
   IconDeviceImacHeart,
   IconDiamond,
@@ -16,6 +16,7 @@ import {
   IconPencilStar,
   IconShadowOff,
   IconThumbUp,
+  IconCursorText,
   IconTool,
   IconTypography,
 } from "@tabler/icons-react";
@@ -30,6 +31,7 @@ import type {
   DocumentFontPreset,
   DocumentHeadingFont,
   DocumentTheme,
+  DocumentTypeWritingModeDefaults,
   HeadingAlign,
   ParagraphPlainBehavior,
   Theme,
@@ -48,6 +50,9 @@ import {
   MAX_TOOLBAR_SCALE,
   MIN_TOOLBAR_ICON_STROKE,
   MIN_TOOLBAR_SCALE,
+  PSEUDO_CARET_THICKNESS_MAX,
+  PSEUDO_CARET_THICKNESS_MIN,
+  PSEUDO_CARET_THICKNESS_STEP,
   THEME_LABELS,
   TYPEWRITER_FOLLOW_BAND_RATIO_MAX,
   TYPEWRITER_FOLLOW_BAND_RATIO_MIN,
@@ -89,6 +94,11 @@ type DisplaySettingsModalProps = {
   open: boolean;
   displaySettings: DisplaySettings;
   writingMode: WritingMode;
+  /** Document Type 別の既定表示方向（frontmatter `writingMode` 無しの文書にだけ効く）。 */
+  documentTypeWritingModeDefaults: DocumentTypeWritingModeDefaults;
+  onChangeDocumentTypeWritingModeDefault: (
+    patch: Partial<DocumentTypeWritingModeDefaults>,
+  ) => void;
   uiLanguageMode: UiLanguageMode;
   /** process.platform と同じ値（Electron） */
   platform: string;
@@ -118,6 +128,9 @@ type DisplaySettingsModalProps = {
   frontmatterShowAuthors: boolean;
   frontmatterShowTranslators: boolean;
   frontmatterShowRoleLabels: boolean;
+  frontmatterShowInProjectFiles: boolean;
+  frontmatterProjectShowTitle: boolean;
+  frontmatterProjectShowAuthors: boolean;
   onClose: () => void;
   onReset: () => void;
   onSetDisplayNumber: (
@@ -159,12 +172,22 @@ type DisplaySettingsModalProps = {
   onFrontmatterShowAuthorsChange: (value: boolean) => void;
   onFrontmatterShowTranslatorsChange: (value: boolean) => void;
   onFrontmatterShowRoleLabelsChange: (value: boolean) => void;
+  onFrontmatterShowInProjectFilesChange: (value: boolean) => void;
+  onFrontmatterProjectShowTitleChange: (value: boolean) => void;
+  onFrontmatterProjectShowAuthorsChange: (value: boolean) => void;
   caretColorMode: CaretColorMode;
   caretColorCustom: string | null;
   useEditorArrowPointer: boolean;
   onCaretColorModeChange: (mode: CaretColorMode) => void;
   onCaretColorCustomChange: (color: string | null) => void;
   onUseEditorArrowPointerChange: (value: boolean) => void;
+  /** Task 2-4: pseudo caret ON/OFF + short-axis thickness (px). */
+  pseudoCaretEnabled: boolean;
+  onPseudoCaretEnabledChange: (value: boolean) => void;
+  pseudoCaretThickness: number;
+  onPseudoCaretThicknessChange: (value: number) => void;
+  pseudoCaretBlinkEnabled: boolean;
+  onPseudoCaretBlinkEnabledChange: (value: boolean) => void;
   paragraphPlainBehavior: ParagraphPlainBehavior;
   onParagraphPlainBehaviorChange: (value: ParagraphPlainBehavior) => void;
   typewriterModeEnabled: boolean;
@@ -191,6 +214,8 @@ type DisplaySettingsModalProps = {
   onVisualFocusCurrentLineHighlightOpacityChange: (value: number) => void;
   /** Phase5-H Slice1: open the Theme Studio modal */
   onOpenThemeStudio: () => void;
+  /** 表示設定を閉じたうえで書庫管理 modal を開く（App 側 handler） */
+  onOpenLibraryManager: () => void;
   onSendBugReport: () => void;
   onSendFeedback: () => void;
   onOpenRepository: () => void;
@@ -242,6 +267,8 @@ export function DisplaySettingsModal({
   open,
   displaySettings,
   writingMode,
+  documentTypeWritingModeDefaults,
+  onChangeDocumentTypeWritingModeDefault,
   uiLanguageMode,
   platform,
   theme,
@@ -270,6 +297,9 @@ export function DisplaySettingsModal({
   frontmatterShowAuthors,
   frontmatterShowTranslators,
   frontmatterShowRoleLabels,
+  frontmatterShowInProjectFiles,
+  frontmatterProjectShowTitle,
+  frontmatterProjectShowAuthors,
   onClose,
   onReset,
   onSetDisplayNumber,
@@ -303,12 +333,21 @@ export function DisplaySettingsModal({
   onFrontmatterShowAuthorsChange,
   onFrontmatterShowTranslatorsChange,
   onFrontmatterShowRoleLabelsChange,
+  onFrontmatterShowInProjectFilesChange,
+  onFrontmatterProjectShowTitleChange,
+  onFrontmatterProjectShowAuthorsChange,
   caretColorMode,
   caretColorCustom,
   useEditorArrowPointer,
   onCaretColorModeChange,
   onCaretColorCustomChange,
   onUseEditorArrowPointerChange,
+  pseudoCaretEnabled,
+  onPseudoCaretEnabledChange,
+  pseudoCaretThickness,
+  onPseudoCaretThicknessChange,
+  pseudoCaretBlinkEnabled,
+  onPseudoCaretBlinkEnabledChange,
   paragraphPlainBehavior,
   onParagraphPlainBehaviorChange,
   typewriterModeEnabled,
@@ -334,6 +373,7 @@ export function DisplaySettingsModal({
   visualFocusCurrentLineHighlightOpacity,
   onVisualFocusCurrentLineHighlightOpacityChange,
   onOpenThemeStudio,
+  onOpenLibraryManager,
   onSendBugReport,
   onSendFeedback,
   onOpenRepository,
@@ -730,6 +770,132 @@ export function DisplaySettingsModal({
                     onSetDisplayNumber("lineHeight", value, 1.2, 2.8)
                   }
                 />
+              </div>
+            )}
+          </div>
+
+          {/* ── Section: 文書タイプ別の既定表示方向 ── */}
+          <div className="settings-section">
+            <SectionHeading
+              title={t("displaySettings.section.writingDirection")}
+              icon={IconColumns}
+              isOpen={sectionOpenState.writingDirection}
+              onToggle={() => toggleSection("writingDirection")}
+            />
+            {sectionOpenState.writingDirection && (
+              <div className="settings-section-body">
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.section.writingDirection")}
+                    </div>
+                    <div className="setting-item-desc">
+                      {t("displaySettings.section.writingDirection", "helper")}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.writingDirection.novel")}
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <select
+                      className="setting-select"
+                      value={documentTypeWritingModeDefaults.novel}
+                      onChange={(e) =>
+                        onChangeDocumentTypeWritingModeDefault({
+                          novel: e.target.value as WritingMode,
+                        })
+                      }
+                    >
+                      <option value="vertical-rl">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.writingDirection.option.vertical"),
+                          documentTypeWritingModeDefaults.novel === "vertical-rl",
+                          platform,
+                        )}
+                      </option>
+                      <option value="horizontal-tb">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.writingDirection.option.horizontal"),
+                          documentTypeWritingModeDefaults.novel === "horizontal-tb",
+                          platform,
+                        )}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.writingDirection.article")}
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <select
+                      className="setting-select"
+                      value={documentTypeWritingModeDefaults.article}
+                      onChange={(e) =>
+                        onChangeDocumentTypeWritingModeDefault({
+                          article: e.target.value as WritingMode,
+                        })
+                      }
+                    >
+                      <option value="horizontal-tb">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.writingDirection.option.horizontal"),
+                          documentTypeWritingModeDefaults.article === "horizontal-tb",
+                          platform,
+                        )}
+                      </option>
+                      <option value="vertical-rl">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.writingDirection.option.vertical"),
+                          documentTypeWritingModeDefaults.article === "vertical-rl",
+                          platform,
+                        )}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.writingDirection.unset")}
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <select
+                      className="setting-select"
+                      value={documentTypeWritingModeDefaults.unset}
+                      onChange={(e) =>
+                        onChangeDocumentTypeWritingModeDefault({
+                          unset: e.target.value as WritingMode,
+                        })
+                      }
+                    >
+                      <option value="vertical-rl">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.writingDirection.option.vertical"),
+                          documentTypeWritingModeDefaults.unset === "vertical-rl",
+                          platform,
+                        )}
+                      </option>
+                      <option value="horizontal-tb">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.writingDirection.option.horizontal"),
+                          documentTypeWritingModeDefaults.unset === "horizontal-tb",
+                          platform,
+                        )}
+                      </option>
+                    </select>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -1347,7 +1513,7 @@ export function DisplaySettingsModal({
             )}
           </div>
 
-          {/* ── Section 7: フロントマター表示 ── */}
+          {/* ── Section 7: タイトル・著者表示 ── */}
           <div className="settings-section">
             <SectionHeading
               title={t("displaySettings.section.frontmatter")}
@@ -1357,49 +1523,113 @@ export function DisplaySettingsModal({
             />
             {sectionOpenState.frontmatter && (
               <div className="settings-section-body">
-                <label className="settings-toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={frontmatterVisible}
-                    onChange={(e) =>
-                      onFrontmatterVisibleChange(e.target.checked)
-                    }
-                  />
-                  <span>{t("displaySettings.frontmatterVisible")}</span>
-                </label>
-                <label className="settings-toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={frontmatterShowAuthors}
-                    disabled={!frontmatterVisible}
-                    onChange={(e) =>
-                      onFrontmatterShowAuthorsChange(e.target.checked)
-                    }
-                  />
-                  <span>{t("displaySettings.frontmatterAuthors")}</span>
-                </label>
-                <label className="settings-toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={frontmatterShowTranslators}
-                    disabled={!frontmatterVisible}
-                    onChange={(e) =>
-                      onFrontmatterShowTranslatorsChange(e.target.checked)
-                    }
-                  />
-                  <span>{t("displaySettings.frontmatterTranslators")}</span>
-                </label>
-                <label className="settings-toggle-row">
-                  <input
-                    type="checkbox"
-                    checked={frontmatterShowRoleLabels}
-                    disabled={!frontmatterVisible}
-                    onChange={(e) =>
-                      onFrontmatterShowRoleLabelsChange(e.target.checked)
-                    }
-                  />
-                  <span>{t("displaySettings.frontmatterRoleLabels")}</span>
-                </label>
+                <div className="settings-subsection settings-subsection-frontmatter-standalone">
+                  <div className="setting-item setting-item-subheading">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.frontmatter.standalone.heading")}
+                      </div>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.frontmatter.standalone.heading", "helper")}
+                      </div>
+                    </div>
+                  </div>
+                  <label className="settings-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterVisible}
+                      onChange={(e) =>
+                        onFrontmatterVisibleChange(e.target.checked)
+                      }
+                    />
+                    <span>{t("displaySettings.frontmatterVisible")}</span>
+                  </label>
+                  <label className="settings-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterShowAuthors}
+                      disabled={!frontmatterVisible}
+                      onChange={(e) =>
+                        onFrontmatterShowAuthorsChange(e.target.checked)
+                      }
+                    />
+                    <span>{t("displaySettings.frontmatterAuthors")}</span>
+                  </label>
+                  <label className="settings-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterShowTranslators}
+                      disabled={!frontmatterVisible}
+                      onChange={(e) =>
+                        onFrontmatterShowTranslatorsChange(e.target.checked)
+                      }
+                    />
+                    <span>{t("displaySettings.frontmatterTranslators")}</span>
+                  </label>
+                  <label className="settings-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterShowRoleLabels}
+                      disabled={!frontmatterVisible}
+                      onChange={(e) =>
+                        onFrontmatterShowRoleLabelsChange(e.target.checked)
+                      }
+                    />
+                    <span>{t("displaySettings.frontmatterRoleLabels")}</span>
+                  </label>
+                </div>
+
+                <div className="settings-subsection settings-subsection-frontmatter-project">
+                  <div className="setting-item setting-item-subheading">
+                    <div className="setting-item-info">
+                      <div className="setting-item-name">
+                        {t("displaySettings.frontmatter.project.heading")}
+                      </div>
+                      <div className="setting-item-desc">
+                        {t("displaySettings.frontmatter.project.heading", "helper")}
+                      </div>
+                    </div>
+                  </div>
+                  <label className="settings-toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterShowInProjectFiles}
+                      disabled={!frontmatterVisible}
+                      onChange={(e) =>
+                        onFrontmatterShowInProjectFilesChange(e.target.checked)
+                      }
+                    />
+                    <span>
+                      {t("displaySettings.frontmatterShowInProjectFiles")}
+                    </span>
+                  </label>
+                  <label className="settings-toggle-row settings-toggle-row-nested">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterProjectShowTitle}
+                      disabled={!frontmatterVisible || !frontmatterShowInProjectFiles}
+                      onChange={(e) =>
+                        onFrontmatterProjectShowTitleChange(e.target.checked)
+                      }
+                    />
+                    <span>
+                      {t("displaySettings.frontmatterProjectShowTitle")}
+                    </span>
+                  </label>
+                  <label className="settings-toggle-row settings-toggle-row-nested">
+                    <input
+                      type="checkbox"
+                      checked={frontmatterProjectShowAuthors}
+                      disabled={!frontmatterVisible || !frontmatterShowInProjectFiles}
+                      onChange={(e) =>
+                        onFrontmatterProjectShowAuthorsChange(e.target.checked)
+                      }
+                    />
+                    <span>
+                      {t("displaySettings.frontmatterProjectShowAuthors")}
+                    </span>
+                  </label>
+                </div>
               </div>
             )}
           </div>
@@ -1580,133 +1810,7 @@ export function DisplaySettingsModal({
                     </button>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
 
-          {/* ── Section 9: ツールバー ── */}
-          <div className="settings-section">
-            <SectionHeading
-              title={t("displaySettings.section.toolbar")}
-              icon={IconTool}
-              isOpen={sectionOpenState.toolbar}
-              onToggle={() => toggleSection("toolbar")}
-            />
-            {sectionOpenState.toolbar && (
-              <div className="settings-section-body">
-                <div className="setting-item">
-                  <div className="setting-item-info">
-                    <div className="setting-item-name">
-                      {t("displaySettings.toolbarIconColor")}
-                    </div>
-                  </div>
-                  <div className="setting-item-control">
-                    <div className="color-control">
-                      <input
-                        type="color"
-                        value={effectiveToolbarIconColor}
-                        onChange={(e) =>
-                          onToolbarIconColorChange(e.target.value)
-                        }
-                      />
-                      <span className="color-hex">
-                        {effectiveToolbarIconColor}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="font-register-btn"
-                      onClick={() => onToolbarIconColorChange(null)}
-                    >
-                      {t("displaySettings.resetToNormalColor")}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="setting-item">
-                  <div className="setting-item-info">
-                    <div className="setting-item-name">
-                      {t("displaySettings.toolbarIconStroke")}
-                    </div>
-                  </div>
-                  <div className="setting-item-control">
-                    <div className="slider-control">
-                      <input
-                        type="range"
-                        min={MIN_TOOLBAR_ICON_STROKE}
-                        max={MAX_TOOLBAR_ICON_STROKE}
-                        step={0.05}
-                        value={toolbarIconStroke}
-                        onChange={(e) =>
-                          onToolbarIconStrokeChange(Number(e.target.value))
-                        }
-                      />
-                      <span className="slider-value">
-                        {toolbarIconStroke.toFixed(2)}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="font-register-btn"
-                      onClick={() =>
-                        onToolbarIconStrokeChange(DEFAULT_TOOLBAR_ICON_STROKE)
-                      }
-                    >
-                      {t("common.resetToDefault")}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="setting-item">
-                  <div className="setting-item-info">
-                    <div className="setting-item-name">
-                      {t("displaySettings.toolbarScale")}
-                    </div>
-                    <div className="setting-item-desc">
-                      トップバー内に収まる範囲で調整します
-                    </div>
-                  </div>
-                  <div className="setting-item-control">
-                    <div className="slider-control">
-                      <input
-                        type="range"
-                        min={MIN_TOOLBAR_SCALE}
-                        max={MAX_TOOLBAR_SCALE}
-                        step={0.05}
-                        value={toolbarScale}
-                        onChange={(e) =>
-                          onToolbarScaleChange(Number(e.target.value))
-                        }
-                      />
-                      <span className="slider-value">
-                        {toolbarScale.toFixed(2)}x
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className="font-register-btn"
-                      onClick={() =>
-                        onToolbarScaleChange(DEFAULT_TOOLBAR_SCALE)
-                      }
-                    >
-                      {t("common.resetToDefault")}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── Section 10: アプリロゴ ── */}
-          <div className="settings-section">
-            <SectionHeading
-              title={t("displaySettings.section.appTitle")}
-              icon={IconBrandGithub}
-              isOpen={sectionOpenState.appLogo}
-              onToggle={() => toggleSection("appLogo")}
-            />
-            {sectionOpenState.appLogo && (
-              <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
                     <div className="setting-item-name">
@@ -1886,6 +1990,119 @@ export function DisplaySettingsModal({
             )}
           </div>
 
+          {/* ── Section 9: ツールバー ── */}
+          <div className="settings-section">
+            <SectionHeading
+              title={t("displaySettings.section.toolbar")}
+              icon={IconTool}
+              isOpen={sectionOpenState.toolbar}
+              onToggle={() => toggleSection("toolbar")}
+            />
+            {sectionOpenState.toolbar && (
+              <div className="settings-section-body">
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.toolbarIconColor")}
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <div className="color-control">
+                      <input
+                        type="color"
+                        value={effectiveToolbarIconColor}
+                        onChange={(e) =>
+                          onToolbarIconColorChange(e.target.value)
+                        }
+                      />
+                      <span className="color-hex">
+                        {effectiveToolbarIconColor}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="font-register-btn"
+                      onClick={() => onToolbarIconColorChange(null)}
+                    >
+                      {t("displaySettings.resetToNormalColor")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.toolbarIconStroke")}
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <div className="slider-control">
+                      <input
+                        type="range"
+                        min={MIN_TOOLBAR_ICON_STROKE}
+                        max={MAX_TOOLBAR_ICON_STROKE}
+                        step={0.05}
+                        value={toolbarIconStroke}
+                        onChange={(e) =>
+                          onToolbarIconStrokeChange(Number(e.target.value))
+                        }
+                      />
+                      <span className="slider-value">
+                        {toolbarIconStroke.toFixed(2)}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="font-register-btn"
+                      onClick={() =>
+                        onToolbarIconStrokeChange(DEFAULT_TOOLBAR_ICON_STROKE)
+                      }
+                    >
+                      {t("common.resetToDefault")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <div className="setting-item-name">
+                      {t("displaySettings.toolbarScale")}
+                    </div>
+                    <div className="setting-item-desc">
+                      トップバー内に収まる範囲で調整します
+                    </div>
+                  </div>
+                  <div className="setting-item-control">
+                    <div className="slider-control">
+                      <input
+                        type="range"
+                        min={MIN_TOOLBAR_SCALE}
+                        max={MAX_TOOLBAR_SCALE}
+                        step={0.05}
+                        value={toolbarScale}
+                        onChange={(e) =>
+                          onToolbarScaleChange(Number(e.target.value))
+                        }
+                      />
+                      <span className="slider-value">
+                        {toolbarScale.toFixed(2)}x
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="font-register-btn"
+                      onClick={() =>
+                        onToolbarScaleChange(DEFAULT_TOOLBAR_SCALE)
+                      }
+                    >
+                      {t("common.resetToDefault")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* ── Section 11: 文書テーマ ── */}
           <div className="settings-section">
             <SectionHeading
@@ -2008,8 +2225,20 @@ export function DisplaySettingsModal({
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
 
-                {/* BETA-DISP1: キャレット色 */}
+          {/* ── Section: キャレット ── */}
+          <div className="settings-section">
+            <SectionHeading
+              title={t("displaySettings.section.caret")}
+              icon={IconCursorText}
+              isOpen={sectionOpenState.caret}
+              onToggle={() => toggleSection("caret")}
+            />
+            {sectionOpenState.caret && (
+              <div className="settings-section-body">
                 <div className="setting-item">
                   <div className="setting-item-info">
                     <div className="setting-item-name">
@@ -2033,6 +2262,13 @@ export function DisplaySettingsModal({
                         {formatNativeSelectOptionLabel(
                           t("displaySettings.caretColorAuto"),
                           caretColorMode === "auto",
+                          platform,
+                        )}
+                      </option>
+                      <option value="highlight">
+                        {formatNativeSelectOptionLabel(
+                          t("displaySettings.caretColorHighlight"),
+                          caretColorMode === "highlight",
                           platform,
                         )}
                       </option>
@@ -2070,6 +2306,53 @@ export function DisplaySettingsModal({
                     </div>
                   </div>
                 )}
+
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <label className="setting-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={pseudoCaretEnabled}
+                        onChange={(e) =>
+                          onPseudoCaretEnabledChange(e.target.checked)
+                        }
+                      />
+                      {t("displaySettings.pseudoCaret.enabled")}
+                    </label>
+                    <div className="setting-item-desc">
+                      {t("displaySettings.pseudoCaret.heading", "helper")}
+                    </div>
+                  </div>
+                </div>
+                <DisplayNumberSlider
+                  label={t("displaySettings.pseudoCaret.thickness")}
+                  value={pseudoCaretThickness}
+                  min={PSEUDO_CARET_THICKNESS_MIN}
+                  max={PSEUDO_CARET_THICKNESS_MAX}
+                  step={PSEUDO_CARET_THICKNESS_STEP}
+                  valueText={`${pseudoCaretThickness}px`}
+                  description={t("displaySettings.pseudoCaret.thickness", "helper")}
+                  disabled={!pseudoCaretEnabled}
+                  onChange={onPseudoCaretThicknessChange}
+                />
+                <div className="setting-item">
+                  <div className="setting-item-info">
+                    <label className="setting-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={pseudoCaretBlinkEnabled}
+                        disabled={!pseudoCaretEnabled}
+                        onChange={(e) =>
+                          onPseudoCaretBlinkEnabledChange(e.target.checked)
+                        }
+                      />
+                      {t("displaySettings.pseudoCaret.blink")}
+                    </label>
+                    <div className="setting-item-desc">
+                      {t("displaySettings.pseudoCaret.blink", "helper")}
+                    </div>
+                  </div>
+                </div>
 
                 {platform === "win32" && (
                   <div className="setting-item">
@@ -2480,24 +2763,34 @@ export function DisplaySettingsModal({
           </div>
         </div>
 
-        <div className="prompt-buttons">
+        <div className="prompt-buttons display-settings-dialog-footer">
           <button
             type="button"
-            onClick={() => {
-              if (
-                window.confirm(
-                  "すべての表示設定を初期値に戻します。よろしいですか？",
-                )
-              ) {
-                onReset();
-              }
-            }}
+            className="display-settings-library-entry-btn"
+            onClick={onOpenLibraryManager}
+            title={t("library.menuOpen")}
           >
-            {t("displaySettings.resetDefaults")}
+            {t("library.menuOpen")}
           </button>
-          <button type="button" onClick={onClose}>
-            {t("common.close")}
-          </button>
+          <div className="display-settings-dialog-footer-actions">
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "すべての表示設定を初期値に戻します。よろしいですか？",
+                  )
+                ) {
+                  onReset();
+                }
+              }}
+            >
+              {t("displaySettings.resetDefaults")}
+            </button>
+            <button type="button" onClick={onClose}>
+              {t("common.close")}
+            </button>
+          </div>
         </div>
       </section>
     </div>

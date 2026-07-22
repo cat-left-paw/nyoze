@@ -7,6 +7,7 @@ type DisplayNumberSliderProps = {
   valueText: string
   description?: string
   disabled?: boolean
+  itemClassName?: string
   onChange: (value: number) => void
 }
 
@@ -19,10 +20,11 @@ export function DisplayNumberSlider({
   valueText,
   description,
   disabled,
+  itemClassName,
   onChange,
 }: DisplayNumberSliderProps) {
   return (
-    <div className='setting-item'>
+    <div className={itemClassName ?? 'setting-item'}>
       <div className='setting-item-info'>
         <div className='setting-item-name'>{label}</div>
         {description && <div className='setting-item-desc'>{description}</div>}

@@ -37,6 +37,7 @@ import {
   IconStrikethrough,
   IconSwitchHorizontal,
   IconSwitchVertical,
+  IconUnderline,
   IconNumber123,
 } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
@@ -61,7 +62,7 @@ type ToolbarProps = {
   fullPlainEditActive: boolean;
   displaySettingsOpen: boolean;
   onRunMarkCommand: (
-    commandName: "bold" | "italic" | "strike" | "highlight",
+    commandName: "bold" | "italic" | "strike" | "highlight" | "underline",
   ) => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -289,6 +290,16 @@ export function Toolbar({
         {...getFormattingButtonProps(t("editor.highlight"))}
       >
         <IconHighlight size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
+      </button>
+      <button
+        className="toolbar-btn-iconized toolbar-btn-icon-only"
+        onClick={withPlainFormattingGuard(() => onRunMarkCommand("underline"))}
+        disabled={!plainFormattingBlocked && !availability.canUnderline}
+        type="button"
+        aria-label={t("editor.underline")}
+        {...getFormattingButtonProps(t("editor.underline"))}
+      >
+        <IconUnderline size={TOOLBAR_ICON_SIZE} stroke={TOOLBAR_ICON_STROKE} />
       </button>
       <button
         className="toolbar-btn-iconized toolbar-btn-icon-only"

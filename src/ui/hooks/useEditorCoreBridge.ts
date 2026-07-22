@@ -84,6 +84,9 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
             tw.current.visualFocusDimNonFocusedBlocksEnabled === true,
           getVisualFocusCurrentLineHighlightEnabled: () =>
             tw.current.visualFocusCurrentLineHighlightEnabled === true,
+          getPseudoCaretEnabled: () => tw.current.pseudoCaretEnabled === true,
+          getPseudoCaretThickness: () => tw.current.pseudoCaretThickness,
+          getPseudoCaretBlinkEnabled: () => tw.current.pseudoCaretBlinkEnabled !== false,
         }
       : {}),
   })

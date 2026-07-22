@@ -1,12 +1,20 @@
 import type { EditorState } from '@tiptap/pm/state'
 import type { CommandAvailability } from '../types'
+import {
+  isNoteAnchorNodeSelection,
+  resolveNoteAnchorContextId,
+  selectionTouchesNoteAnchor,
+} from './noteAnchorProtection'
 import { resolveSelectedTcyRanges } from './tcyFormatting'
+import { isPageBreakNodeSelected, resolveCurrentDirectiveDescriptor } from '../commands/customBlockDirectiveCommands'
+import { formatDirectiveToken } from '../io/customBlockDirective'
 
 type ActiveMarksSnapshot = {
   isBold: boolean
   isItalic: boolean
   isStrike: boolean
   isHighlight: boolean
+  isUnderline: boolean
   isInlineCode: boolean
   isBulletList: boolean
   isOrderedList: boolean
@@ -78,24 +86,32 @@ export function buildCommandAvailability({
 }: BuildCommandAvailabilityInput): CommandAvailability {
   const { from, to } = state.selection
   const hasSelection = from !== to
+  const hasNonAnchorTextSelection = hasSelection && !isNoteAnchorNodeSelection(state)
   const hasTcyClearTarget = resolveSelectedTcyRanges(state).length > 0
+  const touchesNoteAnchor = selectionTouchesNoteAnchor(state)
+  const noteAnchorContextId = resolveNoteAnchorContextId(state)
+  const blockNoteAnchorEdits = touchesNoteAnchor && !composing
+  const directiveDescriptor = resolveCurrentDirectiveDescriptor(state)
+  const blockDirectiveToken = directiveDescriptor ? formatDirectiveToken(directiveDescriptor) : null
 
   return {
     hasSelection,
-    canBold: hasSelection && !composing,
-    canItalic: hasSelection && !composing,
-    canStrike: hasSelection && !composing,
-    canHighlight: hasSelection && !composing,
-    canInlineCode: hasSelection && !composing,
-    canClearFormat: (hasSelection || hasTcyClearTarget) && !composing,
-    canBlockTransforms: !composing,
+    hasNonAnchorTextSelection,
+    canBold: hasSelection && !composing && !blockNoteAnchorEdits,
+    canItalic: hasSelection && !composing && !blockNoteAnchorEdits,
+    canStrike: hasSelection && !composing && !blockNoteAnchorEdits,
+    canHighlight: hasSelection && !composing && !blockNoteAnchorEdits,
+    canUnderline: hasSelection && !composing && !blockNoteAnchorEdits,
+    canInlineCode: hasSelection && !composing && !blockNoteAnchorEdits,
+    canClearFormat: (hasSelection || hasTcyClearTarget) && !composing && !blockNoteAnchorEdits,
+    canBlockTransforms: !composing && !blockNoteAnchorEdits,
     canUndo: !composing && canUndo,
     canRedo: !composing && canRedo,
-    canInsertRuby: hasSelection && !composing && enableRuby,
+    canInsertRuby: hasSelection && !composing && enableRuby && !blockNoteAnchorEdits,
     canParagraphPlain: !composing && resolveParagraphPlainState(state),
-    canToggleTcy: hasSelection && !composing,
+    canToggleTcy: hasSelection && !composing && !blockNoteAnchorEdits,
     canCopy: hasSelection && !composing,
-    canCut: hasSelection && !composing,
+    canCut: hasSelection && !composing && !blockNoteAnchorEdits,
     canPaste: !composing,
     canSelectAll: !composing && state.doc.textContent.length > 0,
     canMoveListUp: canMoveListUp,
@@ -105,11 +121,19 @@ export function buildCommandAvailability({
     isItalic: active.isItalic,
     isStrike: active.isStrike,
     isHighlight: active.isHighlight,
+    isUnderline: active.isUnderline,
     isInlineCode: active.isInlineCode,
     isBulletList: active.isBulletList,
     isOrderedList: active.isOrderedList,
     isChecklist: resolveChecklistState(state),
     isBlockquote: active.isBlockquote,
     isCodeBlock: active.isCodeBlock,
+    canBlockDirective: !composing,
+    blockDirectiveToken,
+    canDeletePageBreak: !composing && isPageBreakNodeSelected(state),
+    noteAnchorContextId,
+    touchesNoteAnchor,
+    canShowNoteInPanel: noteAnchorContextId !== null && !composing,
+    canDeleteNoteAnchor: noteAnchorContextId !== null && !composing,
   }
 }

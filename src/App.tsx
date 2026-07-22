@@ -29,6 +29,9 @@ import {
   DEFAULT_DOC_HEADING_FONT,
   DEFAULT_EDITOR_ARROW_POINTER,
   DEFAULT_FRONTMATTER_SHOW_AUTHORS,
+  DEFAULT_FRONTMATTER_SHOW_IN_PROJECT_FILES,
+  DEFAULT_FRONTMATTER_PROJECT_SHOW_TITLE,
+  DEFAULT_FRONTMATTER_PROJECT_SHOW_AUTHORS,
   DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
   DEFAULT_FRONTMATTER_SHOW_TRANSLATORS,
   DEFAULT_FRONTMATTER_VISIBLE,
@@ -39,6 +42,9 @@ import {
   DEFAULT_TYPEWRITER_OFFSET_RATIO,
   DEFAULT_UI_FONT_SCALE,
   DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
+  DEFAULT_PSEUDO_CARET_BLINK_ENABLED,
+  DEFAULT_PSEUDO_CARET_ENABLED,
+  DEFAULT_PSEUDO_CARET_THICKNESS,
   DOCUMENT_THEME_COLOR_PRESETS,
   UI_THEME_DOC_COLOR_PRESETS,
 } from "./settings/defaults";
@@ -60,13 +66,30 @@ import type {
   Theme,
 } from "./settings/types";
 import { usePaneLayout } from "./ui/hooks/usePaneLayout";
+import { useDocumentWritingModeChange } from "./ui/hooks/useDocumentWritingModeChange";
 import { useFileExplorer } from "./ui/hooks/useFileExplorer";
+import { useEditorTabRoles } from "./ui/hooks/useEditorTabRoles";
+import { useLibraryManagerGlue } from "./ui/hooks/useLibraryManagerGlue";
+import { useProjectPanelContext } from "./ui/hooks/useProjectPanelContext";
 import { useEditorCoreBridge } from "./ui/hooks/useEditorCoreBridge";
 import type { TypewriterRuntimeSnapshot } from "./ui/hooks/typewriterRuntimeRef";
 import { applyVisualFocusCssVariables } from "./ui/utils/syncVisualFocusCssVariables";
 import { useRubyBoutenPrompt } from "./ui/hooks/useRubyBoutenPrompt";
 import { useEditorContextMenu } from "./ui/hooks/useEditorContextMenu";
+import { useEditorTabActionsSlot } from "./ui/hooks/useEditorTabActionsSlot";
 import { useSearchUiState } from "./ui/hooks/useSearchUiState";
+import { useBlockDirectiveCommands } from "./ui/hooks/useBlockDirectiveCommands";
+import { useAozoraTextExport } from "./ui/hooks/useAozoraTextExport";
+import { useLeMEMarkdownExport } from "./ui/hooks/useLeMEMarkdownExport";
+import { useDendenMarkdownExport } from "./ui/hooks/useDendenMarkdownExport";
+import { useWebBookExport } from "./ui/hooks/useWebBookExport";
+import { usePageViewerLauncher } from "./ui/hooks/usePageViewerLauncher";
+import { useBookPageViewerLauncher } from "./ui/hooks/useBookPageViewerLauncher";
+import { useExternalExportOptionsRouting } from "./ui/hooks/useExternalExportOptionsRouting";
+import { useBookExport } from "./ui/hooks/useBookExport";
+import { useBookExportResultDetailsPrompt } from "./ui/hooks/useBookExportResultDetailsPrompt";
+import { useWebBookCapacityConfirmPrompt } from "./ui/hooks/useWebBookCapacityConfirmPrompt";
+import { useBookExportMenuAvailability } from "./ui/hooks/useBookExportMenuAvailability";
 import { useLargeDocumentGuard } from "./ui/hooks/useLargeDocumentGuard";
 import { useGlobalShortcuts } from "./ui/hooks/useGlobalShortcuts";
 import { useUndoRedoRouting } from "./ui/hooks/useUndoRedoRouting";
@@ -104,6 +127,10 @@ import {
 import { clampCommandAvailabilityForInternalDoc } from "./ui/utils/clampCommandAvailabilityForInternalDoc";
 import { getPathBaseName } from "./ui/utils/path";
 import {
+  formatWritingModeLabel,
+  resolveDisplayedDocumentMetadata,
+} from "./ui/utils/documentMetadataDisplay";
+import {
   formatDocumentTypeLabel,
   formatDocumentTypeNoticeMessage,
 } from "./ui/utils/documentTypePresentation";
@@ -112,10 +139,12 @@ import { Workspace } from "./ui/components/Workspace";
 import { DocumentSettingsPanel } from "./ui/components/DocumentSettingsPanel";
 import { EditorContextMenu } from "./ui/components/EditorContextMenu";
 import { DisplaySettingsModal } from "./ui/components/DisplaySettingsModal";
+import { LibraryManagerModal } from "./ui/components/LibraryManagerModal";
 import { ThemeStudioPanel } from "./ui/components/ThemeStudioModal";
 import { LargeDocumentGuardModal } from "./ui/components/LargeDocumentGuardModal";
 import { LineBreakPolicyConfirmModal } from "./ui/components/LineBreakPolicyConfirmModal";
 import { FileExplorerNamePromptModal } from "./ui/components/FileExplorerNamePromptModal";
+import { ExplorerProjectCreateModalHost } from "./ui/components/ExplorerProjectCreateModalHost";
 import { FileTransferConflictModal } from "./ui/components/FileTransferConflictModal";
 import { UnsavedChangesModal } from "./ui/components/UnsavedChangesModal";
 import {
@@ -128,6 +157,9 @@ import {
   type SaveFailureInfo,
 } from "./ui/components/SaveFailureModal";
 import { BackupWarningNotice } from "./ui/components/BackupWarningNotice";
+import { ExportOptionsModal } from "./ui/components/ExportOptionsModal";
+import { BookExportResultDetailsModal } from "./ui/components/BookExportResultDetailsModal";
+import { WebBookCapacityConfirmModal } from "./ui/components/WebBookCapacityConfirmModal";
 import {
   buildConflictAwareWriteFileOptions,
   detectExternalEditConflict,
@@ -144,11 +176,52 @@ import { countBodyCharacters as countDocumentBodyCharacters } from "./ui/utils/c
 // BETA-SP11: EOL fidelity — 保存時に元の改行種別へ戻す
 import { applyEol } from "./editor-core/io/eolHelper";
 import { shouldEnableAutoTcyDisplay } from "./editor-core/features/autoTcy";
-import { resolveCaretColor } from "./theme/caretColor";
+import { resolveCaretColor, resolveUiThemeAccentColor } from "./theme/caretColor";
 import { PromptModal } from "./ui/components/PromptModal";
+import { NoteAnchorModal } from "./ui/components/NoteAnchorModal";
+import { useNoteAnchorInsert } from "./ui/hooks/useNoteAnchorInsert";
+import { resolveNoteAnchorOnlyContextMenuId } from "./ui/utils/noteAnchorContextMenu";
+import {
+  commitNoteAnchorDelete,
+  prepareNoteAnchorDelete,
+} from "./ui/hooks/noteAnchorDeleteController";
+import {
+  commitOrphanNoteDelete,
+  prepareOrphanNoteDelete,
+} from "./ui/hooks/noteOrphanDeleteController";
+import {
+  commitMissingFileNoteDelete,
+  commitMissingFileNotesBulkDelete,
+  prepareMissingFileNoteDelete,
+} from "./ui/hooks/noteMissingFileDeleteController";
+import { useNotePanelActions } from "./ui/hooks/useNotePanelActions";
+import {
+  commitNoteAnchorMarkerOnlyDelete,
+  prepareNoteAnchorMarkerOnlyDelete,
+} from "./ui/hooks/noteAnchorMarkerOnlyDeleteController";
+import {
+  deriveMarkerDeleteModeForMenu,
+  resolveNoteAnchorDeletePath,
+} from "./ui/utils/noteAnchorDeletePath";
+import type { OrphanNoteDeleteResult } from "./ui/components/DocumentNotesPanel";
+import type { MissingFileNoteDeleteResult } from "./ui/components/MissingFileNotesSection";
+import { useNoteAnchorPreviews } from "./ui/hooks/useNoteAnchorPreviews";
+import { useDocumentNotes } from "./ui/hooks/useDocumentNotes";
+import { DocumentNotesPanel } from "./ui/components/DocumentNotesPanel";
+import { MissingFileNotesSection } from "./ui/components/MissingFileNotesSection";
+import { useMissingFileNotes } from "./ui/hooks/useMissingFileNotes";
+import { useNoteFileRelocation } from "./ui/hooks/useNoteFileRelocation";
+import { useExplorerMetadataBridge } from "./ui/hooks/useExplorerMetadataBridge";
+import { useActiveFileProjectMembership } from "./ui/hooks/useActiveFileProjectMembership";
+import { useFileMetadataPanelGlue } from "./ui/hooks/useFileMetadataPanelGlue";
+import { resolveProjectDocumentStartDisplay } from "./project/projectDocumentStartDisplay";
+import { ProjectPaneContainer } from "./ui/components/ProjectPaneContainer";
+import { BookOutlinePaneContainer } from "./ui/components/BookOutlinePaneContainer";
+import { ToolbarChapterNavContainer } from "./ui/components/ToolbarChapterNavContainer";
+import { EditorChapterBoundaryNavContainer } from "./ui/components/EditorChapterBoundaryNavContainer";
 import { SearchBar } from "./ui/components/SearchBar";
 import { ImeProfilerHud } from "./ui/components/ImeProfilerHud";
-import { createUiTextGetter } from "./ui/i18n/uiText";
+import { createUiTextGetter, getUiText } from "./ui/i18n/uiText";
 import { getShortcutReferenceContent } from "./ui/internalDocs/getShortcutReferenceContent";
 
 const BUG_REPORT_URL =
@@ -174,6 +247,14 @@ type ActiveDocumentInfo = {
   pathTitle: string;
   documentTypeLabel: string;
   eolKind: "lf" | "crlf";
+  /** frontmatter title 優先、無ければ basename / tab title fallback（表示専用）。 */
+  titleText: string;
+  /** 著者表示（author + co_authors を結合）。空なら行を出さない。 */
+  authorText: string;
+  /** 訳者表示（translator + co_translators を結合）。空なら行を出さない。 */
+  translatorText: string;
+  /** effective writing mode のラベル（既存 i18n 由来、raw 値ではない）。 */
+  writingModeLabel: string;
 };
 type PendingDocumentSettingsChange = {
   nextFrontmatterPrefix: string;
@@ -275,35 +356,6 @@ function isSystemDocPreset(preset: {
   return preset.id.startsWith("preset-doc-");
 }
 
-function remapMovedPath(
-  currentPath: string,
-  fromPath: string,
-  toPath: string,
-): string | null {
-  const normalize = (value: string) => {
-    const normalized = value.replace(/\\/g, "/");
-    return normalized === "/" ? normalized : normalized.replace(/\/+$/g, "");
-  };
-  const normalizedCurrent = normalize(currentPath);
-  const normalizedFrom = normalize(fromPath);
-  const normalizedTo = normalize(toPath);
-  const windowsLike =
-    /^[A-Za-z]:/.test(normalizedCurrent) ||
-    /^[A-Za-z]:/.test(normalizedFrom) ||
-    /^[A-Za-z]:/.test(normalizedTo);
-  const toComparable = (value: string) =>
-    windowsLike ? value.toLowerCase() : value;
-  const currentCmp = toComparable(normalizedCurrent);
-  const fromCmp = toComparable(normalizedFrom);
-
-  if (currentCmp === fromCmp) return toPath;
-
-  const prefix = `${fromCmp}/`;
-  if (!currentCmp.startsWith(prefix)) return null;
-  const relative = normalizedCurrent.slice(normalizedFrom.length);
-  const remapped = `${normalizedTo}${relative}`;
-  return toPath.includes("\\") ? remapped.replace(/\//g, "\\") : remapped;
-}
 
 const COMMAND_AVAILABILITY_KEYS: Array<keyof CommandAvailability> = [
   "hasSelection",
@@ -311,6 +363,7 @@ const COMMAND_AVAILABILITY_KEYS: Array<keyof CommandAvailability> = [
   "canItalic",
   "canStrike",
   "canHighlight",
+  "canUnderline",
   "canInlineCode",
   "canClearFormat",
   "canBlockTransforms",
@@ -330,12 +383,15 @@ const COMMAND_AVAILABILITY_KEYS: Array<keyof CommandAvailability> = [
   "isItalic",
   "isStrike",
   "isHighlight",
+  "isUnderline",
   "isInlineCode",
   "isBulletList",
   "isOrderedList",
   "isChecklist",
   "isBlockquote",
   "isCodeBlock",
+  "canBlockDirective",
+  "blockDirectiveToken",
 ];
 
 function isSameCommandAvailability(
@@ -365,6 +421,9 @@ function App() {
     visualFocusCurrentLineHighlightColor: DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_COLOR,
     visualFocusCurrentLineHighlightOpacity:
       DEFAULT_VISUAL_FOCUS_CURRENT_LINE_HIGHLIGHT_OPACITY,
+    pseudoCaretEnabled: DEFAULT_PSEUDO_CARET_ENABLED,
+    pseudoCaretThickness: DEFAULT_PSEUDO_CARET_THICKNESS,
+    pseudoCaretBlinkEnabled: DEFAULT_PSEUDO_CARET_BLINK_ENABLED,
   });
   const rubyVisibleRef = useRef(true);
   const editorDivRef = useRef<HTMLDivElement | null>(null);
@@ -399,6 +458,9 @@ function App() {
     visualFocusCurrentLineHighlightEnabled: ui.visualFocusCurrentLineHighlightEnabled,
     visualFocusCurrentLineHighlightColor: ui.visualFocusCurrentLineHighlightColor,
     visualFocusCurrentLineHighlightOpacity: ui.visualFocusCurrentLineHighlightOpacity,
+    pseudoCaretEnabled: ui.pseudoCaretEnabled,
+    pseudoCaretThickness: ui.pseudoCaretThickness,
+    pseudoCaretBlinkEnabled: ui.pseudoCaretBlinkEnabled,
   };
 
   const imeProfilerBuildType: "dev" | "prod" = import.meta.env.DEV
@@ -490,6 +552,96 @@ function App() {
       }),
     [ui.fullPlainEditActive, ui.paragraphPlainModeActive],
   );
+  // 付箋 hover preview: notes.json → editor DOM (display-only)
+  const { refreshNoteAnchorPreviews } = useNoteAnchorPreviews({
+    coreRef,
+    getActiveFilePath: () => ui.activeTab.filePath,
+    isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+  });
+  const { documentNotesState, refreshDocumentNotes } = useDocumentNotes({
+    getActiveFilePath: () => ui.activeTab.filePath,
+    isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+  });
+  const { missingFileNotesState, refreshMissingFileNotes } = useMissingFileNotes({
+    getActiveFilePath: () => ui.activeTab.filePath,
+    isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+  });
+  // frontmatter display の文脈対応: 現在ファイルが Project 所属かを resolve する。
+  // projectRoot は渡さず、main の resolveForFile に active file path だけを渡す。
+  const activeFileMembership = useActiveFileProjectMembership({
+    getActiveFilePath: () => ui.activeTab.filePath,
+    isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+  });
+  // File Explorer の rename / move / delete に付箋 (notes.json) を追従させる。
+  // projectRoot は renderer から渡さず、controller が resolveForFile の結果のみ使う。
+  const [projectRefreshNonce, setProjectRefreshNonce] = useState(0);
+  // エディタタブへ Project role アイコンを出すための display-only role map。
+  // `.nyoze/books.json` v3 だけを正本とし、EditorTab 自体には role を持たせない。
+  const editorTabRoles = useEditorTabRoles(ui.tabs, projectRefreshNonce);
+  const refreshAllNotePanels = useCallback(() => {
+    void refreshNoteAnchorPreviews();
+    void refreshDocumentNotes();
+    void refreshMissingFileNotes();
+  }, [refreshNoteAnchorPreviews, refreshDocumentNotes, refreshMissingFileNotes]);
+  const { relocateNotesForMove, refreshNotesAfterDelete } = useNoteFileRelocation({
+    onRelocated: refreshAllNotePanels,
+    onRefreshAfterDelete: refreshAllNotePanels,
+    onError: (message) => {
+      console.warn("[Nyoze] file explorer path relocation:", message);
+    },
+  });
+  // File Explorer 単一ファイル rename / move と open tab / 付箋 / 作品タブの整合は hook へ集約。
+  const explorerMetadataBridge = useExplorerMetadataBridge({
+    tabs: ui.tabs,
+    patchTab: ui.patchTab,
+    relocateNotesForMove,
+    refreshAllNotePanels,
+    bumpProjectRefresh: () => setProjectRefreshNonce((nonce) => nonce + 1),
+    activeFilePath: ui.activeTab.filePath,
+    // Source Mode draft / Paragraph Plain 未確定 overlay は tab.dirty に即時反映されないため、
+    // active file の rename / move 前にこれらの未確定 draft を probe して安全側で拒否する。
+    hasActiveFileUncommittedDraft: () =>
+      ui.fullPlainEditActive ||
+      (coreRef.current?.hasParagraphPlainPendingOverlayChanges() ?? false),
+  });
+  const [focusedDocumentNoteId, setFocusedDocumentNoteId] = useState<string | null>(
+    null,
+  );
+  // marker click ごとに増える単調キー。同じ note id を連続クリックしても
+  // reveal を再発火できるよう、id とは別にイベントとして通知する。
+  const [focusedDocumentNoteSerial, setFocusedDocumentNoteSerial] = useState(0);
+  const [anchoredNoteIds, setAnchoredNoteIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const syncAnchoredNoteIds = useCallback(() => {
+    setAnchoredNoteIds(new Set(coreRef.current?.getNoteAnchorIdsInDoc() ?? []));
+  }, []);
+  // 付箋追加 (Task 3A-3): flow は useNoteAnchorInsert / controller 側に分離
+  const {
+    noteAnchorModal,
+    noteAnchorTitleValue,
+    setNoteAnchorTitleValue,
+    noteAnchorBodyValue,
+    setNoteAnchorBodyValue,
+    openNoteAnchorPrompt,
+    handleNoteAnchorFirstNoticeConfirm,
+    handleNoteAnchorSubmit,
+    handleNoteAnchorCancel,
+  } = useNoteAnchorInsert({
+    coreRef,
+    getActiveFilePath: () => ui.activeTab.filePath,
+    isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+    getPlainModeKind,
+    noticeConfirmed: ui.noteAnchorNoticeConfirmed,
+    onNoticeConfirmedChange: ui.setNoteAnchorNoticeConfirmed,
+    onInsertSuccess: () => {
+      void refreshNoteAnchorPreviews();
+      void refreshDocumentNotes();
+      void refreshMissingFileNotes();
+    },
+  });
+
   const {
     menu: ctxMenu,
     menuRef: ctxMenuRef,
@@ -537,6 +689,7 @@ function App() {
   const [saveFailureInfo, setSaveFailureInfo] = useState<SaveFailureInfo | null>(
     null,
   );
+  const [projectSwitcherRoot, setProjectSwitcherRoot] = useState<string | null>(null);
   const saveFailureActionResolverRef = useRef<
     ((action: SaveFailureAction) => void) | null
   >(null);
@@ -730,7 +883,8 @@ function App() {
   const handleCoreUpdate = useCallback(() => {
     handleImeProfilerUpdate();
     handleImePhaseAUpdate();
-  }, [handleImePhaseAUpdate, handleImeProfilerUpdate]);
+    syncAnchoredNoteIds();
+  }, [handleImePhaseAUpdate, handleImeProfilerUpdate, syncAnchoredNoteIds]);
 
   const handleCoreReady = useCallback(
     (core: EditorCoreHandle) => {
@@ -749,10 +903,14 @@ function App() {
       onCoreReady(core);
       syncCommandAvailability();
       refreshActiveDocumentCharacterCount();
+      void refreshNoteAnchorPreviews();
+      syncAnchoredNoteIds();
     },
     [
       onCoreReady,
+      syncAnchoredNoteIds,
       refreshActiveDocumentCharacterCount,
+      refreshNoteAnchorPreviews,
       syncCommandAvailability,
       ui.displaySettings.autoTcyEnabled,
       ui.displaySettings.autoTcyNumbersOnly,
@@ -766,9 +924,12 @@ function App() {
 
   const {
     fileExplorerDir,
+    leftPaneTab: fileExplorerLeftPaneTab, projectsPaneView: fileExplorerProjectsPaneView,
+    handleSelectLibraryTab: handleFileExplorerSelectLibraryTab, handleShowProjectList: handleFileExplorerShowProjectList,
+    explorerProjectListState: fileExplorerProjectListState, handleOpenProjectRootFromList: handleFileExplorerOpenProjectRoot,
     rootDirLoaded: fileExplorerRootLoaded,
     visibleEntries: fileExplorerEntries,
-    setFileExplorerDir,
+    setFileExplorerDir, handleLibraryRootActivated,
     clipboardMode: fileExplorerClipboardMode,
     clipboardSourcePath: fileExplorerClipboardSourcePath,
     operationError: fileExplorerOperationError,
@@ -780,6 +941,12 @@ function App() {
     handleOpenInNewTab: handleFileOpenInNewTab,
     handleCreateNote,
     handleCreateFolder,
+    handleCreateProjectForFolder,
+    closeProjectCreateModal,
+    projectCreateModalTarget,
+    notifyProjectCreatedForFolder,
+    notifyProjectUnregistered,
+    fileExplorerRegistration,
     handleRenameEntry,
     handleDeleteEntry,
     handleRevealInFileManager,
@@ -813,17 +980,22 @@ function App() {
       const opened = await tabManager.openFileInTab(filePath, getPathBaseName(filePath), content, saved);
       if (opened === "tab-limit") showTabLimitNotice();
     },
-    onFileMoved: (fromPath, toPath) => {
-      for (const tab of ui.tabs) {
-        if (!tab.filePath) continue;
-        const remappedPath = remapMovedPath(tab.filePath, fromPath, toPath);
-        if (!remappedPath) continue;
-        ui.patchTab(tab.id, {
-          filePath: remappedPath,
-          title: getPathBaseName(remappedPath),
-        });
-      }
+    onFileMoved: explorerMetadataBridge.onFileMoved,
+    canTransferEntry: explorerMetadataBridge.canTransferEntry,
+    onProjectFileTransferred: explorerMetadataBridge.onProjectFileTransferred,
+    onFileDeleted: () => {
+      // 付箋は自動削除しない。missing-file 一覧へ反映するため refresh のみ。
+      refreshNotesAfterDelete();
     },
+    // File Explorer からの v3 登録成功後、Project タブを refresh。
+    onProjectRegistered: () => setProjectRefreshNonce((nonce) => nonce + 1),
+    projectRefreshNonce,
+  });
+
+  const projectPanelContext = useProjectPanelContext({
+    projectSwitcherRoot,
+    activeFilePath: ui.activeTab.filePath,
+    isInternalDoc: Boolean(ui.activeTab.internalDocId),
   });
 
   const openExternalEditorLink = useCallback(async (url: string): Promise<boolean> => {
@@ -851,6 +1023,9 @@ function App() {
     coreRef.current?.syncTypewriterRuntimeState();
     coreRef.current?.nudgeDecorationsRefresh();
     coreRef.current?.scheduleVisualFocusCurrentLineUpdate();
+    // Re-evaluate the pseudo caret on Source Mode / Paragraph Plain toggles so a stale overlay never
+    // lingers when the surface is hidden / re-shown (display-only; the controller decides hide/show).
+    coreRef.current?.schedulePseudoCaretUpdate();
   }, [
     ui.typewriterModeEnabled,
     ui.fullPlainEditActive,
@@ -885,6 +1060,10 @@ function App() {
     ui.visualFocusCurrentLineHighlightOpacity,
   ]);
 
+  useEffect(() => {
+    coreRef.current?.schedulePseudoCaretUpdate();
+  }, [ui.pseudoCaretEnabled, ui.pseudoCaretThickness, ui.pseudoCaretBlinkEnabled]);
+
   // Frontmatter view mount/unmount and field changes shift the body's offset inside
   // `.editor-surface`. None of the controller's own triggers (PM transactions, scroll,
   // resize) fire on these React-side layout changes — so the overlay keeps stale coords
@@ -901,28 +1080,6 @@ function App() {
   const frontmatterCoTranslatorsKey = (frontmatterFields?.co_translators ?? []).join(
     "\u0000",
   );
-  useEffect(() => {
-    const core = coreRef.current;
-    if (!core) return;
-    // One rAF gives the FrontmatterView mount/unmount layout shift time to commit
-    // before the controller's own rAF-debounced scheduleUpdate reads coords.
-    const raf = window.requestAnimationFrame(() => {
-      core.scheduleVisualFocusCurrentLineUpdate();
-    });
-    return () => window.cancelAnimationFrame(raf);
-  }, [
-    ui.frontmatterVisible,
-    ui.frontmatterShowAuthors,
-    ui.frontmatterShowTranslators,
-    ui.frontmatterShowRoleLabels,
-    frontmatterTitle,
-    frontmatterOriginalTitle,
-    frontmatterSubtitle,
-    frontmatterAuthor,
-    frontmatterCoAuthorsKey,
-    frontmatterTranslator,
-    frontmatterCoTranslatorsKey,
-  ]);
 
   useEffect(() => {
     if (!ui.imePhaseAEnabled && !ui.imePhaseBRubySuspendEnabled) return;
@@ -1392,6 +1549,119 @@ function App() {
     ],
   );
 
+  // Shared options confirm UI (pageBreak / pageBreakBeforeHeading /
+  // pageBreakBeforeHeadingMaxLevel, plus Book-only insertPageBreakBetweenChapters)
+  // for both active document export and Book export. One prompt/modal instance;
+  // scope binding lives in the routing hook, format binding lives in each
+  // export hook itself (each already knows its own format).
+  const {
+    prompt: externalExportOptionsPrompt, resolveInitialSelection, confirmExportOptions,
+    cancelExportOptions,
+    requestDocumentExportOptions,
+    requestBookExportOptions: requestBookExportOptionsForBook,
+  } = useExternalExportOptionsRouting();
+
+  // Aozora / LeME export hooks share an identical input surface (active doc,
+  // plain-mode gates, notice + save-failure plumbing, options confirm UI).
+  const documentExportInput = {
+    coreRef,
+    activeTab: ui.activeTab,
+    internalDocActive: Boolean(ui.activeTab.internalDocId),
+    fullPlainEditActive: ui.fullPlainEditActive,
+    paragraphPlainModeActive: ui.paragraphPlainModeActive,
+    uiLanguageMode: ui.uiLanguageMode,
+    // HTML系 export は現在の実効書字方向を `HtmlExportOptions` /
+    // `WebBookExportOptions` へ渡す。青空文庫風 / LeME / でんでんのhookは使わない。
+    writingMode: ui.writingMode,
+    showGlobalNotice: (message: string) => ui.showLineBreakPolicyNotice(message, false),
+    showEditorInlineHint: ui.showEditorInlineHint,
+    showBackupWarningIfPresent,
+    requestSaveFailureAction,
+    requestExportOptions: requestDocumentExportOptions,
+  };
+  const { exportActiveDocument: exportAozoraTextDocument } =
+    useAozoraTextExport(documentExportInput);
+  const { exportActiveDocument: exportLeMEMarkdownDocument } =
+    useLeMEMarkdownExport(documentExportInput);
+  const { exportActiveDocument: exportDendenMarkdownDocument } =
+    useDendenMarkdownExport(documentExportInput);
+  const {
+    state: bookExportResultDetails,
+    showBookExportResultDetails,
+    closeBookExportResultDetails,
+  } = useBookExportResultDetailsPrompt();
+  const {
+    capacity: webBookCapacityConfirm,
+    requestCapacityConfirm,
+    resolveCapacityConfirm,
+  } = useWebBookCapacityConfirmPrompt();
+  const { exportActiveDocument: exportWebBookDocument } =
+    useWebBookExport({
+      ...documentExportInput,
+      docColorSettings: ui.docColorSettings,
+      docHeadingFont: ui.docHeadingFont,
+      displaySettings: ui.displaySettings,
+      showBookExportResultDetails,
+      requestCapacityConfirm,
+    });
+  const { openPageViewer } = usePageViewerLauncher({
+    coreRef,
+    activeTab: ui.activeTab,
+    internalDocActive: Boolean(ui.activeTab.internalDocId),
+    writingMode: ui.writingMode,
+    docColorSettings: ui.docColorSettings,
+    docFontPreset: ui.docFontPreset,
+    selectedFont: ui.selectedFont,
+    docHeadingFont: ui.docHeadingFont,
+    displaySettings: ui.displaySettings,
+    frontmatterVisible: ui.frontmatterVisible,
+    frontmatterShowAuthors: ui.frontmatterShowAuthors,
+    frontmatterShowTranslators: ui.frontmatterShowTranslators,
+    frontmatterShowRoleLabels: ui.frontmatterShowRoleLabels,
+  });
+  const { openBookPageViewer } = useBookPageViewerLauncher({
+    activeTab: ui.activeTab,
+    internalDocActive: Boolean(ui.activeTab.internalDocId),
+    uiLanguageMode: ui.uiLanguageMode,
+    showEditorInlineHint: ui.showEditorInlineHint,
+    writingMode: ui.writingMode,
+    docColorSettings: ui.docColorSettings,
+    docFontPreset: ui.docFontPreset,
+    selectedFont: ui.selectedFont,
+    docHeadingFont: ui.docHeadingFont,
+    displaySettings: ui.displaySettings,
+    frontmatterVisible: ui.frontmatterVisible,
+    frontmatterShowAuthors: ui.frontmatterShowAuthors,
+    frontmatterShowTranslators: ui.frontmatterShowTranslators,
+    frontmatterShowRoleLabels: ui.frontmatterShowRoleLabels,
+    frontmatterShowInProjectFiles: ui.frontmatterShowInProjectFiles,
+    frontmatterProjectShowTitle: ui.frontmatterProjectShowTitle,
+    frontmatterProjectShowAuthors: ui.frontmatterProjectShowAuthors,
+  });
+
+  const bookExportInput = {
+    activeTab: ui.activeTab,
+    internalDocActive: Boolean(ui.activeTab.internalDocId),
+    uiLanguageMode: ui.uiLanguageMode,
+    showGlobalNotice: (message: string) => ui.showLineBreakPolicyNotice(message, false),
+    showEditorInlineHint: ui.showEditorInlineHint,
+    showBackupWarningIfPresent,
+    requestSaveFailureAction,
+    requestBookExportOptions: requestBookExportOptionsForBook,
+    writingMode: ui.writingMode, // Book HTML / Web Book: options.*.writingMode.
+    docColorSettings: ui.docColorSettings,
+    docHeadingFont: ui.docHeadingFont,
+    displaySettings: ui.displaySettings,
+    showBookExportResultDetails,
+    requestCapacityConfirm,
+  };
+  const { exportBookAsLeME, exportBookAsDenden, exportBookAsAozora, exportBookAsWebBook } =
+    useBookExport(bookExportInput);
+  const bookPageViewerToolbarAvailability = useBookExportMenuAvailability({
+    activeTab: ui.activeTab,
+    internalDocActive: Boolean(ui.activeTab.internalDocId),
+  });
+
   // R3.5-2 P2: close-before-save 専用ラッパー。
   // saveDocument(false) を呼び、ref に記録された詳細情報から ActiveTabSaveOutcome を構成する。
   // backupWarning / cancel 理由 / errorKind が orchestrator に伝わるようになる。
@@ -1627,6 +1897,93 @@ function App() {
   const tabLimitReached = ui.tabs.length >= MAX_OPEN_TABS;
 
   const [tabLimitNotice, setTabLimitNotice] = useState<string | null>(null);
+  const activeTabFilePath = ui.activeTab.filePath;
+  const {
+    libraryManagerOpen, reloadLibraryRegistry,
+    handleOpenLibraryManager, handleCloseLibraryManager,
+    handleOpenLibraryManagerFromDisplaySettings, handleLibraryActivated,
+    externalFileActive, externalFileName, documentContextInfo, projectDisplayMetadata,
+    projectDocumentStartInfo, showLibraryOnboarding,
+  } = useLibraryManagerGlue({
+    activeTabFilePath,
+    isInternalDoc: Boolean(ui.activeTab.internalDocId),
+    fileExplorerDir,
+    projectRefreshNonce,
+    setDisplaySettingsOpen: ui.setDisplaySettingsOpen,
+    onLibraryRootActivated: handleLibraryRootActivated,
+  });
+  const documentStartMasterVisible =
+    ui.frontmatterVisible && !ui.activeTab.internalDocId;
+  const standaloneFrontmatterVisible =
+    documentStartMasterVisible &&
+    !activeFileMembership.pending &&
+    !activeFileMembership.inProject;
+  const projectDocumentStartDisplay = useMemo(
+    () =>
+      resolveProjectDocumentStartDisplay({
+        masterVisible: documentStartMasterVisible,
+        inProject: activeFileMembership.inProject,
+        startInfo: projectDocumentStartInfo,
+        showBookAuthors: ui.frontmatterShowAuthors,
+        showInProjectFiles: ui.frontmatterShowInProjectFiles,
+        showFileTitle: ui.frontmatterProjectShowTitle,
+        showFileAuthors: ui.frontmatterProjectShowAuthors,
+        showTranslators: ui.frontmatterShowTranslators,
+      }),
+    [
+      documentStartMasterVisible,
+      activeFileMembership.inProject,
+      projectDocumentStartInfo,
+      ui.frontmatterShowAuthors,
+      ui.frontmatterShowInProjectFiles,
+      ui.frontmatterProjectShowTitle,
+      ui.frontmatterProjectShowAuthors,
+      ui.frontmatterShowTranslators,
+    ],
+  );
+
+  const { documentSettingsGlue } = useFileMetadataPanelGlue({
+    inProject: activeFileMembership.inProject,
+    membershipPending: activeFileMembership.pending,
+    documentContext: documentContextInfo,
+    setRightPaneOpen,
+    setRightPaneTab: ui.setRightPaneTab,
+    setDisplaySettingsOpen: ui.setDisplaySettingsOpen,
+    isDirty: ui.activeTab.dirty,
+    saveDocument,
+  });
+
+  const projectDocumentStartKey = useMemo(() => {
+    if (!documentStartMasterVisible || projectDocumentStartInfo.kind === "none") {
+      return null;
+    }
+    return JSON.stringify(projectDocumentStartInfo);
+  }, [documentStartMasterVisible, projectDocumentStartInfo]);
+  useEffect(() => {
+    const core = coreRef.current;
+    if (!core) return;
+    // One rAF gives the document-start / frontmatter mount/unmount layout shift time
+    // to commit before the controller's own rAF-debounced scheduleUpdate reads coords.
+    const raf = window.requestAnimationFrame(() => {
+      core.scheduleVisualFocusCurrentLineUpdate();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [
+    standaloneFrontmatterVisible,
+    ui.frontmatterShowAuthors,
+    ui.frontmatterShowTranslators,
+    ui.frontmatterShowRoleLabels,
+    frontmatterTitle,
+    frontmatterOriginalTitle,
+    frontmatterSubtitle,
+    frontmatterAuthor,
+    frontmatterCoAuthorsKey,
+    frontmatterTranslator,
+    frontmatterCoTranslatorsKey,
+    projectDocumentStartDisplay.book.visible,
+    projectDocumentStartDisplay.file.visible,
+    projectDocumentStartKey,
+  ]);
   const tabLimitNoticeTimerRef = useRef<number | null>(null);
   const showTabLimitNotice = useCallback(() => {
     setTabLimitNotice(`タブ数の上限（${MAX_OPEN_TABS}）に達しています。不要なタブを閉じてください。`);
@@ -1682,9 +2039,14 @@ function App() {
     flushImeCompositionSideEffects,
     showTabLimitNotice,
     setExplorerRootForE2e: setFileExplorerDir,
+    onLibraryActivatedForE2e: handleLibraryActivated,
+    reloadLibraryRegistryForE2e: reloadLibraryRegistry,
     inspectSpecialInlineAdjacentCaretPm: () =>
       coreRef.current?.inspectSpecialInlineAdjacentCaretPm() ?? null,
     openOrFocusShortcutReferenceTab: tabManager.openOrFocusShortcutReferenceTab,
+    setPseudoCaretEnabledForE2e: ui.setPseudoCaretEnabled,
+    setPseudoCaretThicknessForE2e: ui.setPseudoCaretThickness,
+    setPseudoCaretBlinkEnabledForE2e: ui.setPseudoCaretBlinkEnabled,
   });
 
   // --- Menu command listener (macOS menu bar / Win+Linux popup menu) ---
@@ -1701,8 +2063,9 @@ function App() {
           break;
         }
         case "menu:open": {
+          // 単独ファイル open ボタンを叩く（aria-label は localize されるため安定 selector を使う）。
           const btn = document.querySelector<HTMLButtonElement>(
-            '[aria-label="Load"]',
+            '[data-toolbar-action="open-file"]',
           );
           btn?.click();
           break;
@@ -1715,8 +2078,42 @@ function App() {
           void saveDocument(true);
           break;
         }
+        case "menu:export-aozora-text": {
+          void exportAozoraTextDocument();
+          break;
+        }
+        case "menu:export-leme-markdown":
+          void exportLeMEMarkdownDocument();
+          break;
+        case "menu:export-denden-markdown":
+          void exportDendenMarkdownDocument();
+          break;
+        case "menu:export-web-book":
+          void exportWebBookDocument();
+          break;
+        case "menu:export-book-leme":
+          void exportBookAsLeME();
+          break;
+        case "menu:export-book-denden":
+          void exportBookAsDenden();
+          break;
+        case "menu:export-book-aozora":
+          void exportBookAsAozora();
+          break;
+        case "menu:export-book-web-book":
+          void exportBookAsWebBook();
+          break;
+        case "menu:page-viewer":
+          void openPageViewer();
+          break;
+        case "menu:book-page-viewer":
+          void openBookPageViewer();
+          break;
         case "menu:view-settings":
           ui.setDisplaySettingsOpen(true);
+          break;
+        case "menu:manage-libraries":
+          handleOpenLibraryManager();
           break;
         case "menu:open-manual":
           void openManualFromMenu();
@@ -1736,9 +2133,20 @@ function App() {
   }, [
     confirmContinueWithUnsavedChanges,
     flushImeCompositionSideEffects,
+    handleOpenLibraryManager,
     openManualFromMenu,
     openShortcutReferenceFromMenu,
     saveDocument,
+    exportAozoraTextDocument,
+    exportLeMEMarkdownDocument,
+    exportDendenMarkdownDocument,
+    exportWebBookDocument,
+    exportBookAsLeME,
+    exportBookAsDenden,
+    exportBookAsAozora,
+    exportBookAsWebBook,
+    openPageViewer,
+    openBookPageViewer,
     sendBugReport,
     sendFeedback,
     tabManager,
@@ -1767,6 +2175,8 @@ function App() {
     window.nyozeBridge?.document?.setActiveFilePath(
       ui.activeTab.filePath ?? null,
     );
+    // Project タブはアクティブなタブに連動する。作品切り替え(switcher)の上書きはタブ変更で解除し再連動。
+    setProjectSwitcherRoot(null);
   }, [ui.activeTab.filePath, ui.activeTabId]);
 
   // BETA-SP2: save-before-close で全 dirty tab を順次保存する。
@@ -2005,8 +2415,9 @@ function App() {
   }, [handleRedo, ui.activeTab.internalDocId]);
 
   const runMarkCommand = useCallback(
-    (commandName: "bold" | "italic" | "strike" | "highlight") => {
+    (commandName: "bold" | "italic" | "strike" | "highlight" | "underline") => {
       if (ui.activeTab.internalDocId) return;
+      if (coreRef.current?.getCommandAvailability().touchesNoteAnchor) return;
       coreRef.current?.execute(commandName);
     },
     [ui.activeTab.internalDocId],
@@ -2019,6 +2430,7 @@ function App() {
 
   const handleClearFormat = useCallback(() => {
     if (ui.activeTab.internalDocId) return;
+    if (coreRef.current?.getCommandAvailability().touchesNoteAnchor) return;
     coreRef.current?.clearFormat();
   }, [ui.activeTab.internalDocId]);
 
@@ -2056,6 +2468,8 @@ function App() {
     if (ui.activeTab.internalDocId) return;
     coreRef.current?.toggleCodeBlock();
   }, [ui.activeTab.internalDocId]);
+
+  const blockDirective = useBlockDirectiveCommands(coreRef, Boolean(ui.activeTab.internalDocId));
 
   const guardedOpenLinkPrompt = useCallback(() => {
     if (ui.activeTab.internalDocId) return;
@@ -2133,7 +2547,9 @@ function App() {
         const opened = await bridge.openPath();
         if (!opened) return;
         if (opened.kind === "directory") {
-          setFileExplorerDir(opened.path);
+          // main 側 picker は openFile only。万一フォルダが返っても気軽な書庫追加に
+          // せず、rootPath を渡さず書庫管理画面へ誘導する（登録は modal 内導線で）。
+          handleOpenLibraryManager();
           return;
         }
         const openResult = await bridge.openFile(opened.path);
@@ -2173,7 +2589,7 @@ function App() {
       };
       input.click();
     },
-    [flushImeCompositionSideEffects, setFileExplorerDir, showTabLimitNotice, tabManager],
+    [flushImeCompositionSideEffects, handleOpenLibraryManager, showTabLimitNotice, tabManager],
   );
 
   const handleSave = useCallback(
@@ -2189,6 +2605,7 @@ function App() {
   }, [ui.activeTab.internalDocId]);
 
   const handleCut = useCallback(() => {
+    if (coreRef.current?.getCommandAvailability().touchesNoteAnchor) return;
     cutSelection();
   }, []);
 
@@ -2259,6 +2676,16 @@ function App() {
     activeDocPreset !== null &&
     isSystemDocPreset(activeDocPreset) &&
     activeDocPreset.baseDocTheme === "ui-linked";
+  const activeUiPreset = activeUiThemePresetId
+    ? (uiThemePresets.find((preset) => preset.id === activeUiThemePresetId) ??
+      null)
+    : null;
+  const resolvedCaretColor = resolveCaretColor(
+    ui.caretColorMode,
+    ui.caretColorCustom,
+    ui.docColorSettings.pageColor,
+    resolveUiThemeAccentColor(uiTheme, activeUiPreset),
+  );
 
   useEffect(() => {
     if (!shouldFollowUiThemeForDocument) return;
@@ -2291,11 +2718,291 @@ function App() {
     ui.setDisplaySettingsOpen(false);
   }, [setRightPaneOpen, ui]);
 
-  const handleOpenDocumentSettingsPane = useCallback(() => {
-    setRightPaneOpen(true);
-    ui.setRightPaneTab("document");
-    ui.setDisplaySettingsOpen(false);
-  }, [setRightPaneOpen, ui]);
+  const handleRevealNoteInPanel = useCallback(
+    (id: string) => {
+      if (ui.activeTab.internalDocId) return;
+      if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) return;
+      setRightPaneOpen(true);
+      // 付箋 UI は Notes タブへ分離済み。marker click は Notes タブを開く。
+      ui.setRightPaneTab("notes");
+      ui.setDisplaySettingsOpen(false);
+      setFocusedDocumentNoteId(id);
+      // 同じ id でもイベントとして再通知し、reveal を必ず再発火させる。
+      setFocusedDocumentNoteSerial((serial) => serial + 1);
+      syncAnchoredNoteIds();
+    },
+    [setRightPaneOpen, syncAnchoredNoteIds, ui],
+  );
+
+  const handleDeleteOrphanNote = useCallback(
+    async (id: string): Promise<OrphanNoteDeleteResult> => {
+      if (ui.activeTab.internalDocId) {
+        return { kind: "cancelled" };
+      }
+      if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) {
+        return { kind: "cancelled" };
+      }
+
+      const t = createUiTextGetter(ui.uiLanguageMode);
+      if (!window.confirm(t("documentNotes.orphanDeleteConfirm"))) {
+        return { kind: "cancelled" };
+      }
+
+      const deps = {
+        getActiveFilePath: () => ui.activeTab.filePath,
+        isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+        getPlainModeKind,
+        getBridge: () => window.nyozeBridge?.project ?? null,
+        getAnchoredNoteIds: () => anchoredNoteIds,
+      };
+
+      const prepared = await prepareOrphanNoteDelete(deps);
+      if (prepared.kind === "blocked") {
+        return { kind: "failed", message: prepared.message };
+      }
+
+      const result = await commitOrphanNoteDelete(deps, {
+        activeFilePath: prepared.activeFilePath,
+        id,
+      });
+      if (result.kind === "failed") {
+        return { kind: "failed", message: result.message };
+      }
+
+      void refreshDocumentNotes();
+      void refreshMissingFileNotes();
+      void refreshNoteAnchorPreviews();
+      return { kind: "deleted" };
+    },
+    [
+      anchoredNoteIds,
+      getPlainModeKind,
+      refreshDocumentNotes,
+      refreshMissingFileNotes,
+      refreshNoteAnchorPreviews,
+      ui,
+    ],
+  );
+
+  const {
+    handleSaveNoteEdit,
+    handleMarkResolved,
+    handleReopenNote,
+    handleAddTag,
+    handleRenameTag,
+    handleDeleteTag,
+  } = useNotePanelActions({
+    getActiveFilePath: () => ui.activeTab.filePath,
+    isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+    isPlainModeActive: () => ui.fullPlainEditActive || ui.paragraphPlainModeActive,
+    getPlainModeKind,
+    getBridge: () => window.nyozeBridge?.project ?? null,
+    getUiLanguageMode: () => ui.uiLanguageMode,
+    onSaved: refreshAllNotePanels,
+  });
+
+  const missingFileDeleteDeps = useMemo(
+    () => ({
+      getActiveFilePath: () => ui.activeTab.filePath,
+      isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+      getPlainModeKind,
+      getBridge: () => window.nyozeBridge?.project ?? null,
+    }),
+    [getPlainModeKind, ui.activeTab.filePath, ui.activeTab.internalDocId],
+  );
+
+  const handleDeleteMissingFileNote = useCallback(
+    async (id: string): Promise<MissingFileNoteDeleteResult> => {
+      if (ui.activeTab.internalDocId) {
+        return { kind: "cancelled" };
+      }
+      if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) {
+        return { kind: "cancelled" };
+      }
+
+      const t = createUiTextGetter(ui.uiLanguageMode);
+      if (!window.confirm(t("documentNotes.missingFileDeleteConfirm"))) {
+        return { kind: "cancelled" };
+      }
+
+      const prepared = await prepareMissingFileNoteDelete(missingFileDeleteDeps);
+      if (prepared.kind === "blocked") {
+        return { kind: "failed", message: prepared.message };
+      }
+
+      const result = await commitMissingFileNoteDelete(missingFileDeleteDeps, {
+        activeFilePath: prepared.activeFilePath,
+        id,
+      });
+      if (result.kind === "failed") {
+        return { kind: "failed", message: result.message };
+      }
+
+      void refreshDocumentNotes();
+      void refreshMissingFileNotes();
+      void refreshNoteAnchorPreviews();
+      return { kind: "deleted" };
+    },
+    [
+      missingFileDeleteDeps,
+      refreshDocumentNotes,
+      refreshMissingFileNotes,
+      refreshNoteAnchorPreviews,
+      ui,
+    ],
+  );
+
+  const handleDeleteAllMissingFileNotes = useCallback(async (): Promise<MissingFileNoteDeleteResult> => {
+    if (ui.activeTab.internalDocId) {
+      return { kind: "cancelled" };
+    }
+    if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) {
+      return { kind: "cancelled" };
+    }
+    if (missingFileNotesState.kind !== "ready" || missingFileNotesState.notes.length === 0) {
+      return { kind: "cancelled" };
+    }
+
+    const t = createUiTextGetter(ui.uiLanguageMode);
+    if (!window.confirm(t("documentNotes.missingFileDeleteAllConfirm"))) {
+      return { kind: "cancelled" };
+    }
+
+    const prepared = await prepareMissingFileNoteDelete(missingFileDeleteDeps);
+    if (prepared.kind === "blocked") {
+      return { kind: "failed", message: prepared.message };
+    }
+
+    const result = await commitMissingFileNotesBulkDelete(missingFileDeleteDeps, {
+      activeFilePath: prepared.activeFilePath,
+      ids: missingFileNotesState.notes.map((note) => note.id),
+    });
+    if (result.kind === "failed") {
+      return { kind: "failed", message: result.message };
+    }
+
+    void refreshDocumentNotes();
+    void refreshMissingFileNotes();
+    void refreshNoteAnchorPreviews();
+    return { kind: "deleted" };
+  }, [
+    missingFileDeleteDeps,
+    missingFileNotesState,
+    refreshDocumentNotes,
+    refreshMissingFileNotes,
+    refreshNoteAnchorPreviews,
+    ui,
+  ]);
+
+  const handleDeleteNoteAnchor = useCallback(
+    async (id: string, domMarker: Element | null = null) => {
+      if (ui.activeTab.internalDocId) return;
+      if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) return;
+
+      const t = createUiTextGetter(ui.uiLanguageMode);
+      const activeFilePath = ui.activeTab.filePath;
+      const bridge = window.nyozeBridge?.project ?? null;
+      const deletePath = await resolveNoteAnchorDeletePath(bridge, activeFilePath, id);
+
+      if (deletePath === "markerOnly") {
+        if (!window.confirm(t("editor.noteAnchor.removeMarkerOnlyConfirm"))) return;
+
+        const markerOnlyDeps = {
+          isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+          getPlainModeKind,
+          removeAnchorAtDom: (markerElement: Element | null, noteId: string) =>
+            coreRef.current?.removeNoteAnchorAtDomMarker(markerElement, noteId) ?? false,
+        };
+        const prepared = await prepareNoteAnchorMarkerOnlyDelete(markerOnlyDeps);
+        if (prepared.kind === "blocked") {
+          ui.showEditorInlineHint(prepared.message);
+          return;
+        }
+
+        const result = commitNoteAnchorMarkerOnlyDelete(markerOnlyDeps, {
+          id,
+          domMarker,
+        });
+        if (result.kind === "failed") {
+          ui.showEditorInlineHint(result.message);
+          return;
+        }
+
+        syncAnchoredNoteIds();
+        void refreshNoteAnchorPreviews();
+        void refreshDocumentNotes();
+        void refreshMissingFileNotes();
+        return;
+      }
+
+      if (!window.confirm(t("editor.noteAnchor.deleteConfirm"))) return;
+
+      const prepared = await prepareNoteAnchorDelete({
+        getActiveFilePath: () => ui.activeTab.filePath,
+        isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+        getPlainModeKind,
+        getBridge: () => window.nyozeBridge?.project ?? null,
+        removeAnchor: (noteId) =>
+          coreRef.current?.removeNoteAnchorAtDomMarker(domMarker, noteId) ?? false,
+      });
+      if (prepared.kind === "blocked") {
+        ui.showEditorInlineHint(prepared.message);
+        return;
+      }
+
+      const result = await commitNoteAnchorDelete(
+        {
+          getActiveFilePath: () => ui.activeTab.filePath,
+          isInternalDoc: () => Boolean(ui.activeTab.internalDocId),
+          getPlainModeKind,
+          getBridge: () => window.nyozeBridge?.project ?? null,
+          removeAnchor: (noteId) =>
+            coreRef.current?.removeNoteAnchorAtDomMarker(domMarker, noteId) ?? false,
+        },
+        { activeFilePath: prepared.activeFilePath, id },
+      );
+      if (result.kind === "failed") {
+        ui.showEditorInlineHint(result.message);
+        return;
+      }
+
+      syncAnchoredNoteIds();
+      void refreshNoteAnchorPreviews();
+      void refreshDocumentNotes();
+      void refreshMissingFileNotes();
+    },
+    [
+      getPlainModeKind,
+      refreshDocumentNotes,
+      refreshMissingFileNotes,
+      refreshNoteAnchorPreviews,
+      syncAnchoredNoteIds,
+      ui,
+    ],
+  );
+
+  useEffect(() => {
+    const core = coreRef.current;
+    core?.setOnNoteAnchorReveal(handleRevealNoteInPanel);
+    return () => {
+      core?.setOnNoteAnchorReveal(null);
+    };
+  }, [handleRevealNoteInPanel]);
+
+  useEffect(() => {
+    syncAnchoredNoteIds();
+  }, [documentNotesState, syncAnchoredNoteIds, ui.activeTab.filePath]);
+
+  const noteAnchorContextMenuId = resolveNoteAnchorOnlyContextMenuId({
+    pmHasSelection: ctxMenu.hadTextSelectionAtOpen,
+    domHasTextSelection: false,
+    hadRecentEditorTextSelection: false,
+    domNoteAnchorContextId: ctxMenu.domNoteAnchorContextId,
+  });
+  const noteAnchorMarkerDeleteMode = deriveMarkerDeleteModeForMenu(
+    noteAnchorContextMenuId,
+    documentNotesState,
+  );
 
   const [pendingDocumentSettingsChange, setPendingDocumentSettingsChange] =
     useState<PendingDocumentSettingsChange | null>(null);
@@ -2404,6 +3111,7 @@ function App() {
     !documentSettingsSplit.hasFrontmatter;
   const canEditDocumentSettings =
     !ui.fullPlainEditActive &&
+    !ui.paragraphPlainModeActive &&
     !ui.activeTab.internalDocId &&
     !documentSettingsHasMalformedLeadingFence &&
     canSafelyPatchFrontmatter(documentSettingsSplit.frontmatterPrefix);
@@ -2419,6 +3127,7 @@ function App() {
     }) => {
       if (ui.activeTab.internalDocId) return;
       if (ui.fullPlainEditActive) return;
+      if (ui.paragraphPlainModeActive) return;
 
       const core = coreRef.current;
       if (!core) return;
@@ -2516,6 +3225,7 @@ function App() {
     },
     [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, ui],
   );
+  const handleDocumentWritingModeChange = useDocumentWritingModeChange(coreRef, ui);
 
   const openFullPlainEdit = useCallback(() => {
     if (ui.activeTab.internalDocId) return;
@@ -2699,6 +3409,13 @@ function App() {
   ]);
 
   const resolvedDocumentType = resolveDocumentType(ui.activeTab.frontmatterFields);
+  const displayedDocumentMetadata = resolveDisplayedDocumentMetadata({
+    fields: ui.activeTab.frontmatterFields,
+    filePath: ui.activeTab.filePath,
+    fallbackTitle: ui.activeTab.title,
+    inProject: activeFileMembership.inProject,
+    projectDisplayMetadata,
+  });
   const activeDocumentInfo: ActiveDocumentInfo = {
     characterCount: activeDocumentCharacterCount,
     createdAtText: ui.activeTab.filePath
@@ -2707,13 +3424,20 @@ function App() {
     updatedAtText: ui.activeTab.filePath
       ? formatDocumentInfoDate(activeDocumentStat?.mtimeMs ?? null)
       : "—",
-    pathText: ui.activeTab.filePath ?? "未保存",
-    pathTitle: ui.activeTab.filePath ?? "未保存",
+    pathText:
+      ui.activeTab.filePath ?? getUiText(ui.uiLanguageMode, "common.unsaved"),
+    pathTitle:
+      ui.activeTab.filePath ?? getUiText(ui.uiLanguageMode, "common.unsaved"),
     documentTypeLabel: formatDocumentTypeLabel(
       resolvedDocumentType,
       ui.uiLanguageMode,
     ),
     eolKind: ui.activeTab.eol,
+    // 文書 metadata（表示専用。frontmatter / Markdown には書き込まない）。
+    titleText: displayedDocumentMetadata.titleText,
+    authorText: displayedDocumentMetadata.authorText,
+    translatorText: displayedDocumentMetadata.translatorText,
+    writingModeLabel: formatWritingModeLabel(ui.writingMode, ui.uiLanguageMode),
   };
   const resolvedDocumentMarkdownOptions = resolveDocumentMarkdownOptions(
     ui.activeTab.frontmatterFields,
@@ -2722,6 +3446,20 @@ function App() {
     resolvedDocumentType === "article" &&
     ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs &&
     !resolvedDocumentMarkdownOptions.preserveEmptyParagraphs;
+
+  const editorTabActionsSlot = useEditorTabActionsSlot({
+    ui,
+    search,
+    largeDocGuard,
+    activeDocumentCharacterCount,
+    toggleParagraphPlainMode,
+    toggleFullPlainEdit,
+    handleToggleWritingMode,
+    headerCommandAvailability,
+    openPageViewer,
+    openBookPageViewer,
+    bookPageViewerToolbarAvailability,
+  });
 
   return (
     <main className="app-shell">
@@ -2740,31 +3478,11 @@ function App() {
         toolbarOffset={ui.toolbarOffset}
         onToolbarOffsetChange={ui.setToolbarOffset}
         onToolbarOffsetReset={ui.resetToolbarOffset}
-        rubyVisible={ui.rubyVisible}
         writingMode={ui.writingMode}
         availability={headerCommandAvailability}
         paragraphPlainModeActive={ui.paragraphPlainModeActive}
         fullPlainEditActive={ui.fullPlainEditActive}
         internalDocActive={Boolean(ui.activeTab.internalDocId)}
-        displaySettingsOpen={ui.displaySettingsOpen}
-        typewriterModeEnabled={ui.typewriterModeEnabled}
-        onTypewriterModeEnabledChange={ui.setTypewriterModeEnabled}
-        visualFocusBlockHighlightEnabled={ui.visualFocusBlockHighlightEnabled}
-        onVisualFocusBlockHighlightEnabledChange={
-          ui.setVisualFocusBlockHighlightEnabled
-        }
-        visualFocusDimNonFocusedBlocksEnabled={
-          ui.visualFocusDimNonFocusedBlocksEnabled
-        }
-        onVisualFocusDimNonFocusedBlocksEnabledChange={
-          ui.setVisualFocusDimNonFocusedBlocksEnabled
-        }
-        visualFocusCurrentLineHighlightEnabled={
-          ui.visualFocusCurrentLineHighlightEnabled
-        }
-        onVisualFocusCurrentLineHighlightEnabledChange={
-          ui.setVisualFocusCurrentLineHighlightEnabled
-        }
         onRunMarkCommand={runMarkCommand}
         onUndo={guardedUndo}
         onRedo={guardedRedo}
@@ -2776,40 +3494,36 @@ function App() {
         onToggleChecklist={handleToggleChecklist}
         onToggleBlockquote={handleToggleBlockquote}
         onToggleCodeBlock={handleToggleCodeBlock}
+        onApplyBlockDirective={blockDirective.apply}
+        onRemoveBlockDirective={blockDirective.remove}
+        onInsertPageBreak={blockDirective.insertPageBreak}
+        onDeletePageBreak={blockDirective.deletePageBreak}
+        onInsertBlankPage={blockDirective.insertBlankPage}
         onClearFormat={handleClearFormat}
         onSetOrUnsetLink={guardedOpenLinkPrompt}
         onInsertImage={guardedOpenImagePrompt}
         onInsertRubyBouten={guardedOpenRubyBoutenPrompt}
+        onAddNoteAnchor={openNoteAnchorPrompt}
         onToggleTcy={handleToggleTcy}
-        onToggleRubyVisible={() => {
-          const charCount = activeDocumentCharacterCount;
-          largeDocGuard.requestGuardedAction(
-            charCount,
-            "ルビ表示の切替は、大きな文書では数秒かかる場合があります。続行しますか。",
-            () => ui.setRubyVisible((v) => !v),
-          );
-        }}
-        onToggleWritingMode={handleToggleWritingMode}
-        documentType={resolvedDocumentType}
-        hasDocumentBehaviorOverride={ui.lineBreakPolicyLockReason === "frontmatter"}
-        onOpenDocumentSettings={handleOpenDocumentSettingsPane}
-        onToggleParagraphPlainMode={toggleParagraphPlainMode}
-        onToggleFullPlainEdit={toggleFullPlainEdit}
-        onOpenDisplaySettings={() => ui.setDisplaySettingsOpen(true)}
-        onOpenDisplaySettingsForTypewriter={() =>
-          ui.setDisplaySettingsOpen(true, { expandSection: "typewriter" })
-        }
         onShowEditorInlineHint={ui.showEditorInlineHint}
-        searchOpen={search.state.open}
-        onOpenSearch={search.openSearch}
         onLoad={handleLoad}
         onSave={handleSave}
         onOpenAppMenu={handleOpenAppMenu}
         appTitleVisible={ui.appTitleVisible}
         appTitleText={ui.appTitleText}
+        chapterNavSlot={
+          <ToolbarChapterNavContainer
+            getActiveFilePath={() => ui.activeTab.filePath} isInternalDoc={() => Boolean(ui.activeTab.internalDocId)}
+            uiLanguageMode={ui.uiLanguageMode} writingMode={ui.writingMode} loadIntoActiveTab={tabManager.loadIntoActiveTab} openFileInTab={tabManager.openFileInTab}
+            flushImeCompositionSideEffects={flushImeCompositionSideEffects} onTabLimit={showTabLimitNotice}
+            navigationDisabled={ui.fullPlainEditActive || ui.paragraphPlainModeActive}
+            projectRefreshNonce={projectRefreshNonce}
+          />
+        }
       />
 
       <Workspace
+        editorTabActionsSlot={editorTabActionsSlot}
         workspaceRef={workspaceRef}
         editorDivRef={editorDivRef}
         sourceModeController={sourceModeController}
@@ -2819,6 +3533,12 @@ function App() {
         rightPaneOpen={rightPaneOpen}
         rightWidth={rightWidth}
         fileExplorerDir={fileExplorerDir}
+        fileExplorerLeftPaneTab={fileExplorerLeftPaneTab} fileExplorerProjectsPaneView={fileExplorerProjectsPaneView}
+        onFileExplorerSelectLibraryTab={handleFileExplorerSelectLibraryTab} onFileExplorerShowProjectList={handleFileExplorerShowProjectList}
+        fileExplorerProjectListState={fileExplorerProjectListState} onFileExplorerOpenProjectRoot={handleFileExplorerOpenProjectRoot}
+        fileExplorerShowLibraryOnboarding={showLibraryOnboarding} onFileExplorerOpenLibraryManager={handleOpenLibraryManager}
+        fileExplorerExternalFileActive={externalFileActive} fileExplorerExternalFileName={externalFileName}
+        fileExplorerDocumentContext={documentContextInfo}
         fileExplorerRootLoaded={fileExplorerRootLoaded}
         fileExplorerEntries={fileExplorerEntries}
         fileExplorerClipboardMode={fileExplorerClipboardMode}
@@ -2827,16 +3547,20 @@ function App() {
         activeDocumentInfo={activeDocumentInfo}
         canFileExplorerPaste={canFileExplorerPaste}
         tabs={ui.tabs}
+        tabRoles={editorTabRoles}
         activeTabId={ui.activeTabId}
         fullPlainEditActive={ui.fullPlainEditActive}
+        paragraphPlainModeActive={ui.paragraphPlainModeActive}
         fullPlainEditValue={ui.fullPlainEditValue}
         fullPlainEditError={ui.fullPlainEditError}
         fullPlainEditInitialScrollOffset={ui.activeTab.sourceModeTopOffset}
         rubyVisible={ui.rubyVisible}
-        frontmatterVisible={ui.frontmatterVisible}
-        frontmatterShowAuthors={ui.frontmatterShowAuthors}
+        frontmatterVisible={standaloneFrontmatterVisible}
+        frontmatterShowTitle={true}
+        frontmatterViewShowAuthors={ui.frontmatterShowAuthors}
         frontmatterShowTranslators={ui.frontmatterShowTranslators}
         frontmatterShowRoleLabels={ui.frontmatterShowRoleLabels}
+        projectDocumentStartDisplay={projectDocumentStartDisplay}
         writingMode={ui.writingMode}
         frontmatterFields={ui.activeTab.frontmatterFields}
         effectiveLineBreakPolicy={ui.effectiveLineBreakPolicy}
@@ -2853,6 +3577,8 @@ function App() {
         onDividerMouseDown={handleDividerMouseDown}
         onFileExplorerCreateNote={handleCreateNote}
         onFileExplorerCreateFolder={handleCreateFolder}
+        onFileExplorerCreateProjectForFolder={handleCreateProjectForFolder}
+        fileExplorerRegistration={fileExplorerRegistration}
         onFileExplorerRenameEntry={handleRenameEntry}
         onFileExplorerDeleteEntry={handleDeleteEntry}
         onFileExplorerRevealInFileManager={handleRevealInFileManager}
@@ -2889,11 +3615,8 @@ function App() {
         onToggleHeadingFold={handleToggleHeadingFold}
         onRequestHeadingPreview={handleRequestHeadingPreview}
         onScrollToPos={(pos) => coreRef.current?.scrollToPos(pos)}
-        caretColor={resolveCaretColor(
-          ui.caretColorMode,
-          ui.caretColorCustom,
-          ui.docColorSettings.pageColor,
-        )}
+        caretColor={resolvedCaretColor}
+        pseudoCaretEnabled={ui.pseudoCaretEnabled}
         useEditorArrowPointer={ui.useEditorArrowPointer}
         typewriterRuntimeRef={typewriterRuntimeRef}
         onEmptyUntitledSurfaceClick={() => {
@@ -2938,16 +3661,13 @@ function App() {
             </p>
           ) : (
             <DocumentSettingsPanel
+              {...documentSettingsGlue}
               canEdit={canEditDocumentSettings}
               fullPlainEditActive={ui.fullPlainEditActive}
               uiLanguageMode={ui.uiLanguageMode}
               documentType={resolvedDocumentType}
-              preserveEmptyParagraphs={
-                ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs
-              }
-              preserveEmptyParagraphsAutoDetected={
-                autoProtectedPreserveEmptyParagraphs
-              }
+              preserveEmptyParagraphs={ui.activeTab.documentMarkdownOptions.preserveEmptyParagraphs}
+              preserveEmptyParagraphsAutoDetected={autoProtectedPreserveEmptyParagraphs}
               title={ui.activeTab.frontmatterFields.title ?? ""}
               author={ui.activeTab.frontmatterFields.author ?? ""}
               translator={ui.activeTab.frontmatterFields.translator ?? ""}
@@ -2955,16 +3675,100 @@ function App() {
                 ui.lineBreakPolicyLockReason === "frontmatter"
               }
               writingMode={ui.writingMode}
-              recommendedWritingMode={ui.typeRecommendedWritingMode}
               writingModeFollowsTypeRecommendation={
                 ui.writingModeFollowsTypeRecommendation
               }
+              documentWritingMode={ui.documentWritingMode}
+              documentWritingModeUnsupported={ui.documentWritingModeUnsupported}
+              paragraphPlainModeActive={ui.paragraphPlainModeActive}
               onChangeSettings={handleDocumentSettingsChange}
-              onResetWritingModeToRecommendation={
+              onClearManualWritingModeOverride={
                 ui.resetWritingModeToTypeRecommendation
               }
+              onChangeDocumentWritingMode={handleDocumentWritingModeChange}
             />
           )
+        }
+        notesPaneSlot={
+          ui.activeTab.internalDocId ? null : (
+            <>
+              <DocumentNotesPanel
+                state={documentNotesState}
+                uiLanguageMode={ui.uiLanguageMode}
+                anchoredNoteIds={anchoredNoteIds}
+                focusedNoteId={focusedDocumentNoteId}
+                focusedNoteEventKey={focusedDocumentNoteSerial}
+                orphanDeleteEnabled={
+                  !ui.fullPlainEditActive && !ui.paragraphPlainModeActive
+                }
+                onDeleteOrphanNote={handleDeleteOrphanNote}
+                noteEditEnabled={!ui.fullPlainEditActive && !ui.paragraphPlainModeActive}
+                tagSlotsEnabled={!ui.fullPlainEditActive && !ui.paragraphPlainModeActive}
+                tagContext={
+                  documentNotesState.kind === 'ready' || documentNotesState.kind === 'empty'
+                    ? documentNotesState.tagContext
+                    : undefined
+                }
+                statusUpdateEnabled={!ui.fullPlainEditActive && !ui.paragraphPlainModeActive}
+                onSaveNoteEdit={handleSaveNoteEdit}
+                onAddTag={handleAddTag}
+                onRenameTag={handleRenameTag}
+                onDeleteTag={handleDeleteTag}
+                onMarkResolved={handleMarkResolved} onReopenNote={handleReopenNote}
+                onJumpToNote={(id) => {
+                  if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) {
+                    return false;
+                  }
+                  return coreRef.current?.scrollToNoteAnchor(id) ?? false;
+                }}
+              />
+              <MissingFileNotesSection
+                state={missingFileNotesState}
+                uiLanguageMode={ui.uiLanguageMode}
+                deleteEnabled={
+                  !ui.fullPlainEditActive && !ui.paragraphPlainModeActive
+                }
+                onDeleteNote={handleDeleteMissingFileNote}
+                onDeleteAll={handleDeleteAllMissingFileNotes}
+              />
+            </>
+          )
+        }
+        projectPaneSlot={
+          <ProjectPaneContainer
+            getActiveFilePath={() => ui.activeTab.filePath} isInternalDoc={() => Boolean(ui.activeTab.internalDocId)}
+            uiLanguageMode={ui.uiLanguageMode} loadIntoActiveTab={tabManager.loadIntoActiveTab} openFileInTab={tabManager.openFileInTab}
+            flushImeCompositionSideEffects={flushImeCompositionSideEffects} onTabLimit={showTabLimitNotice}
+            projectRefreshNonce={projectRefreshNonce}
+            onProjectUnregistered={notifyProjectUnregistered}
+            onRevealProjectInExplorer={handleFileExplorerOpenProjectRoot}
+            projectPanelContext={projectPanelContext}
+            onProjectSwitcherContextChange={setProjectSwitcherRoot}
+            onProjectBooksChanged={() => setProjectRefreshNonce((nonce) => nonce + 1)}
+          />
+        }
+        bookOutlineSlot={
+          <BookOutlinePaneContainer
+            getActiveFilePath={() => ui.activeTab.filePath} isInternalDoc={() => Boolean(ui.activeTab.internalDocId)}
+            uiLanguageMode={ui.uiLanguageMode} loadIntoActiveTab={tabManager.loadIntoActiveTab} openFileInTab={tabManager.openFileInTab}
+            flushImeCompositionSideEffects={flushImeCompositionSideEffects} onTabLimit={showTabLimitNotice}
+            getDocumentHeadings={() => coreRef.current?.getHeadings() ?? []} activeHeadingIndex={ui.activeHeadingIndex}
+            scrollToPos={(pos) => coreRef.current?.scrollToPos(pos)}
+            navigationDisabled={ui.fullPlainEditActive || ui.paragraphPlainModeActive}
+            projectRefreshNonce={projectRefreshNonce}
+          />
+        }
+        chapterBoundaryNavSlot={
+          <EditorChapterBoundaryNavContainer
+            getActiveFilePath={() => ui.activeTab.filePath} isInternalDoc={() => Boolean(ui.activeTab.internalDocId)}
+            uiLanguageMode={ui.uiLanguageMode} writingMode={ui.writingMode}
+            getScrollHost={() => (editorDivRef.current?.closest(".editor-surface") as HTMLElement | null) ?? null}
+            loadIntoActiveTab={tabManager.loadIntoActiveTab} openFileInTab={tabManager.openFileInTab}
+            flushImeCompositionSideEffects={flushImeCompositionSideEffects} onTabLimit={showTabLimitNotice}
+            navigationDisabled={ui.fullPlainEditActive || ui.paragraphPlainModeActive}
+            getIsComposing={() => coreRef.current?.isComposing() ?? false}
+            projectRefreshNonce={projectRefreshNonce}
+          />
         }
         themeStudioSlot={
           <ThemeStudioPanel
@@ -3027,6 +3831,7 @@ function App() {
         onItalic={() => runMarkCommand("italic")}
         onStrike={() => runMarkCommand("strike")}
         onHighlight={() => runMarkCommand("highlight")}
+        onUnderline={() => runMarkCommand("underline")}
         onHeading={handleCtxHeading}
         onBulletList={handleToggleBulletList}
         onOrderedList={handleToggleOrderedList}
@@ -3036,6 +3841,18 @@ function App() {
         onClearFormat={handleClearFormat}
         onMoveListUp={handleCtxMoveUp}
         onMoveListDown={handleCtxMoveDown}
+        onApplyBlockDirective={blockDirective.apply}
+        onRemoveBlockDirective={blockDirective.remove}
+        onInsertPageBreak={blockDirective.insertPageBreak}
+        onDeletePageBreak={blockDirective.deletePageBreak}
+        onInsertBlankPage={blockDirective.insertBlankPage}
+        noteAnchorContextId={noteAnchorContextMenuId}
+        noteAnchorMarkerDeleteMode={noteAnchorMarkerDeleteMode}
+        onShowNoteInPanel={handleRevealNoteInPanel}
+        onDeleteNoteAnchor={(id) => {
+          void handleDeleteNoteAnchor(id, ctxMenu.domNoteAnchorContextTarget);
+        }}
+        showAddNoteAnchor={!internalShortcutDocActive} contextMenuSelectionRange={ctxMenu.selectionRange} onOpenNoteAnchorPrompt={openNoteAnchorPrompt}
         onClose={closeCtxMenu}
       />
 
@@ -3051,6 +3868,14 @@ function App() {
         prompt={fileExplorerNamePrompt}
         onCancel={cancelFileExplorerNamePrompt}
         onSubmit={submitFileExplorerNamePrompt}
+      />
+
+      <ExplorerProjectCreateModalHost
+        target={projectCreateModalTarget}
+        uiLanguageMode={ui.uiLanguageMode}
+        onCancel={closeProjectCreateModal}
+        notifyProjectCreatedForFolder={notifyProjectCreatedForFolder}
+        onProjectCreated={() => setProjectRefreshNonce((nonce) => nonce + 1)}
       />
 
       <UnsavedChangesModal
@@ -3070,9 +3895,22 @@ function App() {
         onAction={resolveSaveFailureAction}
       />
 
+      <ExportOptionsModal prompt={externalExportOptionsPrompt} uiLanguageMode={ui.uiLanguageMode} resolveInitialSelection={resolveInitialSelection} onConfirm={confirmExportOptions} onCancel={cancelExportOptions} />
+      <WebBookCapacityConfirmModal
+        capacity={webBookCapacityConfirm}
+        uiLanguageMode={ui.uiLanguageMode}
+        onResolve={resolveCapacityConfirm}
+      />
+      <BookExportResultDetailsModal state={bookExportResultDetails} uiLanguageMode={ui.uiLanguageMode} onClose={closeBookExportResultDetails} />
+
       <BackupWarningNotice
         message={backupWarningMessage}
         onDismiss={dismissBackupWarning}
+      />
+
+      <LibraryManagerModal
+        open={libraryManagerOpen} t={createUiTextGetter(ui.uiLanguageMode)}
+        onClose={handleCloseLibraryManager} onLibraryActivated={handleLibraryActivated}
       />
 
       <DisplaySettingsModal
@@ -3081,6 +3919,8 @@ function App() {
         onExpandSectionOnOpenConsumed={() => ui.setDisplaySettingsExpandSectionKey(null)}
         displaySettings={ui.displaySettings}
         writingMode={ui.writingMode}
+        documentTypeWritingModeDefaults={ui.documentTypeWritingModeDefaults}
+        onChangeDocumentTypeWritingModeDefault={ui.setDocumentTypeWritingModeDefaults}
         uiLanguageMode={ui.uiLanguageMode}
         platform={ui.platform}
         theme={ui.theme}
@@ -3109,6 +3949,9 @@ function App() {
         frontmatterShowAuthors={ui.frontmatterShowAuthors}
         frontmatterShowTranslators={ui.frontmatterShowTranslators}
         frontmatterShowRoleLabels={ui.frontmatterShowRoleLabels}
+        frontmatterShowInProjectFiles={ui.frontmatterShowInProjectFiles}
+        frontmatterProjectShowTitle={ui.frontmatterProjectShowTitle}
+        frontmatterProjectShowAuthors={ui.frontmatterProjectShowAuthors}
         onClose={() => ui.setDisplaySettingsOpen(false)}
         onReset={() => {
           ui.setDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
@@ -3130,7 +3973,15 @@ function App() {
           ui.setFrontmatterShowAuthors(DEFAULT_FRONTMATTER_SHOW_AUTHORS);
           ui.setFrontmatterShowTranslators(DEFAULT_FRONTMATTER_SHOW_TRANSLATORS);
           ui.setFrontmatterShowRoleLabels(DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS);
+          ui.setFrontmatterShowInProjectFiles(
+            DEFAULT_FRONTMATTER_SHOW_IN_PROJECT_FILES,
+          );
+          ui.setFrontmatterProjectShowTitle(DEFAULT_FRONTMATTER_PROJECT_SHOW_TITLE);
+          ui.setFrontmatterProjectShowAuthors(DEFAULT_FRONTMATTER_PROJECT_SHOW_AUTHORS);
           ui.setUseEditorArrowPointer(DEFAULT_EDITOR_ARROW_POINTER);
+          ui.setPseudoCaretEnabled(DEFAULT_PSEUDO_CARET_ENABLED);
+          ui.setPseudoCaretThickness(DEFAULT_PSEUDO_CARET_THICKNESS);
+          ui.setPseudoCaretBlinkEnabled(DEFAULT_PSEUDO_CARET_BLINK_ENABLED);
           ui.setParagraphPlainBehavior("fast");
           ui.setTypewriterModeEnabled(DEFAULT_TYPEWRITER_MODE_ENABLED);
           ui.setTypewriterOffsetRatio(DEFAULT_TYPEWRITER_OFFSET_RATIO);
@@ -3185,12 +4036,23 @@ function App() {
         onFrontmatterShowAuthorsChange={ui.setFrontmatterShowAuthors}
         onFrontmatterShowTranslatorsChange={ui.setFrontmatterShowTranslators}
         onFrontmatterShowRoleLabelsChange={ui.setFrontmatterShowRoleLabels}
+        onFrontmatterShowInProjectFilesChange={
+          ui.setFrontmatterShowInProjectFiles
+        }
+        onFrontmatterProjectShowTitleChange={ui.setFrontmatterProjectShowTitle}
+        onFrontmatterProjectShowAuthorsChange={ui.setFrontmatterProjectShowAuthors}
         caretColorMode={ui.caretColorMode}
         caretColorCustom={ui.caretColorCustom}
         useEditorArrowPointer={ui.useEditorArrowPointer}
         onCaretColorModeChange={ui.setCaretColorMode}
         onCaretColorCustomChange={ui.setCaretColorCustom}
         onUseEditorArrowPointerChange={ui.setUseEditorArrowPointer}
+        pseudoCaretEnabled={ui.pseudoCaretEnabled}
+        onPseudoCaretEnabledChange={ui.setPseudoCaretEnabled}
+        pseudoCaretThickness={ui.pseudoCaretThickness}
+        onPseudoCaretThicknessChange={ui.setPseudoCaretThickness}
+        pseudoCaretBlinkEnabled={ui.pseudoCaretBlinkEnabled}
+        onPseudoCaretBlinkEnabledChange={ui.setPseudoCaretBlinkEnabled}
         paragraphPlainBehavior={ui.paragraphPlainBehavior}
         onParagraphPlainBehaviorChange={ui.setParagraphPlainBehavior}
         typewriterModeEnabled={ui.typewriterModeEnabled}
@@ -3230,6 +4092,7 @@ function App() {
           ui.setVisualFocusCurrentLineHighlightOpacity
         }
         onOpenThemeStudio={handleOpenThemeStudioPane}
+        onOpenLibraryManager={handleOpenLibraryManagerFromDisplaySettings}
         onSendBugReport={() => void sendBugReport()}
         onSendFeedback={() => void sendFeedback()}
         onOpenRepository={() => void openRepository()}
@@ -3314,6 +4177,17 @@ function App() {
         onImageSrcChange={setImageSrc}
         onImageAltChange={setImageAlt}
         onImageTitleChange={setImageTitle}
+      />
+
+      <NoteAnchorModal
+        modal={noteAnchorModal}
+        titleValue={noteAnchorTitleValue}
+        bodyValue={noteAnchorBodyValue}
+        onTitleValueChange={setNoteAnchorTitleValue}
+        onBodyValueChange={setNoteAnchorBodyValue}
+        onFirstNoticeConfirm={handleNoteAnchorFirstNoticeConfirm}
+        onSubmit={handleNoteAnchorSubmit}
+        onCancel={handleNoteAnchorCancel}
       />
     </main>
   );

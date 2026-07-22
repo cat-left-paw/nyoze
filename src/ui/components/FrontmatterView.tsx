@@ -3,9 +3,14 @@ import type { FrontmatterFields } from '../../editor-core/io/frontmatter'
 type FrontmatterViewProps = {
   fields: FrontmatterFields
   visible: boolean
+  showTitle: boolean
   showAuthors: boolean
   showTranslators: boolean
   showRoleLabels: boolean
+  authorLabel: string
+  coAuthorLabel: string
+  translatorLabel: string
+  coTranslatorLabel: string
 }
 
 function PersonLine({
@@ -57,12 +62,17 @@ function PersonListLines({
 export function FrontmatterView({
   fields,
   visible,
+  showTitle,
   showAuthors,
   showTranslators,
   showRoleLabels,
+  authorLabel,
+  coAuthorLabel,
+  translatorLabel,
+  coTranslatorLabel,
 }: FrontmatterViewProps) {
   if (!visible) return null
-  const hasTitle = !!(fields.title || fields.original_title || fields.subtitle)
+  const hasTitle = showTitle && !!(fields.title || fields.original_title || fields.subtitle)
   const hasCredits = !!(
     (showAuthors &&
       (fields.author || (fields.co_authors && fields.co_authors.length > 0))) ||
@@ -91,21 +101,21 @@ export function FrontmatterView({
       {hasCredits && (
         <div className='frontmatter-bottom'>
           {showAuthors && fields.author && (
-            <PersonLine label='著' name={fields.author} showRoleLabels={showRoleLabels} />
+            <PersonLine label={authorLabel} name={fields.author} showRoleLabels={showRoleLabels} />
           )}
           {showAuthors && fields.co_authors && fields.co_authors.length > 0 && (
             <PersonListLines
-              label='共著'
+              label={coAuthorLabel}
               names={fields.co_authors}
               showRoleLabels={showRoleLabels}
             />
           )}
           {showTranslators && fields.translator && (
-            <PersonLine label='訳' name={fields.translator} showRoleLabels={showRoleLabels} />
+            <PersonLine label={translatorLabel} name={fields.translator} showRoleLabels={showRoleLabels} />
           )}
           {showTranslators && fields.co_translators && fields.co_translators.length > 0 && (
             <PersonListLines
-              label='共訳'
+              label={coTranslatorLabel}
               names={fields.co_translators}
               showRoleLabels={showRoleLabels}
             />

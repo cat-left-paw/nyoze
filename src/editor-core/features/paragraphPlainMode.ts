@@ -281,6 +281,8 @@ export interface ParagraphPlainModeController {
   isActive(): boolean
   /** Commit in-overlay edits to PM Doc when Paragraph Plain is active. */
   commitIfActive(): boolean
+  /** True when overlay text differs from the original block markdown. */
+  hasPendingOverlayChanges(): boolean
   /** Execute native undo on the paragraph plain overlay textarea. */
   undoOverlay(): void
   /** Execute native redo on the paragraph plain overlay textarea. */
@@ -308,6 +310,16 @@ export function commitParagraphPlainIfActive(params: {
   return params.commitCurrentParagraphPlain(true, {
     preserveSelection: true,
   })
+}
+
+export function hasParagraphPlainPendingOverlayChanges(params: {
+  active: boolean
+  overlayValue: string | null | undefined
+  originalMarkdown: string | null | undefined
+}): boolean {
+  if (!params.active) return false
+  if (params.overlayValue == null || params.originalMarkdown == null) return false
+  return params.overlayValue !== params.originalMarkdown
 }
 
 export function resolveParagraphPlainSplitBeforeNode({
@@ -2128,6 +2140,14 @@ export function createParagraphPlainModeController(
     })
   }
 
+  function hasPendingOverlayChanges(): boolean {
+    return hasParagraphPlainPendingOverlayChanges({
+      active: paragraphPlainActive,
+      overlayValue: paragraphPlainOverlayEl?.value,
+      originalMarkdown: paragraphPlainCurrent?.originalMarkdown,
+    })
+  }
+
   function onModeChange(listener: ParagraphPlainModeListener): () => void {
     paragraphPlainModeListeners.add(listener)
     return () => {
@@ -2166,6 +2186,7 @@ export function createParagraphPlainModeController(
     toggleMode,
     isActive,
     commitIfActive,
+    hasPendingOverlayChanges,
     undoOverlay,
     redoOverlay,
     selectAllOverlay,

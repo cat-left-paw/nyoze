@@ -3,10 +3,14 @@
  *
  * - auto: pageColor の輝度から高コントラストな色を自動決定
  * - custom: ユーザー指定の hex 色をそのまま使用
+ * - highlight: 現在の UI テーマ accent 色を使用
  * - 不正値は auto にフォールバック
  */
 
-export type CaretColorMode = 'auto' | 'custom'
+import type { Theme, UiThemePreset } from '../settings/types'
+import { UI_THEME_MAIN_COLORS } from '../settings/defaults'
+
+export type CaretColorMode = 'auto' | 'custom' | 'highlight'
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
@@ -15,12 +19,24 @@ export function isValidCaretColorCustom(value: unknown): value is string {
 }
 
 export function normalizeCaretColorMode(value: unknown): CaretColorMode {
-  if (value === 'auto' || value === 'custom') return value
+  if (value === 'auto' || value === 'custom' || value === 'highlight') return value
   return 'auto'
 }
 
 export function normalizeCaretColorCustom(value: unknown): string | null {
   return isValidCaretColorCustom(value) ? value : null
+}
+
+/**
+ * 現在の UI テーマ（または active UI preset）の accent 色を返す。
+ * theme preset に新フィールドは追加せず、既存 `colors.accent` を正本とする。
+ */
+export function resolveUiThemeAccentColor(
+  theme: Theme,
+  activePreset: UiThemePreset | null | undefined,
+): string {
+  const accent = activePreset?.colors.accent ?? UI_THEME_MAIN_COLORS[theme].accent
+  return isValidCaretColorCustom(accent) ? accent : UI_THEME_MAIN_COLORS.mist.accent
 }
 
 /**
@@ -50,15 +66,20 @@ function autoCaretColor(pageColor: string): string {
 
 /**
  * 実効キャレット色文字列を返す。
- * CSS の caret-color プロパティに直接設定できる値。
+ * CSS の caret-color / --editor-caret-color に直接設定できる値。
  */
 export function resolveCaretColor(
   mode: CaretColorMode,
   customColor: string | null,
   pageColor: string,
+  uiThemeAccentColor?: string,
 ): string {
   if (mode === 'custom' && isValidCaretColorCustom(customColor)) {
     return customColor
+  }
+  if (mode === 'highlight') {
+    if (isValidCaretColorCustom(uiThemeAccentColor)) return uiThemeAccentColor
+    return autoCaretColor(pageColor)
   }
   return autoCaretColor(pageColor)
 }

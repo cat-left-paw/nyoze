@@ -135,6 +135,8 @@ export function createEditorSurfaceWheelController(
 
   return {
     onWheel(event: WheelEvent): void {
+      // capture phase で章境界ナビゲーションが受理した event は、ここで再度 scroll しない。
+      if (event.defaultPrevented) return
       if (!isTypewriterTrailingWheelZone(proseMirrorDom, editorSurface, event.target)) return
       verticalWheel.onWheel(event)
       if (event.defaultPrevented) return

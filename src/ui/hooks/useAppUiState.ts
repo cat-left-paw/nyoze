@@ -13,8 +13,10 @@ import { setParagraphPlainFormalBehaviorRuntime } from "../../editor-core/featur
 import type { FrontmatterFields } from "../../editor-core/io/frontmatter";
 import {
   resolveDocumentType,
+  resolveEffectiveWritingMode,
+  resolveFrontmatterWritingMode,
+  resolveTypeDefaultWritingMode,
   resolveTypeDerivedLineBreakPolicy,
-  resolveTypeRecommendedWritingMode,
 } from "../../editor-core/io/frontmatterDocumentSettings";
 import type { SavedFileStat } from "../utils/externalEditConflict";
 import type { InternalDocId } from "../internalDocs/internalDocIds";
@@ -24,11 +26,18 @@ import {
   APP_TITLE_PRESET_TEXTS,
   DEFAULT_DISPLAY_SETTINGS,
   DEFAULT_FRONTMATTER_SHOW_AUTHORS,
+  DEFAULT_FRONTMATTER_SHOW_IN_PROJECT_FILES,
+  DEFAULT_FRONTMATTER_PROJECT_SHOW_TITLE,
+  DEFAULT_FRONTMATTER_PROJECT_SHOW_AUTHORS,
   DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
   DEFAULT_FRONTMATTER_SHOW_TRANSLATORS,
   DEFAULT_FRONTMATTER_VISIBLE,
   DEFAULT_LINE_BREAK_POLICY,
   DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
+  DEFAULT_PSEUDO_CARET_BLINK_ENABLED,
+  DEFAULT_NOTE_ANCHOR_NOTICE_CONFIRMED,
+  DEFAULT_PSEUDO_CARET_ENABLED,
+  DEFAULT_PSEUDO_CARET_THICKNESS,
   DEFAULT_TYPEWRITER_FOLLOW_BAND_RATIO,
   DEFAULT_TYPEWRITER_MODE_ENABLED,
   DEFAULT_TYPEWRITER_OFFSET_RATIO,
@@ -70,6 +79,12 @@ import {
   normalizeVisualFocusDimNonFocusedBlocksEnabled,
 } from "../../settings/visualFocusSettings";
 import { normalizeMacosArrowScrollClampEnabled } from "../../settings/macosArrowScrollClampSettings";
+import {
+  normalizePseudoCaretBlinkEnabled,
+  normalizePseudoCaretEnabled,
+  normalizePseudoCaretThickness,
+} from "../../settings/pseudoCaretSettings";
+import { normalizeNoteAnchorNoticeConfirmed } from "../../settings/noteAnchorSettings";
 import { normalizeUiLanguageMode } from "../../settings/uiLanguageMode";
 import { normalizeTheme } from "../../settings/themeUtils";
 import {
@@ -140,6 +155,10 @@ import {
   validateUiThemePresets,
   validateDocThemePresets,
 } from "../../settings/storage";
+import {
+  DEFAULT_DOCUMENT_TYPE_WRITING_MODE_DEFAULTS,
+  resolveDocumentTypeWritingModeDefaultsFromSettings,
+} from "../../settings/writingModeDefaults";
 import type {
   AppTitleFont,
   AppTitlePreset,
@@ -152,6 +171,7 @@ import type {
   DocumentFontPreset,
   DocumentHeadingFont,
   DocumentTheme,
+  DocumentTypeWritingModeDefaults,
   Theme,
   UiFont,
   UiLanguageMode,
@@ -189,10 +209,12 @@ const IS_DEV = import.meta.env.DEV;
 
 export const EMPTY_COMMAND_AVAILABILITY: CommandAvailability = {
   hasSelection: false,
+  hasNonAnchorTextSelection: false,
   canBold: false,
   canItalic: false,
   canStrike: false,
   canHighlight: false,
+  canUnderline: false,
   canInlineCode: false,
   canClearFormat: false,
   canBlockTransforms: false,
@@ -212,15 +234,23 @@ export const EMPTY_COMMAND_AVAILABILITY: CommandAvailability = {
   isItalic: false,
   isStrike: false,
   isHighlight: false,
+  isUnderline: false,
   isInlineCode: false,
   isBulletList: false,
   isOrderedList: false,
   isChecklist: false,
   isBlockquote: false,
   isCodeBlock: false,
+  canBlockDirective: false,
+  blockDirectiveToken: null,
+  canDeletePageBreak: false,
+  noteAnchorContextId: null,
+  touchesNoteAnchor: false,
+  canShowNoteInPanel: false,
+  canDeleteNoteAnchor: false,
 };
 
-export type RightPaneTab = "outline" | "document" | "theme";
+export type RightPaneTab = "outline" | "document" | "notes" | "project" | "theme";
 
 export type EditorTab = {
   id: string;
@@ -307,11 +337,6 @@ type EnsureSafeLineBreakPolicyBeforeDocumentLoadOptions = {
   targetTabSnapshot?: LineBreakPolicyTargetTab;
 };
 
-type WritingModeTargetTab = Pick<
-  EditorTab,
-  "frontmatterFields" | "writingMode" | "writingModeFollowsTypeRecommendation"
->;
-
 export type LineBreakPolicyLockReason = "frontmatter" | "type" | null;
 
 let untitledCounter = 0;
@@ -357,16 +382,6 @@ function resolveLineBreakPolicyLockReasonForTab(
   return resolveTypeDerivedLineBreakPolicy(resolveDocumentType(tab.frontmatterFields))
     ? "type"
     : null;
-}
-
-function resolveEffectiveWritingModeForTab(tab: WritingModeTargetTab): WritingMode {
-  if (!tab.writingModeFollowsTypeRecommendation) {
-    return tab.writingMode;
-  }
-  const recommended = resolveTypeRecommendedWritingMode(
-    resolveDocumentType(tab.frontmatterFields),
-  );
-  return recommended ?? tab.writingMode;
 }
 
 type ImeProfilerDebugConfig = {
@@ -637,6 +652,12 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   const [frontmatterShowRoleLabels, setFrontmatterShowRoleLabels] = useState(
     DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
   );
+  const [frontmatterShowInProjectFiles, setFrontmatterShowInProjectFiles] =
+    useState(DEFAULT_FRONTMATTER_SHOW_IN_PROJECT_FILES);
+  const [frontmatterProjectShowTitle, setFrontmatterProjectShowTitle] =
+    useState(DEFAULT_FRONTMATTER_PROJECT_SHOW_TITLE);
+  const [frontmatterProjectShowAuthors, setFrontmatterProjectShowAuthors] =
+    useState(DEFAULT_FRONTMATTER_PROJECT_SHOW_AUTHORS);
   const [displaySettingsOpen, _setDisplaySettingsOpen] = useState(false);
   const [displaySettingsExpandSectionKey, setDisplaySettingsExpandSectionKey] =
     useState<DisplaySettingsSectionKey | null>(null);
@@ -681,6 +702,17 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [defaultWritingMode, _setDefaultWritingMode] = useState<WritingMode>(
     () => loadWritingMode(),
+  );
+
+  // Document Type 別の既定表示方向（settings.json）。frontmatter `writingMode` が無い文書にだけ効く。
+  const [documentTypeWritingModeDefaults, _setDocumentTypeWritingModeDefaults] =
+    useState<DocumentTypeWritingModeDefaults>(
+      () => DEFAULT_DOCUMENT_TYPE_WRITING_MODE_DEFAULTS,
+    );
+  const setDocumentTypeWritingModeDefaults = useCallback(
+    (patch: Partial<DocumentTypeWritingModeDefaults>) =>
+      _setDocumentTypeWritingModeDefaults((prev) => ({ ...prev, ...patch })),
+    [],
   );
 
   const [fullPlainEditActive, setFullPlainEditActive] = useState(false);
@@ -843,6 +875,19 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   const [macosArrowScrollClampEnabled, _setMacosArrowScrollClampEnabled] =
     useState<boolean>(() => DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED);
 
+  const [pseudoCaretEnabled, _setPseudoCaretEnabled] =
+    useState<boolean>(() => DEFAULT_PSEUDO_CARET_ENABLED);
+
+  const [pseudoCaretThickness, _setPseudoCaretThickness] =
+    useState<number>(() => DEFAULT_PSEUDO_CARET_THICKNESS);
+
+  const [pseudoCaretBlinkEnabled, _setPseudoCaretBlinkEnabled] =
+    useState<boolean>(() => DEFAULT_PSEUDO_CARET_BLINK_ENABLED);
+
+  // 付箋 (Task 3A-3): 初回説明の確認済みフラグ。設定 UI なし。
+  const [noteAnchorNoticeConfirmed, _setNoteAnchorNoticeConfirmed] =
+    useState<boolean>(() => DEFAULT_NOTE_ANCHOR_NOTICE_CONFIRMED);
+
   const platform = detectRuntimePlatform();
   const usesNativeWindowControls =
     platform === "darwin" || platform === "win32" || platform === "linux";
@@ -882,9 +927,20 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   const isLineBreakPolicyLocked = lineBreakPolicyLockReason !== null;
   const isLineBreakPolicyOverridden =
     lineBreakPolicyLockReason === "frontmatter";
-  const effectiveWritingMode = resolveEffectiveWritingModeForTab(activeTab);
-  const typeRecommendedWritingMode = resolveTypeRecommendedWritingMode(
+  // 実効表示方向の優先順位: 手動切替 > frontmatter writingMode > Document Type 別の既定表示方向。
+  const effectiveWritingMode = resolveEffectiveWritingMode({
+    frontmatter: activeTab.frontmatterFields,
+    tabWritingMode: activeTab.writingMode,
+    followsTypeRecommendation: activeTab.writingModeFollowsTypeRecommendation,
+    typeDefaults: documentTypeWritingModeDefaults,
+  });
+  // Document Settings の表示方向サマリ用に、Document Type 別の既定表示方向を解決する。
+  const typeRecommendedWritingMode = resolveTypeDefaultWritingMode(
     resolveDocumentType(activeTab.frontmatterFields),
+    documentTypeWritingModeDefaults,
+  );
+  const frontmatterWritingModeResolution = resolveFrontmatterWritingMode(
+    activeTab.frontmatterFields,
   );
 
   useEffect(() => {
@@ -986,6 +1042,15 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       if (typeof settings.frontmatterShowRoleLabels === "boolean") {
         setFrontmatterShowRoleLabels(settings.frontmatterShowRoleLabels);
       }
+      if (typeof settings.frontmatterShowInProjectFiles === "boolean") {
+        setFrontmatterShowInProjectFiles(settings.frontmatterShowInProjectFiles);
+      }
+      if (typeof settings.frontmatterProjectShowTitle === "boolean") {
+        setFrontmatterProjectShowTitle(settings.frontmatterProjectShowTitle);
+      }
+      if (typeof settings.frontmatterProjectShowAuthors === "boolean") {
+        setFrontmatterProjectShowAuthors(settings.frontmatterProjectShowAuthors);
+      }
       if (settings.caretColorMode !== undefined) {
         _setCaretColorMode(normalizeCaretColorMode(settings.caretColorMode));
       }
@@ -1060,6 +1125,32 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
         _setMacosArrowScrollClampEnabled(
           normalizeMacosArrowScrollClampEnabled(settings.macosArrowScrollClampEnabled),
         );
+      }
+      if (settings.pseudoCaretEnabled !== undefined) {
+        _setPseudoCaretEnabled(
+          normalizePseudoCaretEnabled(settings.pseudoCaretEnabled),
+        );
+      }
+      if (settings.pseudoCaretThickness !== undefined) {
+        _setPseudoCaretThickness(
+          normalizePseudoCaretThickness(settings.pseudoCaretThickness),
+        );
+      }
+      if (settings.pseudoCaretBlinkEnabled !== undefined) {
+        _setPseudoCaretBlinkEnabled(
+          normalizePseudoCaretBlinkEnabled(settings.pseudoCaretBlinkEnabled),
+        );
+      }
+      if (settings.noteAnchorNoticeConfirmed !== undefined) {
+        _setNoteAnchorNoticeConfirmed(
+          normalizeNoteAnchorNoticeConfirmed(settings.noteAnchorNoticeConfirmed),
+        );
+      }
+
+      const loadedWritingModeDefaults =
+        resolveDocumentTypeWritingModeDefaultsFromSettings(settings);
+      if (loadedWritingModeDefaults) {
+        _setDocumentTypeWritingModeDefaults(loadedWritingModeDefaults);
       }
 
       if (settings.lineBreakPolicy === DEFAULT_LINE_BREAK_POLICY) {
@@ -1362,6 +1453,21 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   }, [frontmatterShowRoleLabels, settingsSyncReady]);
 
   useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({ frontmatterShowInProjectFiles });
+  }, [frontmatterShowInProjectFiles, settingsSyncReady]);
+
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({ frontmatterProjectShowTitle });
+  }, [frontmatterProjectShowTitle, settingsSyncReady]);
+
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({ frontmatterProjectShowAuthors });
+  }, [frontmatterProjectShowAuthors, settingsSyncReady]);
+
+  useEffect(() => {
     saveDisplaySettings(displaySettings);
     if (settingsSyncReady) {
       void patchSettingsJson({ displaySettings });
@@ -1442,6 +1548,32 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     visualFocusCurrentLineHighlightColor,
     visualFocusCurrentLineHighlightOpacity,
   ]);
+
+  // Pseudo caret (Task 2-2/2-4): settings.json ON/OFF + thickness persistence.
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({
+      pseudoCaretEnabled,
+      pseudoCaretThickness,
+      pseudoCaretBlinkEnabled,
+    });
+  }, [settingsSyncReady, pseudoCaretEnabled, pseudoCaretThickness, pseudoCaretBlinkEnabled]);
+
+  // 付箋 (Task 3A-3): 初回説明の確認済みフラグ persistence.
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({ noteAnchorNoticeConfirmed });
+  }, [settingsSyncReady, noteAnchorNoticeConfirmed]);
+
+  // Document Type 別の既定表示方向 persistence（frontmatter へは書き込まない）。
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({
+      defaultNovelWritingMode: documentTypeWritingModeDefaults.novel,
+      defaultArticleWritingMode: documentTypeWritingModeDefaults.article,
+      defaultUnsetDocumentWritingMode: documentTypeWritingModeDefaults.unset,
+    });
+  }, [settingsSyncReady, documentTypeWritingModeDefaults]);
 
   // Sync effective policy to editor core on tab switch / frontmatter change
   useEffect(() => {
@@ -2239,6 +2371,22 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     );
   }, []);
 
+  const setPseudoCaretEnabled = useCallback((value: boolean) => {
+    _setPseudoCaretEnabled(normalizePseudoCaretEnabled(value));
+  }, []);
+
+  const setPseudoCaretThickness = useCallback((value: number) => {
+    _setPseudoCaretThickness(normalizePseudoCaretThickness(value));
+  }, []);
+
+  const setPseudoCaretBlinkEnabled = useCallback((value: boolean) => {
+    _setPseudoCaretBlinkEnabled(normalizePseudoCaretBlinkEnabled(value));
+  }, []);
+
+  const setNoteAnchorNoticeConfirmed = useCallback((value: boolean) => {
+    _setNoteAnchorNoticeConfirmed(normalizeNoteAnchorNoticeConfirmed(value));
+  }, []);
+
   // BETA-T1: doc font is independent of presets — no detach on font change.
   const setDocFontPreset = useCallback((value: DocumentFontPreset) => {
     _setDocFontPreset(value);
@@ -2655,6 +2803,12 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setFrontmatterShowTranslators,
     frontmatterShowRoleLabels,
     setFrontmatterShowRoleLabels,
+    frontmatterShowInProjectFiles,
+    setFrontmatterShowInProjectFiles,
+    frontmatterProjectShowTitle,
+    setFrontmatterProjectShowTitle,
+    frontmatterProjectShowAuthors,
+    setFrontmatterProjectShowAuthors,
     displaySettingsOpen,
     displaySettingsExpandSectionKey,
     setDisplaySettingsExpandSectionKey,
@@ -2674,7 +2828,11 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     writingModeFollowsTypeRecommendation:
       activeTab.writingModeFollowsTypeRecommendation,
     typeRecommendedWritingMode,
+    documentWritingMode: frontmatterWritingModeResolution.writingMode,
+    documentWritingModeUnsupported: frontmatterWritingModeResolution.unsupported,
     defaultWritingMode,
+    documentTypeWritingModeDefaults,
+    setDocumentTypeWritingModeDefaults,
     toggleWritingMode,
     resetWritingModeToTypeRecommendation,
     fullPlainEditActive,
@@ -2773,6 +2931,14 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     visualFocusCurrentLineHighlightOpacity,
     setVisualFocusCurrentLineHighlightOpacity,
     macosArrowScrollClampEnabled,
+    pseudoCaretEnabled,
+    setPseudoCaretEnabled,
+    pseudoCaretThickness,
+    setPseudoCaretThickness,
+    pseudoCaretBlinkEnabled,
+    setPseudoCaretBlinkEnabled,
+    noteAnchorNoticeConfirmed,
+    setNoteAnchorNoticeConfirmed,
     registeredFonts,
     setRegisteredFonts,
     selectedFont,

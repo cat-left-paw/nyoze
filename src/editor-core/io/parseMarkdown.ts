@@ -8,7 +8,17 @@ import {
 } from './emptyParagraphPreservation'
 import { validateDocumentLinkHref } from './linkHrefSafety'
 import { INLINE_PATTERN_WITH_EMPHASIS_REGEX } from './fallbackEmphasis'
+import { matchNoteAnchorComment, NOTE_ANCHOR_NODE_NAME } from './noteAnchor'
 import { rescueOrphanDelimiters } from './rescueOrphanDelimiters'
+import {
+  NYOZE_BLANK_PAGE_NODE_NAME,
+  NYOZE_DIRECTIVE_NODE_NAME,
+  NYOZE_PAGE_BREAK_NODE_NAME,
+  PAGE_BREAK_TOKEN,
+  formatBlankPageToken,
+  splitDirectiveSegments,
+  type DirectiveSegment,
+} from './customBlockDirective'
 
 /**
  * Parse a Markdown string into a ProseMirror document.
@@ -49,10 +59,156 @@ export function parseMarkdown(
   options?: ParseMarkdownOptions,
 ): PMNode {
   const normalized = normalizeLineEndings(markdown)
+
+  // Nyoze 独自ブロック装飾 (`:::align-center` 等 / `:::page-break`) が含まれる場合だけ
+  // directive 分割を行う。directive も page-break も無い文書は従来の per-policy parser
+  // へそのまま委譲し、挙動を変えない。
+  if (schema.nodes[NYOZE_DIRECTIVE_NODE_NAME]) {
+    const segments = splitDirectiveSegments(normalized.split('\n'))
+    if (
+      segments.some(
+        (segment) =>
+          segment.type === 'directive' ||
+          segment.type === 'page-break' ||
+          segment.type === 'blank-page',
+      )
+    ) {
+      return buildDocFromDirectiveSegments(schema, segments, lineBreakPolicy, options)
+    }
+  }
+
   if (lineBreakPolicy === 'obsidian-paragraph') {
     return parseObsidianParagraphMarkdown(schema, normalized, options)
   }
   return parseCommonmarkMarkdown(schema, normalized, options)
+}
+
+/**
+ * directive segment 列から doc を組み立てる。
+ * - plain segment は既存 per-policy parser で解析し、その block 子を取り込む。
+ * - directive segment は inner を再帰 parse し、専用 node で包む (ネスト対応)。
+ */
+function buildDocFromDirectiveSegments(
+  schema: Schema,
+  segments: DirectiveSegment[],
+  lineBreakPolicy: LineBreakPolicy,
+  options?: ParseMarkdownOptions,
+): PMNode {
+  const children: PMNode[] = []
+
+  for (const segment of segments) {
+    if (segment.type === 'plain') {
+      const chunk = segment.lines.join('\n')
+      const parsed = lineBreakPolicy === 'obsidian-paragraph'
+        ? parseObsidianParagraphMarkdown(schema, chunk, options)
+        : parseCommonmarkMarkdown(schema, chunk, options)
+      parsed.forEach((child) => children.push(child))
+      continue
+    }
+
+    if (segment.type === 'page-break') {
+      for (const node of buildPageBreakNode(schema, lineBreakPolicy, options)) {
+        children.push(node)
+      }
+      continue
+    }
+
+    if (segment.type === 'blank-page') {
+      for (const node of buildBlankPageNode(schema, segment.count, lineBreakPolicy, options)) {
+        children.push(node)
+      }
+      continue
+    }
+
+    for (const node of buildDirectiveNodes(schema, segment, lineBreakPolicy, options)) {
+      children.push(node)
+    }
+  }
+
+  return createDocNode(schema, children)
+}
+
+/**
+ * canonical 空 page-break directive (`:::page-break` / `:::`) から node を組み立てる。
+ * schema に専用 node が無い場合は、安全側で元の fenced directive を通常
+ * markdown として温存する (テキストが消えないようにする)。
+ */
+function buildPageBreakNode(
+  schema: Schema,
+  lineBreakPolicy: LineBreakPolicy,
+  options?: ParseMarkdownOptions,
+): PMNode[] {
+  const nodeType = schema.nodes[NYOZE_PAGE_BREAK_NODE_NAME]
+  if (nodeType) {
+    try {
+      return [nodeType.create()]
+    } catch {
+      // fall through to the safe fallback below
+    }
+  }
+
+  const rawLines = [`:::${PAGE_BREAK_TOKEN}`, ':::']
+  const parsed = lineBreakPolicy === 'obsidian-paragraph'
+    ? parseObsidianParagraphMarkdown(schema, rawLines.join('\n'), options)
+    : parseCommonmarkMarkdown(schema, rawLines.join('\n'), options)
+  const result: PMNode[] = []
+  parsed.forEach((child) => result.push(child))
+  return result
+}
+
+/**
+ * canonical 空 blank-page directive (`:::blank-page` / `:::blank-page-N`) から
+ * node を組み立てる。schema に専用 node が無い場合は、安全側で元の fenced
+ * directive を通常 markdown として温存する (テキストが消えないようにする)。
+ */
+function buildBlankPageNode(
+  schema: Schema,
+  count: number,
+  lineBreakPolicy: LineBreakPolicy,
+  options?: ParseMarkdownOptions,
+): PMNode[] {
+  const nodeType = schema.nodes[NYOZE_BLANK_PAGE_NODE_NAME]
+  if (nodeType) {
+    try {
+      return [nodeType.create({ count })]
+    } catch {
+      // fall through to the safe fallback below
+    }
+  }
+
+  const rawLines = [`:::${formatBlankPageToken(count)}`, ':::']
+  const parsed = lineBreakPolicy === 'obsidian-paragraph'
+    ? parseObsidianParagraphMarkdown(schema, rawLines.join('\n'), options)
+    : parseCommonmarkMarkdown(schema, rawLines.join('\n'), options)
+  const result: PMNode[] = []
+  parsed.forEach((child) => result.push(child))
+  return result
+}
+
+function buildDirectiveNodes(
+  schema: Schema,
+  segment: Extract<DirectiveSegment, { type: 'directive' }>,
+  lineBreakPolicy: LineBreakPolicy,
+  options?: ParseMarkdownOptions,
+): PMNode[] {
+  const nodeType = schema.nodes[NYOZE_DIRECTIVE_NODE_NAME]
+  const innerSource = segment.inner.join('\n')
+  // 再帰 parse でネストした directive も解決する。
+  const innerDoc = parseMarkdown(schema, innerSource, lineBreakPolicy, options)
+
+  const content: PMNode[] = []
+  innerDoc.forEach((child) => content.push(child))
+  if (content.length === 0) {
+    content.push(createParagraphNode(schema, ''))
+  }
+
+  const { kind, name, level } = segment.descriptor
+  try {
+    return [nodeType.create({ kind, name, level }, content)]
+  } catch {
+    // schema 制約で生成に失敗した場合は内容を温存して通常 block 列として返す。
+    return content
+  }
 }
 
 function parseCommonmarkMarkdown(schema: Schema, markdown: string, options?: ParseMarkdownOptions): PMNode {
@@ -98,8 +254,19 @@ function parseObsidianParagraphMarkdown(schema: Schema, markdown: string, option
 
     if (isStructuralLine(line)) {
       let next = index + 1
-      while (next < lines.length && lines[next] !== '') {
-        next++
+      if (isBlockquoteLine(line)) {
+        // CommonMark's lazy continuation would otherwise absorb any
+        // following non-blank line into the blockquote's last paragraph.
+        // Nyoze's per-line obsidian-paragraph editing model treats a line
+        // without a `>` marker as always outside the quote, so only keep
+        // consuming lines that themselves carry the marker.
+        while (next < lines.length && lines[next] !== '' && isBlockquoteLine(lines[next])) {
+          next++
+        }
+      } else {
+        while (next < lines.length && lines[next] !== '') {
+          next++
+        }
       }
       appendCommonmarkChunk(schema, lines.slice(index, next).join('\n'), children, options)
       index = next
@@ -244,6 +411,10 @@ function isStructuralLine(line: string): boolean {
   if (/^<[^>]+>/.test(trimmed)) return true
   if (/^(?: {4}|\t)/.test(line)) return true
   return false
+}
+
+function isBlockquoteLine(line: string): boolean {
+  return /^>/.test(line.trimStart())
 }
 
 function isThematicBreakLine(line: string): boolean {
@@ -407,6 +578,7 @@ class DocBuilder {
 
       // --- Inline container ---
       case 'inline':
+        this.excludePreservedParagraphLeadingWs(tok.content)
         if (tok.children) {
           this.processInlineTokens(tok.children)
         }
@@ -518,9 +690,17 @@ class DocBuilder {
           break
         }
 
-        case 'html_inline':
-          this.addHtmlInlineAtom(tok.content)
+        case 'html_inline': {
+          // 付箋アンカー comment に厳密一致する場合のみ専用 noteAnchor node にする。
+          // それ以外の inline HTML は従来どおり html_inline_atom として保持する。
+          const noteAnchorId = matchNoteAnchorComment(tok.content)
+          if (noteAnchorId !== null) {
+            this.addNoteAnchorNode(noteAnchorId, tok.content)
+          } else {
+            this.addHtmlInlineAtom(tok.content)
+          }
           break
+        }
 
         default:
           // Unknown inline token -> treat as text if it has content
@@ -554,6 +734,26 @@ class DocBuilder {
     const line = this.source.slice(lineStart, nextLineStart)
     const match = line.match(/^[ \t\u3000]+/)
     return match ? match[0] : ''
+  }
+
+  /**
+   * markdown-it が inline token に残した段落先頭空白は、source からの復元対象から除く。
+   *
+   * markdown-it 14.3 では全角スペースを inline content に保持する一方、CommonMark の
+   * 0〜3個の半角スペースは従来どおり block indentation として除去する。このため、
+   * source 側 leading whitespace のうち inline content に既に残った suffix を差し引き、
+   * 実際に失われた prefix だけを closeBlock() で復元する。
+   */
+  private excludePreservedParagraphLeadingWs(inlineContent: string): void {
+    const frame = this.currentFrame()
+    const leadingWs = frame.type === 'paragraph' ? frame.leadingWs : undefined
+    if (!leadingWs || !inlineContent) return
+
+    for (let length = leadingWs.length; length > 0; length -= 1) {
+      if (!inlineContent.startsWith(leadingWs.slice(-length))) continue
+      frame.leadingWs = leadingWs.slice(0, leadingWs.length - length)
+      return
+    }
   }
 
   private closeBlock(): void {
@@ -638,7 +838,8 @@ class DocBuilder {
     const hasBold = this.schema.marks['bold']
     const hasItalic = this.schema.marks['italic']
     const hasStrike = this.schema.marks['strike']
-    if (!hasRuby && !hasTcy && !hasHighlight && !hasBold && !hasItalic && !hasStrike) {
+    const hasUnderline = this.schema.marks['underline']
+    if (!hasRuby && !hasTcy && !hasHighlight && !hasBold && !hasItalic && !hasStrike && !hasUnderline) {
       this.addText(text, marks)
       return
     }
@@ -677,6 +878,9 @@ class DocBuilder {
       } else if (match[9] !== undefined && hasStrike) {
         // Fallback strike: group [9]
         this.addTextWithAozora(match[9], [...marks, { name: 'strike', attrs: {} }])
+      } else if (match[10] !== undefined && hasUnderline) {
+        // Underline match: group [10] (||text||) — recurse for ruby/tcy/etc. inside
+        this.addTextWithAozora(match[10], [...marks, { name: 'underline', attrs: {} }])
       } else {
         // Schema doesn't have the required node type; keep as text
         this.addText(match[0], marks)
@@ -778,6 +982,16 @@ class DocBuilder {
     this.currentFrame().children.push(
       nodeType.create({ src, alt, title })
     )
+  }
+
+  private addNoteAnchorNode(id: string, raw: string): void {
+    const nodeType = this.schema.nodes[NOTE_ANCHOR_NODE_NAME]
+    if (!nodeType) {
+      // Schema に noteAnchor がない場合は元の comment をそのまま保持する
+      this.addHtmlInlineAtom(raw)
+      return
+    }
+    this.currentFrame().children.push(nodeType.create({ id }))
   }
 
   private addHtmlInlineAtom(raw: string): void {

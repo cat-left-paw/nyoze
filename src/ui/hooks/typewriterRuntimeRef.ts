@@ -20,6 +20,12 @@ export type TypewriterRuntimeSnapshot = {
   visualFocusCurrentLineHighlightEnabled: boolean
   visualFocusCurrentLineHighlightColor: string
   visualFocusCurrentLineHighlightOpacity: number
+  /** Pseudo caret (Task 2-2): display-only caret overlay ON/OFF. */
+  pseudoCaretEnabled: boolean
+  /** Pseudo caret (Task 2-4): caret short-axis thickness in px (1..8, 0.5 step). */
+  pseudoCaretThickness: number
+  /** Pseudo caret blink: overlay opacity animation ON/OFF. */
+  pseudoCaretBlinkEnabled: boolean
 }
 
 export type TypewriterRuntimeRef = MutableRefObject<TypewriterRuntimeSnapshot>

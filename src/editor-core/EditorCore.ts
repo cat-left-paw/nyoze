@@ -1,6 +1,11 @@
 import { Editor } from '@tiptap/core'
 import { EditorState, type Transaction } from '@tiptap/pm/state'
 import { parseMarkdown } from './io/parseMarkdown'
+import { exportAozoraTextFromDoc, type AozoraTextExportOptions } from './export/aozoraTextExport'
+import { exportLeMECompatibleMarkdownFromDoc, type LeMEMarkdownExportOptions } from './export/lemeMarkdownExport'
+import { exportDendenCompatibleMarkdownFromDoc, type DendenMarkdownExportOptions } from './export/dendenMarkdownExport'
+import { exportWebBookFromDoc } from './export/webBookExport'
+import type { WebBookExportOptions } from './export/webBookExport'
 import { serializeMarkdown } from './io/serializeMarkdown'
 import { resolveEffectiveDocumentMarkdownOptionsForLoad } from './io/emptyParagraphPreservation'
 import {
@@ -29,6 +34,7 @@ import type {
   SelectionListener,
 } from './types'
 import { buildExtensions, DEFAULT_EDITOR_CONTENT } from './extensions/buildExtensions'
+import { createCustomBlockDirectiveController } from './commands/customBlockDirectiveCommands'
 import {
   resolveAutoTcyDigitRange,
   createBasicCommandsController,
@@ -45,6 +51,13 @@ import {
   editorClipboardCopyCutDOMHandlers,
   createCompositionEventHandlers,
   createFoldTooltipController,
+  createNoteAnchorPreviewController,
+  createNoteAnchorJumpController,
+  findNoteAnchorPosition,
+  buildRemoveNoteAnchorTransaction,
+  buildRemoveNoteAnchorTransactionAtDom,
+  collectNoteAnchorIdsInDoc,
+  NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY,
   createEditorSurfaceWheelController,
   createInlineAnnotationController,
   createLineBreakPolicyController,
@@ -52,6 +65,7 @@ import {
   createMarkdownIoController,
   createOutlineNavigationController,
   createParagraphPlainModeController,
+  createPseudoCaretController,
   createSearchController,
   createTypewriterModeController,
   createVisualFocusCurrentLineController,
@@ -98,7 +112,7 @@ import { searchHighlightPluginKey } from './extensions/searchHighlight'
 import { replaceMatchInDoc, replaceAllMatchesInDoc } from './features'
 import { serializeClipboardSliceToPlainText } from './io/clipboardSlicePlainText'
 
-const TCY_VALID_PATTERN = /^[A-Za-z0-9!?]{2,4}$/
+const TCY_VALID_PATTERN = /^[A-Za-z0-9!?]{1,4}$/
 
 export interface CreateEditorCoreOptions {
   /** Required: the DOM element to mount the editor into */
@@ -121,6 +135,12 @@ export interface CreateEditorCoreOptions {
   getVisualFocusDimNonFocusedBlocksEnabled?: () => boolean
   /** Visual Focus Phase 5: current visual line overlay (WYSIWYG; not Typewriter scroll). */
   getVisualFocusCurrentLineHighlightEnabled?: () => boolean
+  /** Pseudo caret (Task 2-2): display-only caret overlay (WYSIWYG; collapsed selection). */
+  getPseudoCaretEnabled?: () => boolean
+  /** Pseudo caret (Task 2-4): caret short-axis thickness in px (already sanitized in the UI). */
+  getPseudoCaretThickness?: () => number
+  /** Pseudo caret blink: overlay opacity animation ON/OFF (default true when unset). */
+  getPseudoCaretBlinkEnabled?: () => boolean
 }
 
 export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHandle {
@@ -140,6 +160,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
   let isComposing = false
   let visualFocusCurrentLineController: ReturnType<typeof createVisualFocusCurrentLineController> | null = null
+  let pseudoCaretController: ReturnType<typeof createPseudoCaretController> | null = null
   let enableRubyFlag = true
   let autoTcyEnabled = false
   let autoTcyNumbersOnly = false
@@ -236,20 +257,31 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     baseOnSelectionUpdate(payload)
     typewriterModeController?.handleSelectionUpdate()
     visualFocusCurrentLineController?.scheduleUpdate()
+    pseudoCaretController?.scheduleUpdate()
   }
   let typewriterModeController: ReturnType<typeof createTypewriterModeController> | null = null
+  let noteAnchorPreviewController: ReturnType<typeof createNoteAnchorPreviewController> | null = null
+  let noteAnchorJumpController: ReturnType<typeof createNoteAnchorJumpController> | null = null
+  let onNoteAnchorReveal: ((id: string) => void) | null = null
   const onUpdate = ({ transaction }: { transaction: Transaction }) => {
     // If policy changed without "apply now", the first user edit should treat the doc as the current policy.
     const activePolicy = readLineBreakPolicy()
     if (documentLineBreakPolicy !== activePolicy) {
       documentLineBreakPolicy = activePolicy
     }
-    emitUpdate()
-    searchController.scheduleRefreshForDocChange()
+    const isDocumentLoad = Boolean(transaction.getMeta(NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY))
+    if (!isDocumentLoad) {
+      emitUpdate()
+      searchController.scheduleRefreshForDocChange()
+    }
     typewriterModeController?.handleEditorUpdate({
       docChanged: transaction.docChanged,
     })
     visualFocusCurrentLineController?.scheduleUpdate()
+    pseudoCaretController?.scheduleUpdate()
+    if (transaction.docChanged) {
+      noteAnchorPreviewController?.scheduleApply()
+    }
   }
 
   const editor = new Editor({
@@ -311,9 +343,11 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
         preserveEmptyParagraphs: documentMarkdownOptions.preserveEmptyParagraphs,
       }).toJSON(),
     setEditorContent: (content) => {
-      editor.commands.setContent(
-        content as Parameters<typeof editor.commands.setContent>[0],
-      )
+      const nextDoc = editor.schema.nodeFromJSON(content)
+      const tr = editor.state.tr
+        .replaceWith(0, editor.state.doc.content.size, nextDoc.content)
+        .setMeta(NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY, true)
+      editor.view.dispatch(tr)
     },
     clearEditorHistory: () => {
       const freshState = EditorState.create({
@@ -379,12 +413,14 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     setIsComposing: (next) => {
       isComposing = next
       visualFocusCurrentLineController?.scheduleUpdate()
+      pseudoCaretController?.scheduleUpdate()
     },
     noteTypewriterBeforeInput: (event) => {
       typewriterModeController?.noteBeforeInput(event)
     },
     scheduleVisualFocusCurrentLineUpdate: () => {
       visualFocusCurrentLineController?.scheduleUpdate()
+      pseudoCaretController?.scheduleUpdate()
     },
     clearStoredMarks: () => clearStoredMarksAtBoundary(editor),
     pushLog,
@@ -407,11 +443,17 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     onHeadingFoldToggled: () => {
       typewriterModeController?.noteJumpNavigationSuppress('fold-toggle')
     },
+    onNoteAnchorReveal: (id) => {
+      onNoteAnchorReveal?.(id)
+      pushLog('command', `noteAnchorReveal id=${id}`)
+    },
     pushLog,
   })
 
   // --- Fold ellipsis tooltip ---
   const foldTooltipController = createFoldTooltipController('heading-fold-preview-tooltip')
+  noteAnchorPreviewController = createNoteAnchorPreviewController(editor.view)
+  noteAnchorJumpController = createNoteAnchorJumpController(editor.view)
   const editorSurface = editor.view.dom.closest('.editor-surface') as HTMLElement | null
   const wheelScrollController = editorSurface
     ? createEditorSurfaceWheelController(editor.view.dom, editorSurface)
@@ -430,6 +472,18 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getIsComposing: () => isComposing || editor.view.composing,
   })
   visualFocusCurrentLineController.scheduleUpdate()
+
+  pseudoCaretController = createPseudoCaretController({
+    view: editor.view,
+    editorSurface,
+    getEnabled: () => options.getPseudoCaretEnabled?.() ?? false,
+    getThickness: () => options.getPseudoCaretThickness?.(),
+    getBlinkEnabled: () => options.getPseudoCaretBlinkEnabled?.() ?? true,
+    getIsSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
+    getIsParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+    getIsComposing: () => isComposing || editor.view.composing,
+  })
+  pseudoCaretController.scheduleUpdate()
 
   function onMouseOver(event: MouseEvent) {
     foldTooltipController.onMouseOver(event, FOLD_ELLIPSIS_CLASS)
@@ -481,12 +535,18 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   const basicCommandsController = createBasicCommandsController({
     editor,
     getIsComposing: () => isComposing || editor.view.composing,
+    getLineBreakPolicy: readLineBreakPolicy,
     pushLog,
     clearCheckedChecklistItemsInRange,
     toggleChecklistItemAtSelection,
     toggleChecklistInSelection,
     moveListItemUp,
     moveListItemDown,
+  })
+  const customBlockDirectiveController = createCustomBlockDirectiveController({
+    editor,
+    getIsComposing: () => isComposing || editor.view.composing,
+    pushLog,
   })
   const commandAvailabilityController = createCommandAvailabilityController({
     getState: () => editor.state,
@@ -501,6 +561,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       isItalic: editor.isActive('italic'),
       isStrike: editor.isActive('strike'),
       isHighlight: editor.isActive('highlight'),
+      isUnderline: editor.isActive('underline'),
       isInlineCode: editor.isActive('code'),
       isBulletList: editor.isActive('bulletList'),
       isOrderedList: editor.isActive('orderedList'),
@@ -574,6 +635,43 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     return true
   }
 
+  /**
+   * HTML / Web Book export 専用の一時変換（実機報告、2026-07）。`commonmark-strict` の
+   * 記事・文書系文書は、段落間隔を横書き前提の CSS margin/line-height で
+   * 表現する commonmark 流の段落構造（長い hardBreak 連結や 0.86em 相当の
+   * margin）のまま縦書き HTML へ出すと、列間隔が過大に見える。段落間隔を
+   * 詰めて表示する `obsidian-paragraph`（小説・本文既定）相当の段落構造へ
+   * 出力直前だけ変換することで、CSS 側を書字方向ごとに調整しなくても
+   * Web Book の縦書き表示を小説・本文と同等の詰まった見た目にできる。
+   *
+   * `applyLineBreakPolicyImmediately` と同じ「現在の doc を現在の policy で
+   * serialize → 目的の policy で再 parse」の変換経路を再利用するが、
+   * editor state（`editor.view.dispatch`）・`documentLineBreakPolicy` /
+   * `documentMarkdownOptions`・frontmatter・保存ファイルのいずれも一切
+   * 書き換えない。variable を返すだけの純粋な一時変換で、呼び出し元は
+   * この一時 doc を `exportWebBookFromDoc` へ渡すだけに使う。
+   * - frontmatter の `documentType` は書き換えない（この変換と無関係）。
+   * - `obsidian-paragraph` の文書はそのまま `editor.state.doc` を使う
+   *   （変換不要、変換前後で内容が変わらないため）。
+   * - page-break / blank-page / ruby / TCY / underline / noteAnchor /
+   *   custom block directive は、通常の保存・読み込みと同じ
+   *   `serializeMarkdown` / `parseMarkdown` を経由するため round-trip する。
+   */
+  function resolveHtmlExportDoc() {
+    const activePolicy = readLineBreakPolicy()
+    if (activePolicy !== 'commonmark-strict') {
+      return editor.state.doc
+    }
+    const markdownForExport = serializeMarkdown(
+      editor.state.doc,
+      activePolicy,
+      documentMarkdownOptions,
+    )
+    return parseMarkdown(editor.schema, markdownForExport, 'obsidian-paragraph', {
+      enableRuby: enableRubyFlag,
+    })
+  }
+
   // --- Public API ---
 
   const handle: EditorCoreHandle = {
@@ -585,7 +683,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       return basicCommandsController.redo()
     },
 
-    execute(command: 'bold' | 'italic' | 'strike' | 'highlight') {
+    execute(command: 'bold' | 'italic' | 'strike' | 'highlight' | 'underline') {
       basicCommandsController.execute(command)
     },
 
@@ -623,6 +721,46 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
     insertHorizontalRule() {
       basicCommandsController.insertHorizontalRule()
+    },
+
+    applyCustomBlockDirective(token: string): boolean {
+      return customBlockDirectiveController.applyToken(token)
+    },
+
+    removeCustomBlockDirective(): boolean {
+      return customBlockDirectiveController.remove()
+    },
+
+    getCustomBlockDirectiveToken(): string | null {
+      return customBlockDirectiveController.getToken()
+    },
+
+    insertPageBreak(): boolean {
+      return customBlockDirectiveController.insertPageBreak()
+    },
+
+    deletePageBreak(): boolean {
+      return customBlockDirectiveController.deletePageBreak()
+    },
+
+    insertBlankPage(count?: number): boolean {
+      return customBlockDirectiveController.insertBlankPage(count)
+    },
+
+    exportAozoraText(options?: AozoraTextExportOptions) {
+      return exportAozoraTextFromDoc(editor.state.doc, options)
+    },
+
+    exportLeMEMarkdown(options?: LeMEMarkdownExportOptions) {
+      return exportLeMECompatibleMarkdownFromDoc(editor.state.doc, options)
+    },
+
+    exportDendenMarkdown(options?: DendenMarkdownExportOptions) {
+      return exportDendenCompatibleMarkdownFromDoc(editor.state.doc, options)
+    },
+
+    exportWebBook(options?: WebBookExportOptions) {
+      return exportWebBookFromDoc(resolveHtmlExportDoc(), options)
     },
 
     moveListItemUp(): boolean {
@@ -689,6 +827,61 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       inlineAnnotationController.insertImage(src, alt, title)
     },
 
+    insertNoteAnchor(id: string, range?: { from: number; to: number }) {
+      return inlineAnnotationController.insertNoteAnchor(id, range)
+    },
+
+    setNoteAnchorPreviews(previews: Record<string, string>) {
+      noteAnchorPreviewController?.setNoteAnchorPreviews(previews)
+    },
+
+    setNoteAnchorColors(colors: Record<string, import('../project/noteColor').NoteColorId>) {
+      noteAnchorPreviewController?.setNoteAnchorColors(colors)
+    },
+
+    scrollToNoteAnchor(id: string): boolean {
+      const pos = findNoteAnchorPosition(editor.state.doc, id)
+      if (pos === null) return false
+      if (!editor.view.dom.isConnected) return false
+      outlineNavigationController.scrollToPos(pos)
+      noteAnchorJumpController?.scheduleHighlightNoteAnchor(id)
+      pushLog('command', `scrollToNoteAnchor id=${id}`)
+      return true
+    },
+
+    removeNoteAnchor(id: string): boolean {
+      const tr = buildRemoveNoteAnchorTransaction(editor.state, id)
+      if (!tr) return false
+      editor.view.dispatch(tr)
+      pushLog('command', `removeNoteAnchor id=${id}`)
+      return true
+    },
+
+    removeNoteAnchorAtDomMarker(markerElement: Element | null, id: string): boolean {
+      if (markerElement) {
+        const tr = buildRemoveNoteAnchorTransactionAtDom(
+          editor.state,
+          editor.view,
+          markerElement,
+          id,
+        )
+        if (tr) {
+          editor.view.dispatch(tr)
+          pushLog('command', `removeNoteAnchorAtDomMarker id=${id}`)
+          return true
+        }
+      }
+      return this.removeNoteAnchor(id)
+    },
+
+    getNoteAnchorIdsInDoc(): string[] {
+      return collectNoteAnchorIdsInDoc(editor.state.doc)
+    },
+
+    setOnNoteAnchorReveal(listener: ((id: string) => void) | null) {
+      onNoteAnchorReveal = listener
+    },
+
     loadMarkdown(md: string) {
       resetHomeEndState()
       markdownIoController.loadMarkdown(md)
@@ -751,11 +944,12 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     isParagraphPlainModeActive(): boolean {
       return paragraphPlainControllerRef.current!.isActive()
     },
-
     commitParagraphPlainIfActive(): boolean {
       return paragraphPlainControllerRef.current!.commitIfActive()
     },
-
+    hasParagraphPlainPendingOverlayChanges(): boolean {
+      return paragraphPlainControllerRef.current!.hasPendingOverlayChanges()
+    },
     onParagraphPlainModeChange(listener: ParagraphPlainModeListener): () => void {
       return paragraphPlainControllerRef.current!.onModeChange(listener)
     },
@@ -920,6 +1114,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     isRubyEnabled(): boolean {
       return enableRubyFlag
     },
+    isComposing(): boolean { return isComposing || editor.view.composing },
 
     setAutoTcyOptions(options) {
       const nextDigitRange = resolveAutoTcyDigitRange(options)
@@ -964,10 +1159,16 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       visualFocusCurrentLineController?.scheduleUpdate()
     },
 
+    schedulePseudoCaretUpdate() {
+      pseudoCaretController?.scheduleUpdate()
+    },
+
     destroy() {
       unsubscribeTypewriterParagraphPlainMode()
       visualFocusCurrentLineController?.destroy()
       visualFocusCurrentLineController = null
+      pseudoCaretController?.destroy()
+      pseudoCaretController = null
       typewriterModeController?.destroy()
       searchController.destroy()
       paragraphPlainControllerRef.current!.destroy()
@@ -979,6 +1180,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       }
       wheelScrollController?.destroy()
       foldTooltipController.destroy()
+      noteAnchorPreviewController?.destroy()
+      noteAnchorPreviewController = null
+      noteAnchorJumpController?.destroy()
+      noteAnchorJumpController = null
       listenerSubscriptions.clearAll()
       editor.destroy()
     },

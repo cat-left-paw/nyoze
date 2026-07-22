@@ -15,6 +15,7 @@ import { getPathBaseName } from "../utils/path";
 import type { ActiveTabLoadResult, TabAddResult } from "./useTabManager";
 import { getUiText } from "../i18n/uiText";
 import { getShortcutReferenceContent } from "../internalDocs/getShortcutReferenceContent";
+import { setChapterBoundaryHideDelayMsForE2e } from "../utils/editorChapterBoundaryVisibility";
 
 type UseE2eBridgeOptions = {
   loadIntoActiveTab: (
@@ -33,7 +34,16 @@ type UseE2eBridgeOptions = {
   showTabLimitNotice: () => void;
   /** When set, E2E can open a fixture directory as the File Explorer root (NYOZE_E2E only). */
   setExplorerRootForE2e?: (rootDir: string) => void;
+  /** When set, E2E can sync library registry + explorer after fixture setup. */
+  onLibraryActivatedForE2e?: (activeRoot: string) => void;
+  reloadLibraryRegistryForE2e?: () => void;
   inspectSpecialInlineAdjacentCaretPm?: () => SpecialInlineAdjacentPmInspection | null;
+  /** Toggle pseudo caret overlay at runtime (NYOZE_E2E only). */
+  setPseudoCaretEnabledForE2e?: (on: boolean) => void;
+  /** Set pseudo caret thickness at runtime (NYOZE_E2E only). */
+  setPseudoCaretThicknessForE2e?: (px: number) => void;
+  /** Toggle pseudo caret blink at runtime (NYOZE_E2E only). */
+  setPseudoCaretBlinkEnabledForE2e?: (on: boolean) => void;
   /** Opens or focuses the fixed shortcut-reference tab (NYOZE_E2E). */
   openOrFocusShortcutReferenceTab?: (args: {
     title: string;
@@ -48,8 +58,13 @@ export function useE2eBridge({
   flushImeCompositionSideEffects,
   showTabLimitNotice,
   setExplorerRootForE2e,
+  onLibraryActivatedForE2e,
+  reloadLibraryRegistryForE2e,
   inspectSpecialInlineAdjacentCaretPm,
   openOrFocusShortcutReferenceTab,
+  setPseudoCaretEnabledForE2e,
+  setPseudoCaretThicknessForE2e,
+  setPseudoCaretBlinkEnabledForE2e,
 }: UseE2eBridgeOptions) {
   useEffect(() => {
     const bridge = window.nyozeBridge?.e2e;
@@ -77,13 +92,48 @@ export function useE2eBridge({
       flushSpecialInlineBoundaryDiagLogs: () => consumeSpecialInlineDiagLines(),
       inspectSpecialInlineAdjacentCaretPm:
         inspectSpecialInlineAdjacentCaretPm ?? (() => null),
+      setPseudoCaretEnabledForE2e: setPseudoCaretEnabledForE2e ?? (() => {}),
+      setPseudoCaretThicknessForE2e: setPseudoCaretThicknessForE2e ?? (() => {}),
+      setPseudoCaretBlinkEnabledForE2e: setPseudoCaretBlinkEnabledForE2e ?? (() => {}),
+      setChapterBoundaryHideDelayMsForE2e: (delayMs: number) => {
+        setChapterBoundaryHideDelayMsForE2e(delayMs);
+      },
       establishFixtureWorkspace: async (dir: string) => {
         const establish = window.nyozeBridge?.e2e?.establishWorkspaceRoot;
         if (!establish || !setExplorerRootForE2e) return false;
         const root = await establish(dir);
         if (!root) return false;
+        onLibraryActivatedForE2e?.(root);
+        reloadLibraryRegistryForE2e?.();
         setExplorerRootForE2e(root);
         return true;
+      },
+      establishLibrariesFixture: async (payload: {
+        libraryRoots: string[];
+        activeRoot: string;
+      }) => {
+        const establish = window.nyozeBridge?.e2e?.establishLibrariesFixture;
+        if (!establish || !setExplorerRootForE2e) return false;
+        const result = await establish(payload);
+        if (!result.ok) return false;
+        onLibraryActivatedForE2e?.(result.activeRoot);
+        reloadLibraryRegistryForE2e?.();
+        setExplorerRootForE2e(result.activeRoot);
+        return true;
+      },
+      queueOpenPathResult: async (payload: {
+        kind: "file" | "directory";
+        path: string;
+      }) => {
+        const queue = window.nyozeBridge?.e2e?.queueOpenPathResult;
+        if (!queue) return false;
+        const result = await queue(payload);
+        return result.ok;
+      },
+      dispatchMenuCommand: async (command: string) => {
+        const dispatch = window.nyozeBridge?.e2e?.dispatchMenuCommand;
+        if (!dispatch) return false;
+        return dispatch(command);
       },
       loadFileIntoActiveTab: async (filePath: string) => {
         const fixture = await readDocumentFixture(filePath);
@@ -166,6 +216,11 @@ export function useE2eBridge({
     openFileInNewTab,
     openOrFocusShortcutReferenceTab,
     setExplorerRootForE2e,
+    onLibraryActivatedForE2e,
+    reloadLibraryRegistryForE2e,
+    setPseudoCaretEnabledForE2e,
+    setPseudoCaretThicknessForE2e,
+    setPseudoCaretBlinkEnabledForE2e,
     showTabLimitNotice,
   ]);
 }

@@ -1,6 +1,15 @@
 import type { SpecialInlineAdjacentPmInspection } from './features/specialInlineBoundaryDiagnostics'
+import type { NoteColorId } from '../project/noteColor'
+import type { DirectiveDescriptor } from './io/customBlockDirective'
+import type { AozoraTextExportResult, AozoraTextExportOptions } from './export/aozoraTextExport'
+import type { LeMEMarkdownExportResult, LeMEMarkdownExportOptions } from './export/lemeMarkdownExport'
+import type { DendenMarkdownExportResult, DendenMarkdownExportOptions } from './export/dendenMarkdownExport'
+import type { WebBookExportOptions, WebBookExportResult } from './export/webBookExport'
 
 export type { SpecialInlineAdjacentPmInspection }
+
+/** Custom block directive descriptor (Nyoze 独自ブロック装飾) */
+export type CustomBlockDirectiveDescriptor = DirectiveDescriptor
 
 /** Log entry emitted by EditorCore */
 export type LogEntry = {
@@ -94,10 +103,17 @@ export type OpenExternalUrl = (url: string) => Promise<boolean>
 /** Snapshot of which context-menu commands can run right now */
 export type CommandAvailability = {
   hasSelection: boolean
+  /**
+   * 非空だが、付箋マーカー自身への NodeSelection だけの場合は false になる。
+   * context menu が「実際の非空テキスト選択」かどうかを判定する用途専用。
+   * 通常の書式コマンド可否判定には `hasSelection` を使うこと。
+   */
+  hasNonAnchorTextSelection: boolean
   canBold: boolean
   canItalic: boolean
   canStrike: boolean
   canHighlight: boolean
+  canUnderline: boolean
   canInlineCode: boolean
   canClearFormat: boolean
   canBlockTransforms: boolean
@@ -117,12 +133,23 @@ export type CommandAvailability = {
   isItalic: boolean
   isStrike: boolean
   isHighlight: boolean
+  isUnderline: boolean
   isInlineCode: boolean
   isBulletList: boolean
   isOrderedList: boolean
   isChecklist: boolean
   isBlockquote: boolean
   isCodeBlock: boolean
+  /** 現在の selection に対して独自ブロック装飾を適用 / 解除できるか */
+  canBlockDirective: boolean
+  /** 現在 selection が属する directive の正規 token (例: 'align-center')。なければ null。 */
+  blockDirectiveToken: string | null
+  /** 現在 selection が改ページ marker (`nyozePageBreak`) を NodeSelection として選択しているか */
+  canDeletePageBreak: boolean
+  noteAnchorContextId: string | null
+  touchesNoteAnchor: boolean
+  canShowNoteInPanel: boolean
+  canDeleteNoteAnchor: boolean
 }
 
 /** Search state snapshot (for UI) */
@@ -145,7 +172,7 @@ export interface EditorCoreHandle {
   redo(): boolean
 
   /** Execute a formatting command */
-  execute(command: 'bold' | 'italic' | 'strike' | 'highlight'): void
+  execute(command: 'bold' | 'italic' | 'strike' | 'highlight' | 'underline'): void
 
   /** Toggle inline code mark */
   toggleInlineCode(): void
@@ -173,6 +200,55 @@ export interface EditorCoreHandle {
 
   /** Insert a horizontal rule */
   insertHorizontalRule(): void
+
+  /**
+   * Apply (or replace) a Nyoze custom block directive on the current block /
+   * selected top-level blocks. `token` is a canonical directive token such as
+   * 'align-center' / 'align-end' / 'indent-3' / 'style-letter'. Returns true if
+   * the document changed.
+   */
+  applyCustomBlockDirective(token: string): boolean
+
+  /** Remove the enclosing custom block directive wrapper, keeping its content. */
+  removeCustomBlockDirective(): boolean
+
+  /** Canonical token of the directive enclosing the current selection, or null. */
+  getCustomBlockDirectiveToken(): string | null
+
+  /**
+   * Insert a Nyoze page-break marker (`nyozePageBreak`) after the current
+   * top-level block. Does not delete existing selection content. Returns true
+   * if the document changed.
+   */
+  insertPageBreak(): boolean
+
+  /**
+   * Delete the page-break marker (`nyozePageBreak`) currently selected as a
+   * NodeSelection. No-op (returns false) if the selection is not a page-break
+   * node. Returns true if the document changed.
+   */
+  deletePageBreak(): boolean
+
+  /**
+   * Insert a Nyoze blank-page marker (`nyozeBlankPage`) after the current
+   * top-level block. Does not delete existing selection content. Returns true
+   * if the document changed. `count` is optional and defaults to 1 (backward
+   * compatible with the previous count=1-only behavior); out-of-range or
+   * non-numeric values are clamped/normalized to 1-20.
+   */
+  insertBlankPage(count?: number): boolean
+
+  /** Export the current PM document as Aozora-style plain text (does not serialize Markdown). */
+  exportAozoraText(options?: AozoraTextExportOptions): AozoraTextExportResult
+
+  /** Export the current PM document as LeME-compatible Markdown (does not serialize Markdown). */
+  exportLeMEMarkdown(options?: LeMEMarkdownExportOptions): LeMEMarkdownExportResult
+
+  /** Export the current PM document as Denden-compatible Markdown (does not serialize Markdown). */
+  exportDendenMarkdown(options?: DendenMarkdownExportOptions): DendenMarkdownExportResult
+
+  /** Export the current PM document as a standalone Web Book HTML reader. */
+  exportWebBook(options?: WebBookExportOptions): WebBookExportResult
 
   /** Select the full document */
   selectAll(): void
@@ -230,6 +306,9 @@ export interface EditorCoreHandle {
   /** Commit Paragraph Plain overlay edits into PM Doc if the mode is active. */
   commitParagraphPlainIfActive(): boolean
 
+  /** True when Paragraph Plain overlay text differs from the original block markdown. */
+  hasParagraphPlainPendingOverlayChanges(): boolean
+
   /** Subscribe paragraph plain mode state changes */
   onParagraphPlainModeChange(listener: ParagraphPlainModeListener): () => void
 
@@ -254,7 +333,7 @@ export interface EditorCoreHandle {
   /** Subscribe line break policy changes */
   onLineBreakPolicyChange(listener: LineBreakPolicyListener): () => void
 
-  /** Toggle tate-chu-yoko on selected text (2-4 chars, [A-Za-z0-9!?]) */
+  /** Toggle tate-chu-yoko on selected text (1-4 chars, [A-Za-z0-9!?]) */
   toggleTcy(): void
 
   /** Insert bouten (emphasis dots) on each character of the selection */
@@ -265,6 +344,42 @@ export interface EditorCoreHandle {
 
   /** Insert an inline image node at the cursor */
   insertImage(src: string, alt: string, title?: string): void
+
+  /**
+   * 付箋アンカー (noteAnchor) を挿入する (Task 3A-3)。
+   * collapsed selection はキャレット位置、non-collapsed は選択末尾へ挿入する。
+   * 挿入できない場合 (invalid id / schema 不在 / 非 textblock) は false。
+   */
+  insertNoteAnchor(id: string, range?: SelectionRange): boolean
+
+  /**
+   * noteAnchor marker の hover preview (data-note-anchor-preview) を DOM へ反映する。
+   * editor-only 表示更新であり、PM doc / dirty state は変更しない。
+   */
+  setNoteAnchorPreviews(previews: Record<string, string>): void
+  setNoteAnchorColors(colors: Record<string, NoteColorId>): void
+
+  /**
+   * 右ペイン等から対応 noteAnchor marker へスクロール / selection を移動する。
+   * 見つからない、または editor surface が未接続のときは false。
+   * PM doc / Markdown は変更しない。
+   */
+  scrollToNoteAnchor(id: string): boolean
+
+  /** 本文から noteAnchor node を専用削除する。filterTransaction meta 付き。 */
+  removeNoteAnchor(id: string): boolean
+
+  /**
+   * 右クリックした DOM marker に対応する noteAnchor を優先削除する。
+   * 解決できない場合は id 一致の最初の 1 個へ fallback する。
+   */
+  removeNoteAnchorAtDomMarker(markerElement: Element | null, id: string): boolean
+
+  /** 現 PM doc 内の noteAnchor id 一覧。 */
+  getNoteAnchorIdsInDoc(): string[]
+
+  /** noteAnchor marker クリック時のコールバック。PM selection は変更しない。 */
+  setOnNoteAnchorReveal(listener: ((id: string) => void) | null): void
 
   /** Get the current link href at cursor, or undefined */
   getLinkHref(): string | undefined
@@ -401,6 +516,13 @@ export interface EditorCoreHandle {
   /** Returns whether ruby parsing is currently enabled */
   isRubyEnabled(): boolean
 
+  /**
+   * Read-only: whether the editor is currently in an IME composition.
+   * Returns the existing internal `isComposing` flag OR `editor.view.composing`.
+   * Does not start/stop composition, add listeners, or change PM/DOM state.
+   */
+  isComposing(): boolean
+
   /** Update display-only auto TCY runtime options. */
   setAutoTcyOptions(options: {
     enabled: boolean
@@ -423,6 +545,9 @@ export interface EditorCoreHandle {
 
   /** Recompute Visual Focus current-line overlay (settings / mode / layout). */
   scheduleVisualFocusCurrentLineUpdate(): void
+
+  /** Recompute pseudo caret overlay (settings / mode / layout). */
+  schedulePseudoCaretUpdate(): void
 
   /** Clean up resources */
   destroy(): void

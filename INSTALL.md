@@ -13,7 +13,7 @@
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
-Windows では、GitHub Releases の最新公開版は `0.2.1-beta.1` です。Microsoft Store 版も 2026-05-06 に公開開始しており、現在公開中の Store package version は `1.2.0.0` です。通常の Windows 利用では Store 版を優先し、GitHub zip は Store を使えない環境向けの代替配布として残します。
+GitHub Releasesでは`0.3.0-beta.1`をpre-releaseとして配布します。WindowsのMicrosoft Store公開版はアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`のままで、今回の新機能は含みません。Windowsで`0.3.0-beta.1`を試す場合はGitHub zipを使用してください。
 
 ## macOS
 
@@ -96,7 +96,7 @@ Microsoft Store 版は 2026-05-06 時点で公開済みです。
 - Store 版は Microsoft Store アプリのライブラリ画面から更新できます。
 - GitHub Releases の zip は、Store を使えない環境向けの代替配布であると同時に、Store 版より細かい beta 修正を先に含むことがあります。
 - Store 版と GitHub zip 版は、Windows 実機で共存と起動を確認しています。ただし設定は共有されるため、通常利用ではどちらか一方に寄せることを推奨します。
-- 現行 `0.2.0` 系では多重起動を抑止しているため、片方が起動中はもう片方を同時に立ち上げることはできません。
+- 現行版では多重起動を抑止しているため、片方が起動中はもう片方を同時に立ち上げることはできません。
 - 旧版どうしでは多重起動抑止がない場合がありますが、同じ設定を共有するため同時起動は避けてください。
 
 ### 旧 installer 版を使っている人へ
@@ -166,7 +166,7 @@ Nyoze の設定、バックアップ、ワークスペース状態は、アプ�
 
 - beta 版では、重要な原稿を初めて開く前に別途バックアップを取ってください。
 - 実用上対応している文字コードは UTF-8 のみです。Shift-JIS / CP932 の `.txt` は先に UTF-8 へ変換してください。
-- 正式な読み込み導線はアプリ内の `Load` です。
+- 正式な読み込み導線はアプリ内の **ファイルを開く** と、activeな書庫内の File Explorer です。
 
 ## ソースコードから試す場合
 

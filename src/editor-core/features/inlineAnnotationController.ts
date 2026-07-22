@@ -11,6 +11,7 @@ import type {
   SelectionRange,
 } from '../types'
 import { validateDocumentLinkHref } from '../io/linkHrefSafety'
+import { buildInsertNoteAnchorTransaction } from './noteAnchorInsert'
 
 type LogPush = (event: string, detail: string) => void
 
@@ -68,6 +69,7 @@ export function createInlineAnnotationController({
   insertBouten: (emphasisChar: string, range?: SelectionRange) => void
   setLink: (href: string | null, range?: SelectionRange) => void
   insertImage: (src: string, alt: string, title?: string) => void
+  insertNoteAnchor: (id: string, range?: SelectionRange) => boolean
 } {
   function getLinkHref(): string | undefined {
     return editor.getAttributes('link').href as string | undefined
@@ -260,6 +262,15 @@ export function createInlineAnnotationController({
     pushLog('command', `insertImage ${src}`)
   }
 
+  function insertNoteAnchor(id: string, range?: SelectionRange): boolean {
+    const tr = buildInsertNoteAnchorTransaction(editor.state, id, range)
+    if (!tr) return false
+    editor.view.dispatch(tr)
+    editor.commands.focus()
+    pushLog('command', `insertNoteAnchor ${id}`)
+    return true
+  }
+
   return {
     getLinkHref,
     getSelectedText,
@@ -273,5 +284,6 @@ export function createInlineAnnotationController({
     insertBouten,
     setLink,
     insertImage,
+    insertNoteAnchor,
   }
 }

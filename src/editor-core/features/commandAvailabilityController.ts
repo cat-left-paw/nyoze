@@ -6,6 +6,7 @@ type ActiveMarksSnapshot = {
   isItalic: boolean
   isStrike: boolean
   isHighlight: boolean
+  isUnderline: boolean
   isInlineCode: boolean
   isBulletList: boolean
   isOrderedList: boolean

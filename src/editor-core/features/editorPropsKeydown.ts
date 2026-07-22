@@ -5,6 +5,7 @@ import { handleHomeEndKey, resetHomeEndState } from './homeEndNavigation'
 import { handlePageUpDownKey } from './pageUpDownNavigation'
 import { handleHeadingFoldStartArrowKey } from './headingFoldStartArrowNavigation'
 import { handleRubyBoundaryArrowKey } from './rubyBoundaryArrowNavigation'
+import { handleNoteAnchorDeleteKey } from './noteAnchorDeleteKey'
 import { handleRubyBaseBackspaceKey } from './rubyBoundarySelection'
 import { handleListTabKey } from './listTabNavigation'
 
@@ -79,6 +80,11 @@ export function createEditorPropsKeyDownHandler({
     resetHomeEndState()
 
     if (handleRubyBaseBackspaceKey(view, event, { pushLog })) {
+      return true
+    }
+
+    if (handleNoteAnchorDeleteKey(view, event)) {
+      pushLog('command', 'blocked noteAnchor delete key')
       return true
     }
 

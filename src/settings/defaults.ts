@@ -115,6 +115,14 @@ export const DEFAULT_LINE_BREAK_POLICY: LineBreakPolicy = 'obsidian-paragraph'
 export const WRITING_MODE_STORAGE_KEY = 'nyoze.writingMode'
 export const DEFAULT_WRITING_MODE: WritingMode = 'vertical-rl'
 
+/**
+ * Document Type 別の既定表示方向の初期値（互換維持）。
+ * frontmatter `writingMode` が無い文書にだけ効く。settings.json に保存する。
+ */
+export const DEFAULT_NOVEL_WRITING_MODE: WritingMode = 'vertical-rl'
+export const DEFAULT_ARTICLE_WRITING_MODE: WritingMode = 'horizontal-tb'
+export const DEFAULT_UNSET_DOCUMENT_WRITING_MODE: WritingMode = 'vertical-rl'
+
 export const TOOLBAR_VISIBLE_STORAGE_KEY = 'nyoze.toolbarVisible'
 export const TOOLBAR_OFFSET_STORAGE_KEY = 'nyoze.toolbarOffset'
 
@@ -237,6 +245,18 @@ export const DEFAULT_FRONTMATTER_VISIBLE = true
 export const DEFAULT_FRONTMATTER_SHOW_AUTHORS = true
 export const DEFAULT_FRONTMATTER_SHOW_TRANSLATORS = true
 export const DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS = true
+/**
+ * Project 内 Markdown ファイル（祖先に `.nyoze/project.json` を持つ）で
+ * frontmatter display を本文中に表示するか。既定 false。
+ * Project 内では frontmatter は管理 metadata として扱い、章タイトル・資料タイトルは
+ * Project / Outline / File Explorer の表示名に使う。ON のときだけ Project 内でも
+ * 単独文書と同じ frontmatter display を出す。Project 外の単独文書には影響しない。
+ */
+export const DEFAULT_FRONTMATTER_SHOW_IN_PROJECT_FILES = false
+/** Project 内ファイルの frontmatter title を表示するか。既定 true（後から個別 OFF 可）。 */
+export const DEFAULT_FRONTMATTER_PROJECT_SHOW_TITLE = true
+/** Project 内ファイルの frontmatter authors を表示するか。既定 true（後から個別 OFF 可）。 */
+export const DEFAULT_FRONTMATTER_PROJECT_SHOW_AUTHORS = true
 
 export const DEFAULT_DOCUMENT_THEME: DocumentTheme = 'ui-linked'
 
@@ -412,6 +432,71 @@ export const DEFAULT_EDITOR_ARROW_POINTER = false
 
 /** Hidden settings.json: macOS Chromium の Arrow caret reveal 過大ジャンプ抑制 */
 export const DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED = true
+
+/** 擬似キャレット MVP (Task 2-2): 表示専用キャレットオーバーレイ。新規 / 未設定は既定 ON。 */
+export const DEFAULT_PSEUDO_CARET_ENABLED = true
+
+/**
+ * 擬似キャレット (Task 2-4): 短軸の太さ（px）。横書きは縦線の幅、縦書きは横線の高さ。
+ * 範囲 1〜8px、0.5px 刻み。既定は現行見た目に近い 2px。
+ */
+export const DEFAULT_PSEUDO_CARET_THICKNESS = 2
+export const PSEUDO_CARET_THICKNESS_MIN = 1
+export const PSEUDO_CARET_THICKNESS_MAX = 8
+export const PSEUDO_CARET_THICKNESS_STEP = 0.5
+
+/** 擬似キャレット点滅: overlay の opacity animation ON/OFF。既定は ON。 */
+export const DEFAULT_PSEUDO_CARET_BLINK_ENABLED = true
+
+/**
+ * 付箋 (Task 3A-3): 初回付箋作成時の「本文に非表示コメントが追加される」説明を
+ * 確認済みかどうか。一度確認したら再表示しない。設定 UI なし。
+ */
+export const DEFAULT_NOTE_ANCHOR_NOTICE_CONFIRMED = false
+
+/**
+ * PV-SET-4A: Page Viewer（active document / Book Viewer 共通）の読書用
+ * pagination default。「見出しの前で改ページ」。既定 OFF。外部 export の
+ * `pageBreakBeforeHeading` とは独立した key・独立した既定値。
+ */
+export const DEFAULT_PAGE_VIEWER_BREAK_BEFORE_HEADING = false
+
+/**
+ * PV-SET-4A: 対象見出し最大レベル。1=H1のみ 〜 6=H1〜H6。既定 1（H1のみ）。
+ * toggle が OFF の間も値は保持するが、pagination には影響しない。
+ */
+export const DEFAULT_PAGE_VIEWER_BREAK_BEFORE_HEADING_MAX_LEVEL = 1
+export const PAGE_VIEWER_BREAK_BEFORE_HEADING_MAX_LEVEL_MIN = 1
+export const PAGE_VIEWER_BREAK_BEFORE_HEADING_MAX_LEVEL_MAX = 6
+
+/**
+ * PV-READ-1: Page Viewer 読書面の選択余白（settings.json 保存値）。
+ * 実効余白は固定安全域（top/bottom 8px、inline 0px）を加えた値。
+ * 既定の実効余白は top 32px / bottom 16px / inline 16px。範囲 0〜80、8px 刻み。
+ */
+export const DEFAULT_PAGE_VIEWER_READING_MARGIN_TOP = 24
+export const DEFAULT_PAGE_VIEWER_READING_MARGIN_BOTTOM = 8
+export const DEFAULT_PAGE_VIEWER_READING_MARGIN_INLINE = 16
+export const PAGE_VIEWER_READING_MARGIN_MIN = 0
+export const PAGE_VIEWER_READING_MARGIN_MAX = 80
+export const PAGE_VIEWER_READING_MARGIN_STEP = 8
+
+/** PV-READ-1: 用紙枠の既定 ON。 */
+export const DEFAULT_PAGE_VIEWER_READING_PAPER_FRAME = true
+
+/** PV-READ-2: 読書面 header furniture の既定。 */
+export const DEFAULT_PAGE_VIEWER_READING_HEADER_ENABLED = true
+export const DEFAULT_PAGE_VIEWER_READING_HEADER_ALIGN = 'start' as const
+export const DEFAULT_PAGE_VIEWER_READING_HEADER_CONTENT = 'title' as const
+
+/** PV-READ-2: 読書面 footer furniture の既定。 */
+export const DEFAULT_PAGE_VIEWER_READING_FOOTER_ENABLED = true
+export const DEFAULT_PAGE_VIEWER_READING_FOOTER_ALIGN = 'end' as const
+
+/** PV-READ-3B: Page Viewer専用の簡易表紙（既定OFF）。 */
+export const DEFAULT_PAGE_VIEWER_READING_SIMPLE_COVER_ENABLED = false
+export const DEFAULT_PAGE_VIEWER_READING_SIMPLE_COVER_WRITING_MODE = 'inherit' as const
+export const DEFAULT_PAGE_VIEWER_READING_SIMPLE_COVER_LAYOUT = 'normal' as const
 
 /**
  * Phase5-H Slice1: Main color definitions per UI theme.

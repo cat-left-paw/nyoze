@@ -76,6 +76,7 @@
  *   [7]  Bold body            (**text**)
  *   [8]  Italic body          (*text*)   — negative lookbehind/ahead for *
  *   [9]  Strike body          (~~text~~)
+ *   [10] Underline body       (||text||)
  *
  * Priority / ordering notes:
  * - Ruby & TCY are first (most specific delimiters, no ambiguity).
@@ -84,12 +85,23 @@
  * - Bold `**…**` MUST precede italic `*…*` so `**x**` is not mis-parsed
  *   as `*` + italic(`x`) + `*`.
  * - Italic uses lookbehind/ahead to avoid matching inside `**…**`.
- * - Strike `~~…~~` is last and unambiguous.
+ * - Strike `~~…~~` is last among the emphasis group and unambiguous.
+ * - Underline `||…||` is appended last. It is unambiguous with every branch
+ *   above it: none of them can start a match on `|`, since the ruby-delimiter
+ *   branch (`[｜|]…`) excludes `|` itself from the base body, so a leading
+ *   `||` always falls through to the underline alternative. Ordering
+ *   relative to the other alternatives therefore does not matter.
  *
  * Inner content constraints (bold/italic/strike/bold+italic):
  * - Must not start or end with space (excludes `** foo **`)
  * - Must not contain the delimiter char (excludes cross-match)
  * - Single-char inner is allowed via the `|[^ D\n]` alternation
+ *
+ * Inner content constraints (underline, same shape as highlight `==…==`):
+ * - Must not be empty (excludes bare `||||`)
+ * - Must not contain `|` or a newline (excludes cross-match and
+ *   line-crossing `||…||`); leading/trailing spaces are allowed, matching
+ *   highlight's permissiveness.
  */
 export const INLINE_PATTERN_WITH_EMPHASIS_REGEX =
-  /(?:[｜|]([^｜|《》]+?)|([\u4E00-\u9FFF\u3005\u3400-\u4DBF]+?))《([^》]+?)》|｟([A-Za-z0-9!?]{2,4})｠|==([^=\n]+)==|\*\*\*([^ *\n][^*\n]*[^ *\n]|[^ *\n])\*\*\*|\*\*([^ *\n][^*\n]*[^ *\n]|[^ *\n])\*\*|(?<!\*)\*([^ *\n][^*\n]*[^ *\n]|[^ *\n])\*(?!\*)|~~([^ ~\n][^~\n]*[^ ~\n]|[^ ~\n])~~/g
+  /(?:[｜|]([^｜|《》]+?)|([\u4E00-\u9FFF\u3005\u3400-\u4DBF]+?))《([^》]+?)》|｟([A-Za-z0-9!?]{1,4})｠|==([^=\n]+)==|\*\*\*([^ *\n][^*\n]*[^ *\n]|[^ *\n])\*\*\*|\*\*([^ *\n][^*\n]*[^ *\n]|[^ *\n])\*\*|(?<!\*)\*([^ *\n][^*\n]*[^ *\n]|[^ *\n])\*(?!\*)|~~([^ ~\n][^~\n]*[^ ~\n]|[^ ~\n])~~|\|\|([^|\n]+)\|\|/g

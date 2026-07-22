@@ -1021,6 +1021,15 @@
   --editor-font-family: var(--font-stack-mincho);
   --heading-font-family: var(--editor-font-family);
   --ui-font-scale: 1;
+  /* pane icon sizing (non-toolbar; follows --ui-font-scale) */
+  --ui-icon-size-xs: clamp(11px, calc(13px * var(--ui-font-scale)), 16px);
+  --ui-icon-size-sm: clamp(12px, calc(14px * var(--ui-font-scale)), 18px);
+  --ui-icon-size-md: clamp(14px, calc(16px * var(--ui-font-scale)), 20px);
+  --ui-icon-button-size-compact: clamp(20px, calc(22px * var(--ui-font-scale)), 28px);
+  --ui-icon-button-size: clamp(22px, calc(24px * var(--ui-font-scale)), 30px);
+  --ui-icon-button-size-action: clamp(26px, calc(30px * var(--ui-font-scale)), 36px);
+  --ui-pane-tab-button-width: clamp(30px, calc(34px * var(--ui-font-scale)), 42px);
+  --ui-pane-tab-button-height: clamp(28px, calc(32px * var(--ui-font-scale)), 40px);
   font-family: var(--ui-font-family);
   font-weight: 300;
   color: var(--text-primary);
@@ -1045,6 +1054,27 @@
   --toolbar-scale: 1;
   --toolbar-btn-size: 28px;
   --toolbar-icon-size: 18px;
+}
+
+/* pane Tabler icons: size via CSS variables, not Tabler size prop */
+.ui-pane-tabler-icon {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.ui-pane-tabler-icon--xs {
+  width: var(--ui-icon-size-xs);
+  height: var(--ui-icon-size-xs);
+}
+
+.ui-pane-tabler-icon--sm {
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
+}
+
+.ui-pane-tabler-icon--md {
+  width: var(--ui-icon-size-md);
+  height: var(--ui-icon-size-md);
 }
 
 * {
@@ -1131,7 +1161,8 @@ body.is-resizing-pane {
 
 .unified-header button,
 .unified-header .toolbar-heading-menu-wrap,
-.unified-header .toolbar-list-menu-wrap {
+.unified-header .toolbar-list-menu-wrap,
+.unified-header .toolbar-block-decoration-menu-wrap {
   -webkit-app-region: no-drag;
 }
 
@@ -1477,10 +1508,12 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 /* ----------------------------------------------------------
-   5. Toolbar button styles (shared by unified header)
+   5. Toolbar button styles (shared by unified header AND the
+      fixed editor-tab-actions area — both carry .toolbar-btn-scope
+      so the button visuals stay identical wherever the action lives)
    ---------------------------------------------------------- */
 
-.unified-header-center button {
+.toolbar-btn-scope button {
   border: 1px solid var(--border-main);
   background: var(--bg-button);
   color: var(--text-primary);
@@ -1492,27 +1525,27 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   transition: background 0.12s;
 }
 
-.unified-header-center
+.toolbar-btn-scope
   button:not(.toolbar-btn-icon-only):not(.toolbar-heading-trigger):not(.toolbar-list-trigger) {
   padding: 4px 10px;
 }
 
-.unified-header-center button:hover {
+.toolbar-btn-scope button:hover {
   background: var(--bg-button-hover);
 }
 
-.unified-header-center button.toggle-active {
+.toolbar-btn-scope button.toggle-active {
   border-color: var(--accent);
   color: var(--toolbar-icon-color, var(--text-primary));
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-button-hover));
 }
 
-.unified-header-center button:disabled {
+.toolbar-btn-scope button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.unified-header-center button[aria-disabled="true"] {
+.toolbar-btn-scope button[aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -1529,7 +1562,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   line-height: 1;
 }
 
-.unified-header-center button.toolbar-btn-icon-only {
+.toolbar-btn-scope button.toolbar-btn-icon-only {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1580,23 +1613,46 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .toolbar-heading-menu-wrap,
-.toolbar-list-menu-wrap {
+.toolbar-list-menu-wrap,
+.toolbar-block-decoration-menu-wrap,
+.toolbar-page-viewer-menu-wrap {
   display: inline-flex;
   align-items: center;
   position: relative;
 }
 
+.toolbar-page-viewer-menu-wrap .toolbar-select-menu {
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - 16px));
+  right: 0;
+  left: auto;
+}
+
+.toolbar-btn-scope button.toolbar-btn-icon-only.toolbar-page-viewer-chevron {
+  width: calc(var(--toolbar-btn-size) * 0.72);
+  min-width: calc(var(--toolbar-btn-size) * 0.72);
+  padding: 0;
+  margin-inline-start: -1px;
+}
+
+.toolbar-page-viewer-chevron.open {
+  background: var(--bg-button-hover);
+  border-color: var(--border-main);
+}
+
 .toolbar-heading-trigger,
-.toolbar-list-trigger {
+.toolbar-list-trigger,
+.toolbar-block-decoration-trigger {
   width: auto;
   padding: 0 6px;
   gap: 2px;
 }
 
 /* Wider triggers (keyboard+chevron): override fixed square .toolbar-btn-icon-only */
-.unified-header-center button.toolbar-btn-icon-only.toolbar-heading-trigger,
-.unified-header-center button.toolbar-btn-icon-only.toolbar-list-trigger,
-.unified-header-center button.toolbar-btn-icon-only.toolbar-tw-vf-menu-trigger {
+.toolbar-btn-scope button.toolbar-btn-icon-only.toolbar-heading-trigger,
+.toolbar-btn-scope button.toolbar-btn-icon-only.toolbar-list-trigger,
+.toolbar-btn-scope button.toolbar-btn-icon-only.toolbar-block-decoration-trigger,
+.toolbar-btn-scope button.toolbar-btn-icon-only.toolbar-tw-vf-menu-trigger {
   width: auto;
   min-width: var(--toolbar-btn-size);
   height: var(--toolbar-btn-size);
@@ -1607,10 +1663,21 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .toolbar-heading-trigger.open,
-.toolbar-list-trigger.open {
+.toolbar-list-trigger.open,
+.toolbar-block-decoration-trigger.open {
   background: var(--bg-button) !important;
   border-color: var(--border-main) !important;
   color: var(--text-primary);
+}
+
+/* ブロック装飾メニューは項目数が多いので、狭い高さでもスクロールで収める。 */
+.toolbar-block-decoration-menu-wrap .toolbar-select-menu {
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+}
+
+.toolbar-block-decoration-group {
+  display: contents;
 }
 
 /* Toolbar dropdown menus (heading / list): shared panel + selectable rows */
@@ -1696,10 +1763,11 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   display: inline-flex;
   align-items: center;
   position: relative;
+  flex-shrink: 0;
 }
 
 .toolbar-tw-vf-menu-trigger {
-  /* sizing comes from .unified-header-center … .toolbar-tw-vf-menu-trigger rule above */
+  /* sizing comes from .toolbar-btn-scope … .toolbar-tw-vf-menu-trigger rule above */
   gap: 2px;
 }
 
@@ -1715,18 +1783,14 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   max-width: min(340px, calc(100vw - 16px));
 }
 
-.unified-header .toolbar-tw-vf-menu-wrap {
-  flex-shrink: 0;
-}
-
-.unified-header-center button.toolbar-btn-icon-only:hover,
-.unified-header-center button.toolbar-btn-icon-only:focus-visible {
+.toolbar-btn-scope button.toolbar-btn-icon-only:hover,
+.toolbar-btn-scope button.toolbar-btn-icon-only:focus-visible {
   background: var(--bg-button-hover) !important;
   border-color: var(--border-main) !important;
 }
 
-.unified-header-center button.toolbar-btn-icon-only[aria-disabled="true"]:hover,
-.unified-header-center button.toolbar-btn-icon-only[aria-disabled="true"]:focus-visible {
+.toolbar-btn-scope button.toolbar-btn-icon-only[aria-disabled="true"]:hover,
+.toolbar-btn-scope button.toolbar-btn-icon-only[aria-disabled="true"]:focus-visible {
   background: transparent !important;
   border-color: transparent !important;
 }
@@ -1737,7 +1801,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-color: transparent !important;
 }
 
-.unified-header-center button.toolbar-btn-icon-only.toggle-active {
+.toolbar-btn-scope button.toolbar-btn-icon-only.toggle-active {
   border-color: var(--accent) !important;
   color: var(--toolbar-icon-color, var(--text-primary)) !important;
   background: color-mix(
@@ -1747,8 +1811,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   ) !important;
 }
 
-.unified-header-center button.toolbar-btn-icon-only.toggle-active:hover,
-.unified-header-center
+.toolbar-btn-scope button.toolbar-btn-icon-only.toggle-active:hover,
+.toolbar-btn-scope
   button.toolbar-btn-icon-only.toggle-active:focus-visible {
   border-color: var(--accent) !important;
   color: var(--toolbar-icon-color, var(--text-primary)) !important;
@@ -1868,63 +1932,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   transform: translate(-50%, 0);
 }
 
-/* Line break policy badge: top bar right (same pill as tab CommonMark badge) */
-.unified-header-right .unified-header-line-break-policy-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  position: relative;
-  min-width: 0;
-  max-width: 180px;
-  margin: 0;
-  padding: 2px 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  flex: 0 1 auto;
-  -webkit-app-region: no-drag;
-  transition: opacity 0.12s ease;
-}
-
-.unified-header-right .unified-header-line-break-policy-btn .editor-tab-policy-badge {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.unified-header-right .unified-header-line-break-policy-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-  border-radius: 12px;
-}
-
-.unified-header-right .unified-header-line-break-policy-btn[aria-disabled='true'] {
-  cursor: not-allowed;
-  opacity: 0.88;
-}
-
-.unified-header-line-break-policy-doc {
-  display: inline-flex;
-  align-items: center;
-  height: 14px;
-  padding: 0 4px;
-  border-radius: 4px;
-  font-size: calc(9px * var(--ui-font-scale));
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-main) 70%, transparent);
-  line-height: 1;
-  flex-shrink: 0;
-}
-
 /* Right zone buttons: tooltips anchor to the right edge so they don't clip off-screen.
-   Applies to line-break-policy-btn, pane-toggle, window-control-btn, and any future
-   right-aligned has-tooltip children inside the unified-header-right zone. */
+   Applies to pane-toggle, window-control-btn, and any future right-aligned has-tooltip
+   children inside the unified-header-right zone. */
 .unified-header .unified-header-right .has-tooltip[data-tooltip]::after,
 .unified-header .unified-header-right .toolbar-btn-icon-only[data-tooltip]::after {
   left: auto;
@@ -2004,15 +2014,37 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   flex-direction: column;
 }
 
+/* Two-region strip: `.editor-tab-list` scrolls horizontally on its own;
+   `.editor-tab-actions` (fixed utility actions) never scrolls with it. */
 .editor-tab-strip {
   display: flex;
-  gap: 4px;
   align-items: center;
+  gap: 8px;
   padding: 3px 10px;
   border-bottom: 1px solid var(--border-light);
   background: color-mix(in srgb, var(--bg-panel) 84%, transparent);
   min-height: 33px;
+}
+
+.editor-tab-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.editor-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  /* Buttons here live outside .toolbar-drag-wrapper, so redeclare the same
+     --toolbar-scale-derived sizing (reused, not redefined from scratch). */
+  --toolbar-btn-size: clamp(24px, calc(28px * var(--toolbar-scale)), 30px);
+  --toolbar-icon-size: clamp(14px, calc(18px * var(--toolbar-scale)), 20px);
 }
 
 .editor-tab {
@@ -2047,60 +2079,12 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   text-overflow: ellipsis;
 }
 
-.editor-tab-policy-badge {
+.editor-tab-role-icon {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
-  height: 17px;
-  padding: 0 7px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 78%, var(--border-main));
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 32%, var(--bg-surface)) 0%,
-      color-mix(in srgb, var(--accent) 24%, var(--bg-surface)) 100%
-    );
-  color: color-mix(in srgb, var(--text-primary) 84%, var(--accent) 16%);
-  font-size: calc(10px * var(--ui-font-scale));
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.015em;
-  flex-shrink: 0;
-  text-shadow: 0 1px 0 color-mix(in srgb, var(--bg-surface) 72%, transparent);
-  box-shadow:
-    0 1px 5px rgba(0, 0, 0, 0.12),
-    inset 0 1px 0 color-mix(in srgb, var(--bg-surface) 35%, transparent);
-  white-space: nowrap;
-}
-
-/* Same pill metrics as .editor-tab-policy-badge; muted palette for Obsidian (tabs only show CommonMark) */
-.editor-tab-policy-badge--obsidian {
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-main));
-  background: color-mix(in srgb, var(--bg-button-hover) 70%, var(--bg-surface));
-  color: var(--text-secondary);
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
-}
-
-.editor-tab-policy-badge.is-emphasis {
-  animation: commonmark-badge-pulse 1.1s ease-out 1;
-}
-
-@keyframes commonmark-badge-pulse {
-  0% {
-    transform: scale(0.94);
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 58%, transparent);
-  }
-  38% {
-    transform: scale(1.08);
-    box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-  100% {
-    transform: scale(1);
-    box-shadow:
-      0 1px 5px rgba(0, 0, 0, 0.12),
-      inset 0 1px 0 color-mix(in srgb, var(--bg-surface) 35%, transparent);
-  }
+  justify-content: center;
+  color: currentColor;
 }
 
 .editor-tab-dirty {
@@ -2224,11 +2208,221 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   gap: 6px;
 }
 
+/* 左ペイン header の「書庫を管理」エントリ（書庫名ラベルの左側、compact icon button）。 */
+.file-explorer-library-manage-btn {
+  flex-shrink: 0;
+  width: var(--ui-icon-button-size);
+  height: var(--ui-icon-button-size);
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s,
+    border-color 0.12s;
+}
+
+.file-explorer-library-manage-btn:hover,
+.file-explorer-library-manage-btn:focus-visible {
+  background: var(--bg-button-hover);
+  border-color: var(--border-main);
+  color: var(--text-primary);
+}
+
+.file-explorer-library-manage-btn .tabler-icon,
+.file-explorer-library-manage-btn .ui-pane-tabler-icon {
+  width: var(--ui-icon-size-md);
+  height: var(--ui-icon-size-md);
+}
+
 .file-explorer-header-title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 作品 > project-root drill-down の breadcrumb（tab と file tree の間）。 */
+.file-explorer-project-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  max-height: 28px;
+  padding: 2px 12px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.file-explorer-project-breadcrumb-back {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.file-explorer-project-breadcrumb-back:hover {
+  color: var(--text-primary);
+}
+
+.file-explorer-project-breadcrumb-back-label {
+  line-height: 1.2;
+}
+
+.file-explorer-project-breadcrumb-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-primary);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* 「書庫に戻る」導線（projectRoot 等のサブフォルダ表示中だけ出る）。 */
+.file-explorer-library-nav {
+  padding: 2px 12px 6px;
+}
+
+.file-explorer-back-to-library {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.file-explorer-back-to-library:hover {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.file-explorer-back-to-library .tabler-icon {
+  flex: 0 0 auto;
+}
+
+/* 左ペイン上部のタブ（書庫 / 作品）。右ペイン tab bar と同じ icon-only 見た目。 */
+.file-explorer-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px 0 10px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: visible;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+/* 作品タブの内容領域（この中だけでスクロール）。 */
+.file-explorer-projects-tab {
+  padding-top: 2px;
+}
+
+/* タブ内では Project 一覧が主役なので、書庫上部の区切り線は出さない。 */
+.file-explorer-projects-tab .file-explorer-project-list {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+/* 書庫 root 上の Project 一覧（read-only 目次）。 */
+.file-explorer-project-list {
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+}
+
+.file-explorer-project-list-heading {
+  margin: 0 0 4px;
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.file-explorer-project-list-placeholder {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-muted);
+}
+
+.file-explorer-project-list-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-explorer-project-list-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-explorer-project-list-btn:hover {
+  background: var(--bg-button-hover);
+}
+
+.file-explorer-project-list-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.file-explorer-project-list-title {
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-project-list-path {
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-explorer-project-list-no-books {
+  flex: 0 0 auto;
+  font-size: calc(9px * var(--ui-font-scale));
+  color: var(--text-muted);
+  padding: 1px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
   white-space: nowrap;
 }
 
@@ -2243,8 +2437,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .file-explorer-icon-btn {
-  width: 30px;
-  height: 30px;
+  width: var(--ui-icon-button-size-action);
+  height: var(--ui-icon-button-size-action);
   padding: 0;
   border-radius: 7px;
   border: 1px solid transparent;
@@ -2271,9 +2465,10 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   cursor: default;
 }
 
-.file-explorer-icon-btn .tabler-icon {
-  width: 16px;
-  height: 16px;
+.file-explorer-icon-btn .tabler-icon,
+.file-explorer-icon-btn .ui-pane-tabler-icon {
+  width: var(--ui-icon-size-md);
+  height: var(--ui-icon-size-md);
 }
 
 .file-explorer-action-chip {
@@ -2314,6 +2509,90 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   font-size: calc(12px * var(--ui-font-scale));
   color: var(--text-muted);
   margin: 0;
+}
+
+/* 書庫未登録時の空状態オンボーディング（書庫管理へ誘導する）。 */
+.file-explorer-library-onboarding {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 14px;
+}
+
+.file-explorer-library-onboarding-title {
+  margin: 0;
+  font-size: calc(12.5px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.file-explorer-library-onboarding-helper {
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-font-scale));
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.file-explorer-library-onboarding-button {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  font-size: calc(11.5px * var(--ui-font-scale));
+  cursor: pointer;
+}
+
+.file-explorer-library-onboarding-button:hover {
+  background: var(--bg-button-hover);
+}
+
+/* 書庫外の保存済み単独ファイルを開いているときの banner（tree とは別枠で上部に出す）。 */
+.file-explorer-external-file {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border-main);
+}
+
+.file-explorer-external-file-title {
+  margin: 0;
+  font-size: calc(12.5px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.file-explorer-external-file-name {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-explorer-external-file-helper {
+  margin: 0;
+  font-size: calc(11.5px * var(--ui-font-scale));
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.file-explorer-external-file-button {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  font-size: calc(11.5px * var(--ui-font-scale));
+  cursor: pointer;
+}
+
+.file-explorer-external-file-button:hover {
+  background: var(--bg-button-hover);
 }
 
 /* Pane header button */
@@ -2481,6 +2760,32 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   color: var(--text-muted);
 }
 
+/* project root folder バッジ（表示専用）。通常 folder の意味を消さない小さな副次アイコン。 */
+.file-explorer-project-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--accent, var(--text-secondary));
+}
+
+.file-explorer-tree-item.is-selected .file-explorer-project-badge {
+  color: inherit;
+}
+
+/* project 内 Markdown ファイルの role アイコン（表示専用・補助）。控えめ配色で名前を主役に保つ。 */
+.file-explorer-role-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--text-secondary);
+}
+
+.file-explorer-tree-item.is-selected .file-explorer-role-badge {
+  color: inherit;
+}
+
 .file-explorer-context-menu {
   position: fixed;
   z-index: 2200;
@@ -2545,6 +2850,22 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .file-explorer-context-menu-item--danger:not(:disabled) .tabler-icon {
   color: #c4473a;
+}
+
+/* 登録メニュー: parent の展開 caret は右端へ寄せる。 */
+.file-explorer-context-menu-caret {
+  margin-left: auto;
+}
+
+/* 登録 submenu の選択肢はインデントして親との従属関係を示す。 */
+.file-explorer-context-menu-subitem {
+  padding-left: 24px;
+  font-size: calc(11.5px * var(--ui-font-scale));
+  color: var(--text-secondary);
+}
+
+.file-explorer-context-menu-subitem:hover:not(:disabled) {
+  color: var(--text-primary);
 }
 
 .file-explorer-doc-info-panel {
@@ -2621,7 +2942,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .file-explorer-doc-info-row {
   display: grid;
-  grid-template-columns: 42px 1fr;
+  /* ラベル列はフォントスケール連動で広げ、日本語 4 文字（例: タイトル / 書字方向）でも
+     折り返さない。値側は minmax(0, …) で確実に縮んで 1 行 ellipsis を保つ。 */
+  grid-template-columns: calc(72px * var(--ui-font-scale)) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -2630,6 +2953,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .file-explorer-doc-info-label {
   color: var(--text-muted);
   font-size: calc(11px * var(--ui-font-scale));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-explorer-doc-info-value {
@@ -2654,10 +2980,13 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   align-items: center;
   gap: 0;
   padding: 0;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: visible;
 }
 
 .right-pane-tab {
-  flex: none;
+  flex: 0 0 auto;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -2668,7 +2997,18 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-bottom: 2px solid transparent;
   transition:
     color 0.12s,
-    border-color 0.12s;
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.right-pane-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-pane-tab-button-width);
+  height: var(--ui-pane-tab-button-height);
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .right-pane-tab:hover {
@@ -2679,6 +3019,53 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   color: color-mix(in srgb, var(--accent) 85%, var(--text-primary) 15%);
   border-bottom-color: var(--accent);
   font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* Right pane tab bar + Project tab icon buttons: floating (position: fixed) tooltips.
+   The right pane scrolls (`.project-pane-index` has overflow-y: auto), so CSS `::after`
+   chips get clipped at the pane edges / scroll-region bottom. These buttons render their
+   tooltip as a `position: fixed` portal instead (FloatingTooltip / useFloatingTooltip),
+   clamped into the viewport and flipped above the anchor when there is no room below.
+   See `.floating-tooltip` below for the chip look, kept in sync with the toolbar chip. */
+
+/* The floating portal escapes overflow, but keep the row action strip overflow-visible
+   so the icon buttons themselves are never clipped at the row edge. */
+.project-pane-row-actions {
+  overflow: visible;
+}
+
+.project-pane-icon-btn-host {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: var(--ui-icon-button-size-compact);
+  height: var(--ui-icon-button-size-compact);
+  align-items: center;
+  justify-content: center;
+}
+
+/* Floating tooltip chip rendered into document.body via portal.
+   Position (left/top/visibility) is set inline from getBoundingClientRect; this rule
+   only carries the look, matched to the toolbar custom chip. Long helper copy wraps at
+   240px instead of clipping or breaking one character per line. */
+.floating-tooltip {
+  max-width: 240px;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-align: left;
+  line-height: 1.35;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-primary);
+  background: var(--bg-dialog);
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  padding: 5px 7px;
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+  /* Above the pane divider and right-pane content, which sit in their own stacking
+     contexts; matches the toolbar menu portal so the chip never renders behind them. */
+  z-index: 10000;
 }
 
 .right-pane-version {
@@ -2694,6 +3081,247 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   overflow: auto;
   padding: 4px 0;
   flex: 1;
+}
+
+/* Outline 拡張: [現在の文書] / [Book全体] 表示切替トグル。 */
+.outline-mode-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-divider);
+  position: sticky;
+  top: 0;
+  background: var(--bg-pane, var(--bg-primary));
+  z-index: 1;
+}
+
+.outline-mode-btn {
+  flex: 1;
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 3px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.outline-mode-btn:hover {
+  background: var(--bg-button-hover);
+}
+
+.outline-mode-btn.active {
+  background: var(--bg-button-active, var(--bg-button-hover));
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Outline 拡張: Book全体Outline（read-only）。 */
+.book-outline-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.book-outline-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.book-outline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-divider);
+}
+
+.book-outline-toolbar-title {
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-outline-refresh {
+  flex-shrink: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 2px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.book-outline-refresh:hover {
+  background: var(--bg-button-hover);
+}
+
+.book-outline-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Outline 拡張: 同一 Book 内の前後章移動。 */
+.book-outline-chapter-nav {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-divider);
+}
+
+.book-outline-nav-btn {
+  flex: 1;
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 3px 8px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.book-outline-nav-btn:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+}
+
+.book-outline-nav-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.book-outline-list {
+  padding: 4px 0;
+}
+
+.book-outline-chapter {
+  padding: 4px 10px 8px;
+  border-bottom: 1px solid var(--border-divider);
+}
+
+.book-outline-chapter-title {
+  display: block;
+  width: 100%;
+  text-align: start;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 4px 2px;
+  border-radius: 4px;
+  word-break: break-word;
+}
+
+.book-outline-chapter-title:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+}
+
+.book-outline-chapter-title:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.book-outline-chapter.is-current .book-outline-chapter-title {
+  color: var(--text-accent, var(--accent-color));
+}
+
+.book-outline-chapter.is-missing .book-outline-chapter-title {
+  color: var(--text-secondary);
+}
+
+.book-outline-chapter.is-missing .book-outline-chapter-title:disabled {
+  opacity: 0.72;
+}
+
+.book-outline-current-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  font-size: calc(10px * var(--ui-font-scale));
+  font-weight: 600;
+  line-height: 1.6;
+  border-radius: 8px;
+  background: var(--accent-color, var(--bg-button-hover));
+  color: var(--bg-primary, #fff);
+}
+
+.book-outline-chapter-empty {
+  margin: 0;
+  padding-left: 8px;
+  font-size: calc(11px * var(--ui-font-scale));
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+.book-outline-headings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.book-outline-heading {
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.book-outline-heading-btn {
+  display: block;
+  width: 100%;
+  text-align: start;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.book-outline-heading-btn:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.book-outline-heading-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.book-outline-level-1 { padding-left: 8px; }
+.book-outline-level-2 { padding-left: 20px; }
+.book-outline-level-3 { padding-left: 32px; }
+.book-outline-level-4 { padding-left: 44px; }
+.book-outline-level-5 { padding-left: 56px; }
+.book-outline-level-6 { padding-left: 68px; }
+
+/* Book全体Outline: 仮想 root / 見出し行（fold chevron + ラベル）と現在位置ハイライト */
+.book-outline-chapter-root,
+.book-outline-heading-row {
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.book-outline-chapter-root .book-outline-chapter-title,
+.book-outline-heading-row .book-outline-heading-btn {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.book-outline-chapter-root.active,
+.book-outline-heading-row.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 /* Outline row: fold chevron + heading button */
@@ -2725,8 +3353,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .outline-fold-btn {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: var(--ui-icon-button-size-compact);
+  height: var(--ui-icon-button-size-compact);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2744,6 +3372,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .outline-fold-btn svg {
   display: block;
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
 }
 
 .outline-fold-btn:hover {
@@ -2782,8 +3412,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .outline-preview-btn {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: var(--ui-icon-button-size-compact);
+  height: var(--ui-icon-button-size-compact);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2801,6 +3431,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .outline-preview-btn svg {
   display: block;
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
 }
 
 .outline-preview-btn:hover {
@@ -3200,6 +3832,90 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   margin-inline-end: 0.3em;
 }
 
+/* Project 内 body item の v3 冒頭表示（Book block + file block）。
+   共有 typography は `.frontmatter-view`、階層差は source 別 class で調整する。 */
+.project-document-start-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: stretch;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin-block-end: 1.5em;
+}
+
+.project-document-start-group .project-book-start-view,
+.project-document-start-group .project-file-start-view {
+  margin-block-end: 0;
+}
+
+.project-book-start-view.frontmatter-view {
+  padding-block-end: 0;
+}
+
+.project-document-start-group .project-book-start-view + .project-file-start-view {
+  margin-block-start: 2em;
+}
+
+.project-document-start-group .frontmatter-top {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.project-book-start-view .project-book-start-title {
+  /* 本文 .ProseMirror h1 は font-size 未指定のため UA 既定 2em。Book はそれより大きくする。 */
+  font-size: 2.25em;
+  font-weight: 700;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-file-start-view .project-file-start-title {
+  /* 本文 H1（UA 既定 2em）と同じスケール。 */
+  font-size: 2em;
+  overflow-wrap: anywhere;
+}
+
+.project-document-start-group .frontmatter-bottom {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.project-document-start-group .frontmatter-person {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15em 0.35em;
+  overflow-wrap: anywhere;
+  font-size: 0.8em;
+  opacity: 0.88;
+}
+
+.project-document-start-group .frontmatter-person-label {
+  flex: 0 0 auto;
+}
+
+.project-document-start-group .frontmatter-person-name {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 横書き Project 表示: ラベルと名前を隣接ひとまとまりとして右寄せする。
+   name 側が残り幅いっぱいに伸びたままだと、text-align: end の継承で
+   ラベルが左端・名前が右端に分離して見える（横書き限定の回帰）。 */
+.editor-panel[data-writing-mode="horizontal-tb"]
+  .project-document-start-group
+  .frontmatter-person {
+  justify-content: flex-end;
+}
+
+.editor-panel[data-writing-mode="horizontal-tb"]
+  .project-document-start-group
+  .frontmatter-person-name {
+  flex: 0 1 auto;
+}
+
 .editor-inline-hint-chip {
   position: absolute;
   right: 14px;
@@ -3217,6 +3933,109 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.34);
   pointer-events: none;
   user-select: none;
+}
+
+/* ----------------------------------------------------------
+   章境界ナビ（中央エディタ章頭=前章 / 章末=次章 オーバーレイ）
+   表示専用 read-only。.editor-panel（position: relative）基準で
+   スクロールしない位置に固定する。配置は writing-mode に追従。
+   ---------------------------------------------------------- */
+
+.editor-chapter-boundary-nav {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.editor-chapter-boundary-group {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, visibility 120ms ease;
+}
+
+.editor-chapter-boundary-group.is-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.editor-chapter-boundary-group.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-chapter-boundary-group {
+    transition: none;
+  }
+}
+
+.editor-chapter-boundary-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-main);
+  background: var(--bg-button);
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: var(--shadow-md);
+  opacity: 0.82;
+  cursor: pointer;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.editor-chapter-boundary-btn:hover {
+  opacity: 1;
+  background: var(--bg-button-hover);
+}
+
+.editor-chapter-boundary-label {
+  white-space: nowrap;
+}
+
+/* 横書き: 章頭=上中央、章末=下中央 */
+.editor-chapter-boundary-group.is-at-start {
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.editor-chapter-boundary-group.is-at-end {
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* 縦書き（vertical-rl）: 章頭=右中央（先頭側）、章末=左中央（進行方向） */
+.editor-panel[data-writing-mode="vertical-rl"] .editor-chapter-boundary-group.is-at-start {
+  top: 50%;
+  right: 12px;
+  left: auto;
+  bottom: auto;
+  transform: translateY(-50%);
+  align-items: flex-end;
+}
+
+.editor-panel[data-writing-mode="vertical-rl"] .editor-chapter-boundary-group.is-at-end {
+  top: 50%;
+  left: 12px;
+  right: auto;
+  bottom: auto;
+  transform: translateY(-50%);
+  align-items: flex-start;
 }
 
 .app-global-toast {
@@ -3366,6 +4185,51 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   text-justify: inter-character;
 }
 
+/* BETA-TY-VLB1: Chromium 縦書き inline境界 列末巻き戻り回避（表示専用）。
+   段落末の全角閉じ括弧（」』）】等）が列末に来たとき、段落内の ruby / strong /
+   span / link / TCY などの inline 境界まで折り返し位置が大きく巻き戻る Chromium
+   バグの回避。段落末に generated content のゼロ幅スペースで折り返し機会を与えると
+   巻き戻りが消える（調査: docs/vertical-inline-boundary-line-break-investigation.md）。
+   - generated content なので DOM text / PM doc / Markdown / clipboard には混入しない。
+   - 空 alternative text (/ "") で a11y tree / コピーから除外する。
+   - ruby / 明示 TCY 自体が段落末のときは sentinel + trailingBreak の直後に
+     generated ZWSP を重ねると空の表示列になるため、その実 DOM 条件だけ抑止する。
+   - rubyPunctuationNowrap（ルビ直後約物の行頭落ち）とは別件。
+   無効化はこのルール 1 箇所を削除/コメントアウトすれば足りる。 */
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface .ProseMirror p::after,
+.editor-panel[data-writing-mode="vertical-lr"] .editor-surface .ProseMirror p::after {
+  content: "\200B" / "";
+}
+
+.editor-panel[data-writing-mode="vertical-rl"]
+  .editor-surface
+  .ProseMirror
+  p:has(> br.ProseMirror-trailingBreak:only-child)::after,
+.editor-panel[data-writing-mode="vertical-rl"]
+  .editor-surface
+  .ProseMirror
+  p:has(
+    > [data-nyoze-special-inline-boundary="after"]:is(
+        [data-nyoze-special-inline-node="aozoraRuby"],
+        [data-nyoze-special-inline-node="aozoraTcy"]
+      ) + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-lr"]
+  .editor-surface
+  .ProseMirror
+  p:has(
+    > [data-nyoze-special-inline-boundary="after"]:is(
+        [data-nyoze-special-inline-node="aozoraRuby"],
+        [data-nyoze-special-inline-node="aozoraTcy"]
+      ) + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-lr"]
+  .editor-surface
+  .ProseMirror
+  p:has(> br.ProseMirror-trailingBreak:only-child)::after {
+  content: none;
+}
+
 .editor-surface .ProseMirror p {
   margin: 0;
 }
@@ -3462,6 +4326,17 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-radius: 6px;
   background: var(--blockquote-bg);
   color: var(--blockquote-text);
+}
+
+/* Nested blockquote roundtrip fix follow-up: a nested blockquote that is the
+   last child of its parent blockquote must not also carry the standalone
+   margin-block-end, or the gap stacks once per nesting level (parent
+   padding-block-end + nested margin-block-end, repeated per depth) into a
+   large uneditable blank band inside the outer quote. The enclosing
+   blockquote's own padding-block-end already provides closing space; the
+   margin is only needed when something follows the nested quote. */
+.editor-surface .ProseMirror blockquote blockquote:last-child {
+  margin-block-end: 0;
 }
 
 .editor-surface .ProseMirror blockquote p {
@@ -3843,16 +4718,1114 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   flex: 1;
 }
 
-.document-pane-content {
+.document-pane-content,
+.notes-pane-content {
   min-height: 0;
   overflow: auto;
   flex: 1;
 }
 
+/* 右ペイン: 現行文書の付箋一覧 (read-only) */
+
+/* 付箋 palette tokens（カード / marker / picker 共通。将来 tag color は resolve 層で合成） */
+:root {
+  --nyoze-note-color-yellow-accent: #c9a227;
+  --nyoze-note-color-yellow-tint: color-mix(in srgb, #c9a227 22%, transparent);
+  --nyoze-note-color-gray-accent: #8a8f98;
+  --nyoze-note-color-gray-tint: color-mix(in srgb, #8a8f98 20%, transparent);
+  --nyoze-note-color-blue-accent: #4a7fd4;
+  --nyoze-note-color-blue-tint: color-mix(in srgb, #4a7fd4 20%, transparent);
+  --nyoze-note-color-green-accent: #3d9a5c;
+  --nyoze-note-color-green-tint: color-mix(in srgb, #3d9a5c 20%, transparent);
+  --nyoze-note-color-pink-accent: #d46a9a;
+  --nyoze-note-color-pink-tint: color-mix(in srgb, #d46a9a 20%, transparent);
+  --nyoze-note-color-purple-accent: #8b6cc9;
+  --nyoze-note-color-purple-tint: color-mix(in srgb, #8b6cc9 20%, transparent);
+}
+
+.document-notes-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.document-notes-panel-title {
+  margin: 0;
+  font-size: calc(14px * var(--ui-font-scale));
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.document-notes-muted,
+.document-notes-error {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.5;
+}
+
+.document-notes-muted {
+  color: var(--text-secondary);
+}
+
+.document-notes-error {
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-button-hover) 42%, transparent);
+}
+
+.document-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+/* 付箋カード: テーマに馴染む薄い背景 + 枠線で 1 件ずつ視認しやすくする。 */
+.document-notes-item {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 55%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-button-hover) 26%, transparent);
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.document-notes-item[data-note-color]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 10px 0 0 10px;
+  background: var(--nyoze-note-display-accent, transparent);
+  pointer-events: none;
+}
+
+.document-notes-item[data-note-color='yellow'] {
+  --nyoze-note-display-accent: var(--nyoze-note-color-yellow-accent);
+  --nyoze-note-display-tint: var(--nyoze-note-color-yellow-tint);
+}
+
+.document-notes-item[data-note-color='gray'] {
+  --nyoze-note-display-accent: var(--nyoze-note-color-gray-accent);
+  --nyoze-note-display-tint: var(--nyoze-note-color-gray-tint);
+}
+
+.document-notes-item[data-note-color='blue'] {
+  --nyoze-note-display-accent: var(--nyoze-note-color-blue-accent);
+  --nyoze-note-display-tint: var(--nyoze-note-color-blue-tint);
+}
+
+.document-notes-item[data-note-color='green'] {
+  --nyoze-note-display-accent: var(--nyoze-note-color-green-accent);
+  --nyoze-note-display-tint: var(--nyoze-note-color-green-tint);
+}
+
+.document-notes-item[data-note-color='pink'] {
+  --nyoze-note-display-accent: var(--nyoze-note-color-pink-accent);
+  --nyoze-note-display-tint: var(--nyoze-note-color-pink-tint);
+}
+
+.document-notes-item[data-note-color='purple'] {
+  --nyoze-note-display-accent: var(--nyoze-note-color-purple-accent);
+  --nyoze-note-display-tint: var(--nyoze-note-color-purple-tint);
+}
+
+.document-notes-item[data-note-color]:not(.document-notes-item--selected):not(.document-notes-item--reveal) {
+  background: color-mix(
+    in srgb,
+    var(--nyoze-note-display-tint) 38%,
+    color-mix(in srgb, var(--bg-button-hover) 26%, transparent)
+  );
+}
+
+.document-notes-item--resolved[data-note-color]::before {
+  opacity: 0.55;
+}
+
+.document-notes-item--resolved[data-note-color]:not(.document-notes-item--selected):not(.document-notes-item--reveal) {
+  background: color-mix(
+    in srgb,
+    var(--nyoze-note-display-tint) 18%,
+    color-mix(in srgb, var(--bg-button-hover) 14%, transparent)
+  );
+}
+
+/* 選択状態: カード click。控えめに accent へ寄せる (強い glow は避ける)。 */
+.document-notes-item--selected {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-main));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+/* 一時 reveal: marker click 後に短時間だけ強調。timer で必ず消える。 */
+.document-notes-item--reveal {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border-main));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.document-notes-orphan-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+}
+
+.document-notes-orphan-title {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.document-notes-orphan-hint {
+  margin: 0;
+}
+
+.document-notes-resolved-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+}
+
+.document-notes-resolved-title {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.document-notes-item--resolved {
+  border-color: color-mix(in srgb, var(--border-main) 42%, transparent);
+  background: color-mix(in srgb, var(--bg-button-hover) 14%, transparent);
+}
+
+.document-notes-item--resolved .document-notes-item-title {
+  color: color-mix(in srgb, var(--text-primary) 82%, var(--text-secondary));
+}
+
+.document-notes-item-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.document-notes-item-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.document-notes-card-collapse-host {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.document-notes-card-collapse-btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.document-notes-card-collapse-btn:hover:not(:disabled),
+.document-notes-card-collapse-btn:focus-visible {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.document-notes-card-collapse-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-card-collapse-btn .ui-pane-tabler-icon,
+.document-notes-card-collapse-btn .tabler-icon,
+.document-notes-card-collapse-btn .project-pane-icon-btn-glyph {
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
+}
+
+.document-notes-card-collapse-btn .project-pane-icon-btn-glyph {
+  transition: transform 120ms ease;
+}
+
+.document-notes-card-collapse-btn.is-collapsed .project-pane-icon-btn-glyph {
+  transform: rotate(-90deg);
+}
+
+.document-notes-item-title-row .document-notes-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.document-notes-item-actions-row {
+  width: 100%;
+  min-width: 0;
+}
+
+.document-notes-jump-button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: calc(22px * var(--ui-font-scale));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-jump-button:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-main));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-button-hover));
+}
+
+.document-notes-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.document-notes-delete-button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: calc(22px * var(--ui-font-scale));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-delete-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--danger, #c44) 45%, var(--border-main));
+  background: color-mix(in srgb, var(--danger, #c44) 10%, var(--bg-button-hover));
+}
+
+.document-notes-delete-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-edit-button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: calc(22px * var(--ui-font-scale));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-edit-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--border-main) 90%, transparent);
+  background: var(--bg-button-hover);
+}
+
+.document-notes-edit-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-resolve-button,
+.document-notes-reopen-button {
+  flex: 0 0 auto;
+  margin: 0;
+  min-height: calc(22px * var(--ui-font-scale));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-resolve-button:hover:not(:disabled),
+.document-notes-reopen-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--border-main) 90%, transparent);
+  background: var(--bg-button-hover);
+}
+
+.document-notes-resolve-button:disabled,
+.document-notes-reopen-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.document-notes-edit-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.document-notes-edit-label-text {
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-secondary);
+}
+
+.document-notes-edit-title,
+.document-notes-edit-text {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 80%, transparent);
+  border-radius: 8px;
+  background: var(--bg-input, var(--bg-main));
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.document-notes-edit-text {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.document-notes-edit-title:focus,
+.document-notes-edit-text:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent, #4a90d9) 55%, var(--border-main));
+}
+
+.document-notes-edit-title:disabled,
+.document-notes-edit-text:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.document-notes-color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.document-notes-color-swatch {
+  width: calc(22px * var(--ui-font-scale));
+  height: calc(22px * var(--ui-font-scale));
+  min-width: calc(22px * var(--ui-font-scale));
+  min-height: calc(22px * var(--ui-font-scale));
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border-main) 65%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--nyoze-note-swatch-fill, var(--text-muted));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bg-pane) 35%, transparent);
+}
+
+.document-notes-color-swatch[data-note-color-swatch='yellow'] {
+  --nyoze-note-swatch-fill: var(--nyoze-note-color-yellow-accent);
+}
+
+.document-notes-color-swatch[data-note-color-swatch='gray'] {
+  --nyoze-note-swatch-fill: var(--nyoze-note-color-gray-accent);
+}
+
+.document-notes-color-swatch[data-note-color-swatch='blue'] {
+  --nyoze-note-swatch-fill: var(--nyoze-note-color-blue-accent);
+}
+
+.document-notes-color-swatch[data-note-color-swatch='green'] {
+  --nyoze-note-swatch-fill: var(--nyoze-note-color-green-accent);
+}
+
+.document-notes-color-swatch[data-note-color-swatch='pink'] {
+  --nyoze-note-swatch-fill: var(--nyoze-note-color-pink-accent);
+}
+
+.document-notes-color-swatch[data-note-color-swatch='purple'] {
+  --nyoze-note-swatch-fill: var(--nyoze-note-color-purple-accent);
+}
+
+.document-notes-color-swatch--selected {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, var(--nyoze-note-swatch-fill));
+  outline-offset: 2px;
+}
+
+.document-notes-color-swatch:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-main));
+}
+
+.document-notes-color-swatch:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-tag-manager {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-main) 55%, transparent);
+}
+
+.document-notes-tag-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.document-notes-tag-manager-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.document-notes-tag-manager-toggle:hover,
+.document-notes-tag-manager-toggle:focus-visible {
+  color: var(--text-primary);
+}
+
+.document-notes-tag-manager-chevron {
+  transition: transform 0.15s ease;
+}
+
+.document-notes-tag-manager-chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+.document-notes-tag-manager-help-btn,
+.document-notes-tag-manager-action-btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.document-notes-tag-manager-help-btn:hover:not(:disabled),
+.document-notes-tag-manager-help-btn:focus-visible,
+.document-notes-tag-manager-action-btn:hover:not(:disabled),
+.document-notes-tag-manager-action-btn:focus-visible {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.document-notes-tag-manager-help-btn:disabled,
+.document-notes-tag-manager-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-tag-manager-help-btn .ui-pane-tabler-icon,
+.document-notes-tag-manager-help-btn .tabler-icon,
+.document-notes-tag-manager-action-btn .ui-pane-tabler-icon,
+.document-notes-tag-manager-action-btn .tabler-icon {
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
+}
+
+.document-notes-tag-manager-body {
+  display: grid;
+  gap: 8px;
+}
+
+.document-notes-tag-manager-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.document-notes-tag-manager-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 35%, transparent);
+}
+
+.document-notes-tag-manager-item-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.document-notes-tag-manager-item-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.document-notes-tag-manager-item-label {
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-notes-tag-manager-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.document-notes-tag-manager-empty {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+.document-notes-tag-manager-editor {
+  display: grid;
+  gap: 6px;
+}
+
+.document-notes-tag-manager-editor-label {
+  display: grid;
+  gap: 4px;
+}
+
+.document-notes-tag-manager-editor-caption {
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-muted);
+}
+
+.document-notes-tag-manager-input {
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 6px;
+  background: var(--bg-input, var(--bg-pane));
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+
+.document-notes-tag-manager-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.document-notes-tag-manager-save,
+.document-notes-tag-manager-cancel,
+.document-notes-tag-manager-add {
+  margin: 0;
+  padding: 3px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-primary);
+  font-size: calc(11px * var(--ui-font-scale));
+  cursor: pointer;
+}
+
+.document-notes-tag-manager-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.document-notes-tag-manager-save {
+  border-color: color-mix(in srgb, var(--accent, #4a90d9) 45%, var(--border-main));
+}
+
+.document-notes-tag-manager-save:disabled,
+.document-notes-tag-manager-cancel:disabled,
+.document-notes-tag-manager-add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-tag-manager-ops-help {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.document-notes-tag-slots {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-main) 55%, transparent);
+}
+
+.document-notes-tag-slots-title {
+  margin: 0 0 4px;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.document-notes-tag-slots-hint {
+  margin: 0 0 8px;
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+.document-notes-tag-slots-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.document-notes-tag-slot-label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-notes-tag-slot-index {
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-muted);
+  min-width: 1.2em;
+  text-align: right;
+}
+
+.document-notes-tag-slot-input {
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 6px;
+  background: var(--bg-input, var(--bg-pane));
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+
+.document-notes-tag-slots-save {
+  margin: 0;
+  padding: 3px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent, #4a90d9) 45%, var(--border-main));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-primary);
+  font-size: calc(11px * var(--ui-font-scale));
+  cursor: pointer;
+}
+
+.document-notes-tag-slots-save:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.document-notes-tag-picker-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.document-notes-tag-picker-checkbox {
+  margin: 0;
+}
+
+.document-notes-tag-picker-empty {
+  margin: 0;
+}
+
+.document-notes-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.document-notes-tag-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-button-hover) 35%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(10px * var(--ui-font-scale));
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.document-notes-tag-chip--display {
+  pointer-events: none;
+}
+
+.document-notes-tag-filter {
+  margin-bottom: 12px;
+}
+
+.document-notes-tag-filter-title {
+  margin: 0 0 6px;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.document-notes-tag-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.document-notes-tag-filter-chip {
+  margin: 0;
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 80%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-button-hover) 35%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.document-notes-tag-filter-chip:hover {
+  color: var(--text-primary);
+  background: var(--bg-button-hover);
+}
+
+.document-notes-tag-filter-chip--active {
+  border-color: color-mix(in srgb, var(--accent, #4a90d9) 50%, var(--border-main));
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent, #4a90d9) 12%, var(--bg-button-hover));
+}
+
+.document-notes-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.document-notes-edit-cancel,
+.document-notes-edit-save {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 3px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-edit-save {
+  border-color: color-mix(in srgb, var(--accent, #4a90d9) 45%, var(--border-main));
+  color: var(--text-primary);
+}
+
+.document-notes-edit-cancel:hover:not(:disabled),
+.document-notes-edit-save:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-button-hover);
+}
+
+.document-notes-edit-cancel:disabled,
+.document-notes-edit-save:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-missing-anchor {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.document-notes-item-title {
+  margin: 0;
+  font-size: calc(13px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+  word-break: normal;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.document-notes-item-body.note-markdown-preview {
+  --document-notes-preview-line-height: 1.55em;
+  --document-notes-preview-expanded-max-height: min(
+    calc(var(--document-notes-preview-line-height) * 16),
+    40vh
+  );
+  min-width: 0;
+  max-width: 100%;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.document-notes-item-body.note-markdown-preview p {
+  margin: 0 0 0.35em;
+}
+
+.document-notes-item-body.note-markdown-preview p:last-child {
+  margin-bottom: 0;
+}
+
+.document-notes-item-body.note-markdown-preview.document-notes-item-body--collapsed {
+  max-height: calc(var(--document-notes-preview-line-height) * 10);
+  overflow: hidden;
+}
+
+.document-notes-item-body.note-markdown-preview.document-notes-item-body--expanded-scroll {
+  max-height: var(--document-notes-preview-expanded-max-height);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.document-notes-item--card-collapsed .document-notes-preview-wrap,
+.document-notes-item--card-collapsed .document-notes-item-body.note-markdown-preview,
+.document-notes-item--card-collapsed .document-notes-missing-anchor {
+  display: none;
+}
+
+.document-notes-preview-wrap {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.document-notes-preview-wrap--collapsed {
+  position: relative;
+}
+
+.document-notes-preview-wrap--collapsed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(6px + 1.4em);
+  height: 1.75em;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--bg-button-hover) 26%, transparent)
+  );
+}
+
+.document-notes-item--resolved .document-notes-preview-wrap--collapsed::after {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--bg-button-hover) 14%, transparent)
+  );
+}
+
+.document-notes-item--selected .document-notes-preview-wrap--collapsed::after {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--accent) 7%, transparent)
+  );
+}
+
+.document-notes-item--reveal .document-notes-preview-wrap--collapsed::after {
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--accent) 12%, transparent)
+  );
+}
+
+.document-notes-preview-toggle {
+  justify-self: start;
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-preview-toggle:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border-main));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-button-hover));
+}
+
+.document-notes-missing-file-section {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-top: 1px solid var(--border-light);
+}
+
+.document-notes-missing-file-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.document-notes-missing-file-title {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.document-notes-missing-file-hint {
+  margin: 0;
+}
+
+.document-notes-delete-all-button {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-main) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-button-hover) 38%, transparent);
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-notes-delete-all-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--danger, #c44) 45%, var(--border-main));
+  background: color-mix(in srgb, var(--danger, #c44) 10%, var(--bg-button-hover));
+}
+
+.document-notes-delete-all-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.document-notes-missing-file-meta {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.document-notes-missing-file-path,
+.document-notes-missing-file-updated {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.note-markdown-preview p {
+  margin: 0 0 0.45em;
+}
+
+.note-markdown-preview p:last-child {
+  margin-bottom: 0;
+}
+
+.note-markdown-preview h1,
+.note-markdown-preview h2,
+.note-markdown-preview h3,
+.note-markdown-preview h4,
+.note-markdown-preview h5,
+.note-markdown-preview h6 {
+  margin: 0.2em 0 0.35em;
+  font-size: calc(12.5px * var(--ui-font-scale));
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.note-markdown-preview ul,
+.note-markdown-preview ol {
+  margin: 0 0 0.45em;
+  padding-inline-start: 1.2em;
+}
+
+.note-markdown-preview li {
+  margin: 0.1em 0;
+}
+
+.note-markdown-preview code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-button-hover) 70%, transparent);
+}
+
+.note-markdown-preview strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.note-markdown-preview em {
+  font-style: italic;
+}
+
 .document-settings-panel {
   display: grid;
-  gap: 16px;
-  padding: 14px;
+  gap: 12px;
+  padding: 12px;
 }
 
 .document-settings-panel-header {
@@ -3860,14 +5833,62 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   gap: 6px;
 }
 
+.document-settings-panel-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
 .document-settings-panel-title {
   margin: 0;
+  flex: 1 1 auto;
+  min-inline-size: 0;
   font-size: calc(14px * var(--ui-font-scale));
   font-weight: 700;
   color: var(--text-primary);
 }
 
-.document-settings-panel-help,
+.document-settings-panel-help-btn,
+.document-settings-help-btn {
+  flex: 0 0 auto;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.document-settings-panel-help-btn:hover:not(:disabled),
+.document-settings-panel-help-btn:focus-visible,
+.document-settings-help-btn:hover:not(:disabled),
+.document-settings-help-btn:focus-visible {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.document-settings-help-btn .ui-pane-tabler-icon,
+.document-settings-help-btn .tabler-icon {
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
+}
+
+.document-settings-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.document-settings-field-header .document-settings-label {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
 .document-settings-panel-readonly,
 .document-settings-panel-warning {
   margin: 0;
@@ -3890,17 +5911,60 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   background: color-mix(in srgb, var(--bg-button-hover) 42%, transparent);
 }
 
+.document-settings-project-callout {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-light) 88%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-button-hover) 34%, transparent);
+}
+
+.document-settings-project-callout-message {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.document-settings-project-callout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.document-settings-project-callout-button {
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-button);
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.document-settings-project-callout-button:hover {
+  background: var(--bg-button-hover);
+}
+
 .document-settings-form,
 .document-settings-summary {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .document-settings-field,
 .document-settings-summary-row {
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 5px;
+  padding: 9px 11px;
   border: 1px solid var(--border-light);
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
@@ -3923,8 +5987,11 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-radius: 8px;
   background: var(--bg-dialog);
   color: var(--text-primary);
-  font: inherit;
-  padding: 8px 10px;
+  font-family: inherit;
+  /* 右ペインの他タブと密度を揃えるため、本文継承より一段小さくする */
+  font-size: calc(12.5px * var(--ui-font-scale));
+  /* クリック高さを確保しつつ詰める */
+  padding: 6px 9px;
 }
 
 .document-settings-field input:disabled,
@@ -3946,7 +6013,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .document-settings-checkbox-copy {
-  font-size: calc(13px * var(--ui-font-scale));
+  font-size: calc(12.5px * var(--ui-font-scale));
   font-weight: 600;
 }
 
@@ -3954,8 +6021,12 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .document-settings-summary-help,
 .document-settings-summary-current {
   font-size: calc(12px * var(--ui-font-scale));
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--text-secondary);
+}
+
+.document-settings-summary-current {
+  color: var(--text-primary);
 }
 
 .document-settings-type-hint {
@@ -3965,25 +6036,58 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   opacity: 0.78;
 }
 
-.document-settings-summary-value {
-  font-size: calc(13px * var(--ui-font-scale));
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
 .document-settings-reset-button {
   justify-self: start;
   border: 1px solid var(--border-main);
   border-radius: 999px;
   background: var(--bg-button);
   color: var(--text-primary);
-  font: inherit;
-  padding: 6px 12px;
+  font-family: inherit;
+  font-size: calc(12px * var(--ui-font-scale));
+  padding: 5px 11px;
   cursor: pointer;
 }
 
 .document-settings-reset-button:hover:not(:disabled) {
   background: var(--bg-button-hover);
+}
+
+.document-settings-save-footer {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border-light) 88%, transparent);
+}
+
+.document-settings-save-helper {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.document-settings-save-button {
+  justify-self: start;
+  margin: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--accent, #4a90d9);
+  border-radius: 8px;
+  background: var(--accent, #4a90d9);
+  color: var(--bg-button, #fff);
+  font-family: inherit;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.document-settings-save-button:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.document-settings-save-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .log-item {
@@ -4059,6 +6163,135 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   color: var(--text-secondary);
   font-size: calc(12px * var(--ui-font-scale));
   line-height: 1.55;
+}
+
+/* Export options dialog (MVP). Shared by active document export and Book export.
+   Fixed title / scrollable body / fixed footer so Book + LeME/でんでん tall
+   option lists stay within the viewport (Cancel / Export remain reachable). */
+.export-options-dialog {
+  width: min(420px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.export-options-dialog > .prompt-title {
+  flex-shrink: 0;
+}
+
+.export-options-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.export-options-dialog > .prompt-buttons {
+  flex-shrink: 0;
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-input);
+}
+
+.export-options-row {
+  display: flex;
+  margin-top: 10px;
+}
+
+.export-options-body > .export-options-row:first-of-type {
+  margin-top: 0;
+}
+
+.export-options-select-row {
+  align-items: center;
+  gap: 8px;
+  margin-left: 24px;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-family: var(--ui-font-family);
+  color: var(--text-primary);
+}
+
+.export-options-select-row select {
+  flex: 1;
+  min-width: 0;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.export-options-select-row select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Book export result details dialog (MVP) */
+.book-export-result-details-dialog {
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(70vh, 520px);
+  display: flex;
+  flex-direction: column;
+}
+
+.book-export-result-details-summary {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.5;
+}
+
+.book-export-result-details-section {
+  margin-top: 10px;
+  min-height: 0;
+}
+
+.book-export-result-details-section-title {
+  margin: 0 0 4px;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.book-export-result-details-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+}
+
+.book-export-result-details-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-main);
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+.book-export-result-details-item:last-child {
+  border-bottom: none;
+}
+
+.book-export-result-details-item-title {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.book-export-result-details-item-kind {
+  color: #b24343;
+}
+
+.book-export-result-details-item-path,
+.book-export-result-details-item-detail {
+  color: var(--text-secondary);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  word-break: break-all;
 }
 
 /* R3.5-2: Save failure dialog */
@@ -4237,6 +6470,20 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   gap: 8px;
 }
 
+/* 付箋追加 modal (Task 3A-3): タイトル input + 複数行本文 textarea */
+.note-anchor-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 96px));
+}
+
+.note-anchor-textarea {
+  min-height: 8.5em;
+  line-height: 1.5;
+  resize: vertical;
+}
+
 .prompt-field-label {
   display: flex;
   flex-direction: column;
@@ -4351,6 +6598,47 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   padding: 8px 18px 14px;
   flex-shrink: 0;
   border-top: 1px solid var(--border-input);
+}
+
+.display-settings-dialog > .display-settings-dialog-footer {
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 0;
+}
+
+.display-settings-dialog-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.display-settings-library-entry-btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-main);
+  background: var(--bg-button);
+  color: var(--text-primary);
+  padding: 6px 16px;
+  cursor: pointer;
+  font-size: calc(13px * var(--ui-font-scale));
+  line-height: normal;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s;
+}
+
+.display-settings-library-entry-btn:hover,
+.display-settings-library-entry-btn:focus-visible {
+  background: var(--bg-button-hover);
 }
 
 /* --- Section --- */
@@ -5006,6 +7294,322 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   white-space: pre-wrap;
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Nyoze 独自ブロック装飾 (custom block directive)
+   `:::align-center` / `:::align-end` / `:::indent-N` / `:::style-<id>`
+   - 表示は class / data attr で行い、本文 Markdown には font / color の
+     直接値を保存しない。
+   - align は logical な `text-align` で縦書き / 横書き両対応。
+   - indent は logical な padding-inline-start で行頭側に字下げ。
+   - style は控えめ。テーマ変数を使い、未知 style は通常本文に近い表示。
+   ───────────────────────────────────────────────────────────── */
+.nyoze-directive-block {
+  /* 装飾ブロックであることが分かる最小限の手がかり。過剰に凝らない。 */
+  margin-block: 0.4em;
+}
+
+/* align: logical な text-align で writing-mode に追従する。
+   縦書きでは end が「行末 / 地付き」相当になる。 */
+.nyoze-directive-block--align-center {
+  text-align: center;
+}
+
+.nyoze-directive-block--align-end {
+  text-align: end;
+}
+
+/* indent: 行頭側 (inline-start) に段階的な字下げ。
+   縦書きでは inline-start = 上端なので、自然な字下げになる。 */
+.nyoze-directive-block[data-nyoze-kind='indent'] {
+  --nyoze-directive-indent-step: 1.4em;
+  padding-inline-start: calc(
+    var(--nyoze-directive-indent-step) * var(--nyoze-directive-indent-level, 1)
+  );
+}
+
+.nyoze-directive-block--indent-1 { --nyoze-directive-indent-level: 1; }
+.nyoze-directive-block--indent-2 { --nyoze-directive-indent-level: 2; }
+.nyoze-directive-block--indent-3 { --nyoze-directive-indent-level: 3; }
+.nyoze-directive-block--indent-4 { --nyoze-directive-indent-level: 4; }
+.nyoze-directive-block--indent-5 { --nyoze-directive-indent-level: 5; }
+.nyoze-directive-block--indent-6 { --nyoze-directive-indent-level: 6; }
+
+/* style: 組み込み semantic style は最小限・控えめ。テーマ変数のみ使用。 */
+.nyoze-directive-block--style-letter {
+  padding-block: 0.3em;
+  padding-inline: 0.6em;
+  color: var(--text-secondary);
+  line-height: 1.9;
+}
+
+.nyoze-directive-block--style-muted {
+  color: var(--text-muted);
+  font-size: 0.92em;
+}
+
+.nyoze-directive-block--style-heading {
+  color: var(--text-heading, var(--text-primary));
+  font-size: 1.15em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+/* 未知 style は通常本文に近い表示 (style id は class / data attr で保持済み)。 */
+.nyoze-directive-block--style-unknown {
+  color: inherit;
+}
+
+/* 改ページ marker (`:::page-break`): 表示専用・編集不可の block atom。
+   本文テキストは持たず、Markdown は常に fenced empty directive へ戻る。 */
+.nyoze-page-break {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-block: 0.6em;
+  padding-block: 0.3em;
+  border-block: 1px dashed var(--atom-border);
+  color: var(--text-muted);
+  font-size: 0.8em;
+  user-select: none;
+  cursor: default;
+}
+
+.nyoze-page-break__label {
+  padding-inline: 0.6em;
+}
+
+/* 選択中は本文操作を妨げない範囲で明確に分かる見た目にする (削除 command の対象になるため)。 */
+.nyoze-page-break.ProseMirror-selectednode {
+  border-block: 1px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 空白ページ marker (`:::blank-page` / `:::blank-page-N`): 表示専用・編集不可の
+   block atom。`nyoze-page-break` とは意味が異なる (次 block の breakBefore で
+   はなく、固定の空白ページ N 枚) ため、実線 border で視覚的に区別する。 */
+.nyoze-blank-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-block: 0.6em;
+  padding-block: 0.3em;
+  border-block: 1px solid var(--atom-border);
+  color: var(--text-muted);
+  font-size: 0.8em;
+  user-select: none;
+  cursor: default;
+}
+
+.nyoze-blank-page__label {
+  padding-inline: 0.6em;
+}
+
+.nyoze-blank-page.ProseMirror-selectednode {
+  border-block: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 付箋アンカー (noteAnchor): 本文文字ではなく editor-only の UI marker。
+   Tabler message-exclamation 相当の静的 SVG を表示。textContent は空のため、
+   Markdown serialize / save / WYSIWYG 通常 copy へ marker の文字は混入しない。 */
+.note-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 親 textblock の mark 装飾が marker / preview に継承されないようリセット。 */
+  font-weight: normal;
+  font-style: normal;
+  text-decoration: none;
+  background: transparent;
+  box-decoration-break: clone;
+  /* 見出し折りたたみの message icon (.heading-fold-ellipsis) と同程度のサイズ。 */
+  width: 1.2em;
+  height: 1.2em;
+  /* 縦書き本文でも icon の向きを変えない。 */
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  vertical-align: middle;
+  margin-inline: 0.1em;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  color: var(--text-muted);
+  /* hover preview を受けられるよう marker 自体は pointer events を受ける。 */
+  pointer-events: auto;
+}
+
+/* 横書きでは注記アイコンとして上付きに寄せる。 */
+.editor-panel[data-writing-mode="horizontal-tb"] .note-anchor {
+  vertical-align: super;
+}
+
+.note-anchor:hover {
+  color: var(--accent);
+}
+
+.note-anchor[data-note-anchor-color='yellow'] {
+  color: var(--nyoze-note-color-yellow-accent);
+}
+
+.note-anchor[data-note-anchor-color='gray'] {
+  color: var(--nyoze-note-color-gray-accent);
+}
+
+.note-anchor[data-note-anchor-color='blue'] {
+  color: var(--nyoze-note-color-blue-accent);
+}
+
+.note-anchor[data-note-anchor-color='green'] {
+  color: var(--nyoze-note-color-green-accent);
+}
+
+.note-anchor[data-note-anchor-color='pink'] {
+  color: var(--nyoze-note-color-pink-accent);
+}
+
+.note-anchor[data-note-anchor-color='purple'] {
+  color: var(--nyoze-note-color-purple-accent);
+}
+
+.note-anchor[data-note-anchor-color]:hover {
+  color: color-mix(in srgb, var(--nyoze-note-display-marker-accent, var(--accent)) 82%, var(--accent));
+}
+
+.note-anchor[data-note-anchor-color='yellow']:hover {
+  --nyoze-note-display-marker-accent: var(--nyoze-note-color-yellow-accent);
+}
+
+.note-anchor[data-note-anchor-color='gray']:hover {
+  --nyoze-note-display-marker-accent: var(--nyoze-note-color-gray-accent);
+}
+
+.note-anchor[data-note-anchor-color='blue']:hover {
+  --nyoze-note-display-marker-accent: var(--nyoze-note-color-blue-accent);
+}
+
+.note-anchor[data-note-anchor-color='green']:hover {
+  --nyoze-note-display-marker-accent: var(--nyoze-note-color-green-accent);
+}
+
+.note-anchor[data-note-anchor-color='pink']:hover {
+  --nyoze-note-display-marker-accent: var(--nyoze-note-color-pink-accent);
+}
+
+.note-anchor[data-note-anchor-color='purple']:hover {
+  --nyoze-note-display-marker-accent: var(--nyoze-note-color-purple-accent);
+}
+
+.note-anchor-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 親の縦書き writing-mode に引っ張られないよう固定。 */
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  /* selection / caret 干渉を避けるため inner は pointer events を持たない。 */
+  pointer-events: none;
+}
+
+.note-anchor-marker svg {
+  display: block;
+  pointer-events: none;
+}
+
+/* selected state は薄い outline 程度に留める。 */
+.note-anchor.ProseMirror-selectednode {
+  outline: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* 右ペイン等からのジャンプ先を短時間強調 (DOM-only, editor-only)。 */
+.note-anchor.note-anchor--jump-target {
+  color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 2px;
+  border-radius: 3px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* hover preview の足場: data-note-anchor-preview を CSS tooltip で出す。
+   将来 NodeView / plugin が同属性へ notes.json 由来の title/text を差し込める。
+   pseudo-element の content は DOM textContent ではないため copy には混入しない。 */
+.note-anchor[data-note-anchor-preview]:hover::after {
+  content: attr(data-note-anchor-preview);
+  font-family: var(--ui-font-family);
+  font-weight: normal;
+  font-style: normal;
+  text-decoration: none;
+  position: absolute;
+  /* 物理座標で配置し、縦書き本文の logical 軸に引っ張られないようにする。 */
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: block;
+  box-sizing: border-box;
+  /* 親 marker (1.2em) の containing block 幅に縮まないよう明示する。 */
+  width: max-content;
+  min-width: 14.4em;
+  max-width: min(336px, calc(100vw - 16px));
+  max-height: 60vh;
+  overflow: auto;
+  /* 縦書き本文でも preview 自体は横書きで読めるようにする。 */
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  direction: ltr;
+  white-space: pre-wrap;
+  padding: 9px 12px;
+  font-size: calc(12px * var(--ui-font-scale, 1));
+  line-height: 1.55;
+  color: var(--text-secondary);
+  background: var(--bg-dialog);
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  z-index: 50;
+  opacity: 1;
+}
+
+.note-anchor[data-note-anchor-color='yellow']:hover::after {
+  border-left: 3px solid var(--nyoze-note-color-yellow-accent);
+  background: color-mix(in srgb, var(--nyoze-note-color-yellow-accent) 14%, var(--bg-dialog));
+}
+
+.note-anchor[data-note-anchor-color='gray']:hover::after {
+  border-left: 3px solid var(--nyoze-note-color-gray-accent);
+  background: color-mix(in srgb, var(--nyoze-note-color-gray-accent) 14%, var(--bg-dialog));
+}
+
+.note-anchor[data-note-anchor-color='blue']:hover::after {
+  border-left: 3px solid var(--nyoze-note-color-blue-accent);
+  background: color-mix(in srgb, var(--nyoze-note-color-blue-accent) 14%, var(--bg-dialog));
+}
+
+.note-anchor[data-note-anchor-color='green']:hover::after {
+  border-left: 3px solid var(--nyoze-note-color-green-accent);
+  background: color-mix(in srgb, var(--nyoze-note-color-green-accent) 14%, var(--bg-dialog));
+}
+
+.note-anchor[data-note-anchor-color='pink']:hover::after {
+  border-left: 3px solid var(--nyoze-note-color-pink-accent);
+  background: color-mix(in srgb, var(--nyoze-note-color-pink-accent) 14%, var(--bg-dialog));
+}
+
+.note-anchor[data-note-anchor-color='purple']:hover::after {
+  border-left: 3px solid var(--nyoze-note-color-purple-accent);
+  background: color-mix(in srgb, var(--nyoze-note-color-purple-accent) 14%, var(--bg-dialog));
+}
+
 /* ----------------------------------------------------------
    12b. SEC-5 Image Node Styles
    ---------------------------------------------------------- */
@@ -5124,6 +7728,19 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   text-decoration: none;
 }
 
+/*
+ * 青空ルビ直後の対象約物 1 文字を、表示上だけ不可分単位として扱う wrapper。
+ * rubyPunctuationNowrap extension が plugin view で `[ruby ... 約物]` をここに包む。
+ * 親文字 inline-block と直後約物を同一 nowrap inline-block にまとめ、
+ * 縦書きで約物が行頭/次列頭に落ちるのを防ぐ。wrapper は表示専用で doc には載らない。
+ */
+.editor-surface .ProseMirror .tategaki-ruby-punct-run {
+  display: inline-block;
+  white-space: nowrap;
+  writing-mode: inherit;
+  text-orientation: inherit;
+}
+
 /* Tate-chu-yoko (horizontal-in-vertical) */
 .tategaki-md-tcy {
   text-combine-upright: all;
@@ -5139,6 +7756,13 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   color: inherit;
   border-radius: 2px;
   padding: 0 0.05em;
+}
+
+/* Underline mark: in vertical writing mode, Japanese underline (傍線) is
+   conventionally drawn to the right of the glyphs, not the left (which is
+   the browser default for `text-underline-position: auto` in vertical-rl). */
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface .ProseMirror .tategaki-md-underline {
+  text-underline-position: right;
 }
 
 /* ----------------------------------------------------------
@@ -5186,17 +7810,10 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   list-style-type: circle;
 }
 
-/* Horizontal writing: avoid extra gap after nested lists inside list items. */
-.editor-panel[data-writing-mode="horizontal-tb"]
-  .editor-surface
-  .ProseMirror
-  li
-  > ul,
-.editor-panel[data-writing-mode="horizontal-tb"]
-  .editor-surface
-  .ProseMirror
-  li
-  > ol {
+/* Nested lists inside list items: zero block-end margin so the following sibling
+   item is not pushed away by the child list box (horizontal and vertical writing). */
+.editor-surface .ProseMirror li > ul,
+.editor-surface .ProseMirror li > ol {
   margin-block-end: 0;
 }
 
@@ -5343,6 +7960,11 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   left: calc(100% - 4px);
   min-width: 220px;
   max-width: 280px;
+  /* 項目数が多い submenu (ブロック装飾等) がウィンドウ下端をはみ出さないための
+     フォールバック。実際の反転・高さ調整は EditorContextMenu.tsx の
+     handleSubmenuTriggerMouseEnter が実測して inline style で上書きする。 */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px 0;
   border: 1px solid var(--border-main);
   border-radius: 6px;
@@ -5388,6 +8010,48 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
     --nyoze-visual-focus-current-line-bg,
     rgba(30, 144, 255, 0.28)
   );
+}
+
+/* Pseudo caret (Task 2-4): when enabled, hide the WYSIWYG native caret so it does not
+   double up with the display-only overlay. Scoped to the WYSIWYG ProseMirror surface only —
+   Source Mode (CodeMirror) and Paragraph Plain (textarea) live outside `.editor-core-host`,
+   so their caret is untouched. CSS-only: selection / input / IME handling is unaffected. */
+.editor-panel[data-pseudo-caret="on"] .editor-core-host .ProseMirror {
+  caret-color: transparent;
+}
+
+/* Pseudo caret MVP (Task 2-2): display-only thin caret line, painted above the
+   current-line band but below the Paragraph Plain overlay / modals / menus.
+   Shares --editor-caret-color with native / Source Mode carets. */
+.editor-surface > .nyoze-pseudo-caret-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  border-radius: 1px;
+  box-sizing: border-box;
+  background: var(--editor-caret-color, var(--accent, #1e90ff));
+}
+
+/* Pseudo caret blink: instant on/off like a native caret (no fade). Opacity only — no layout / geometry impact. */
+.editor-surface > .nyoze-pseudo-caret-overlay[data-blink="on"] {
+  animation: nyoze-pseudo-caret-blink 1.1s steps(2, jump-none) infinite;
+}
+
+@keyframes nyoze-pseudo-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-surface > .nyoze-pseudo-caret-overlay[data-blink="on"] {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* ----------------------------------------------------------
@@ -5595,6 +8259,70 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 
 .theme-studio-pane {
   padding: 4px 0 8px;
+}
+
+.theme-studio-setting-item--stacked {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 6px;
+}
+
+.theme-studio-setting-item--stacked .setting-item-info,
+.theme-studio-setting-item--stacked .setting-item-control {
+  width: 100%;
+  min-width: 0;
+  margin-right: 0;
+}
+
+.theme-studio-setting-item--stacked .setting-item-control {
+  justify-content: stretch;
+  flex-wrap: wrap;
+}
+
+.theme-studio-setting-item--stacked .setting-item-name {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.theme-studio-setting-item--stacked .setting-select,
+.theme-studio-setting-item--stacked .theme-swatch-select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.theme-studio-setting-item--stacked .slider-control {
+  width: 100%;
+  min-width: 0;
+}
+
+.theme-studio-setting-item--stacked .slider-control input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  max-width: 100%;
+}
+
+.theme-studio-setting-item--stacked .slider-value {
+  flex-shrink: 0;
+}
+
+.theme-studio-setting-item--inline-color .setting-item-info {
+  flex: 0 1 auto;
+  flex-shrink: 0;
+}
+
+.theme-studio-setting-item--inline-color .setting-item-name {
+  word-break: normal;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.theme-studio-setting-item--inline-color .setting-item-control {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
 }
 
 .theme-studio-save-row {
@@ -6139,4 +8867,1650 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .theme-preset-item-rename-icon {
   width: 14px;
   height: 14px;
+}
+
+/* ===================================================================== */
+/* Project pane (Slice B3) — 右ペイン Project タブの read-only サイドデスク。 */
+/* 物理フォルダ階層ではなく Book / role による意味分類を表示する。           */
+/* ===================================================================== */
+
+/* Workspace の分岐ラッパ。右ペインの残り高さに収め、内側 .project-pane を
+   スクロールコンテナにする（これが無いと長い資料 preview がクリップされる）。 */
+.project-pane-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* toolbar は固定、body が残り高さを占め、その中で index と preview が
+   それぞれ独立スクロールする（preview を開いても上部の索引は見えたまま）。 */
+.project-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.project-pane-header {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-divider);
+  overflow: visible;
+  position: relative;
+  z-index: 2;
+}
+
+.project-pane-header-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.project-pane-header-label {
+  flex: 0 0 auto;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-pane-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(13px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.project-pane-header-actions {
+  margin-left: auto;
+}
+
+.project-pane-header-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  min-width: 0;
+}
+
+.project-pane-icon-btn.is-open {
+  background: var(--bg-button-hover);
+  border-color: var(--border-main);
+}
+
+.project-pane-title-edit-compact {
+  min-width: 0;
+}
+
+.project-pane-unregister-trigger {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.project-pane-title-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-pane-title-edit-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 作品切り替え（Project switcher）導線。header expand 内に表示。 */
+.project-pane-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--bg-panel);
+}
+
+.project-switcher-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.project-switcher-title {
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-switcher-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-switcher-refresh:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.project-switcher-refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.project-switcher-placeholder {
+  margin: 2px 4px;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-muted);
+}
+
+.project-switcher-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.project-switcher-item-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-switcher-item-btn:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+}
+
+.project-switcher-item-btn:disabled,
+.project-switcher-item-btn.is-current {
+  cursor: default;
+}
+
+.project-switcher-item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.project-switcher-item-title {
+  font-size: calc(12px * var(--ui-font-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-item-path {
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-switcher-item-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.project-switcher-current-badge {
+  font-size: calc(10px * var(--ui-font-scale));
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-button-hover);
+  color: var(--text-secondary);
+}
+
+.project-switcher-manifest {
+  display: inline-flex;
+  align-items: center;
+}
+
+.project-switcher-manifest.has-manifest {
+  color: var(--text-secondary);
+}
+
+.project-switcher-manifest.no-manifest {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+/* Slice B5: project 未所属時の「作品として設定」導線。 */
+.project-pane-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.project-pane-create-target {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.project-pane-create-button {
+  align-self: flex-start;
+  font-size: calc(12px * var(--ui-font-scale));
+  padding: 4px 12px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.project-pane-create-button:hover {
+  background: var(--bg-button-hover);
+}
+
+.project-pane-create-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.project-pane-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-pane-create-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.project-pane-create-field-label {
+  font-size: calc(10px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-pane-create-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+
+.project-pane-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-pane-create-cancel {
+  font-size: calc(12px * var(--ui-font-scale));
+  padding: 4px 12px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-pane-create-cancel:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+}
+
+.project-pane-create-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.project-pane-create-error {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+  color: var(--text-danger, #c0392b);
+}
+
+.project-pane-create-unavailable {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.project-create-modal {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.project-create-modal .project-pane-create-form {
+  margin-top: 8px;
+}
+
+.project-pane-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 上部の索引領域。残り高さを埋め、内容が長ければここだけスクロールする。 */
+.project-pane-index {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+}
+
+/* 索引と preview の境界。ドラッグで上下の高さを調整する。 */
+.project-pane-divider {
+  flex-shrink: 0;
+  height: 5px;
+  cursor: row-resize;
+  background: var(--pane-divider-track, var(--border-divider));
+  transition: background 0.15s;
+}
+
+.project-pane-divider:hover {
+  background: var(--pane-divider-track-hover, var(--accent));
+  opacity: 0.8;
+}
+
+.project-pane-divider:active {
+  background: var(--pane-divider-track-active, var(--accent));
+  opacity: 1;
+}
+
+body.is-resizing-project-preview {
+  cursor: row-resize;
+  user-select: none;
+}
+
+.project-pane-title-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-weight: 500;
+  font-size: calc(13px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.project-pane-title-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.project-pane-title-edit-error {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 500;
+  color: var(--text-error, #c0392b);
+}
+
+/* role アイコン（表示専用）。テキストと縦中央で揃え、控えめな配色にする。 */
+.project-role-icon {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  vertical-align: text-bottom;
+}
+
+.project-pane-header-main .project-role-icon {
+  margin-right: 4px;
+}
+
+.project-pane-project-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.project-pane-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-pane-section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.project-pane-empty,
+.project-pane-hint,
+.project-pane-section-empty {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.project-pane-hint {
+  font-style: italic;
+}
+
+.project-pane-book-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-pane-book-name-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-pane-book-name {
+  flex: 1 1 auto;
+  font-size: calc(12px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 2px 0;
+  min-width: 0;
+}
+
+.project-pane-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-pane-row-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.project-pane-icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--ui-icon-button-size-compact);
+  height: var(--ui-icon-button-size-compact);
+  padding: 0;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-pane-icon-btn:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.project-pane-icon-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* hover icon 差し替え（表示専用）。通常は base glyph、hover / focus-visible で plus へ。
+   hoverIcon を持つボタン（.has-hover-glyph）だけに限定し、他の icon-only ボタンの
+   通常 hover では glyph を消さない。disabled 時は差し替えない。 */
+.project-pane-icon-btn-glyph {
+  display: inline-flex;
+}
+
+.project-pane-icon-btn-glyph-hover {
+  display: none;
+}
+
+.project-pane-icon-btn.has-hover-glyph:not(:disabled):hover .project-pane-icon-btn-glyph-base,
+.project-pane-icon-btn.has-hover-glyph:not(:disabled):focus-visible .project-pane-icon-btn-glyph-base {
+  display: none;
+}
+
+.project-pane-icon-btn.has-hover-glyph:not(:disabled):hover .project-pane-icon-btn-glyph-hover,
+.project-pane-icon-btn.has-hover-glyph:not(:disabled):focus-visible .project-pane-icon-btn-glyph-hover {
+  display: inline-flex;
+}
+
+/* Book name の編集導線トリガ。 */
+.project-pane-book-edit-trigger {
+  flex: 0 0 auto;
+}
+
+/* Book manifest edit controls. */
+.project-pane-book-edit-form,
+.project-pane-book-label-edit,
+.project-pane-book-remove-confirm,
+.project-pane-book-add-form,
+.project-pane-book-init-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0;
+}
+
+.project-pane-book-init-heading {
+  margin: 0;
+  font-size: 0.92em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.project-pane-book-init-description {
+  margin: 0;
+  font-size: 0.85em;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.project-pane-book-init-helper {
+  margin: 0;
+  font-size: calc(10px * var(--ui-font-scale));
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.project-pane-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  margin-bottom: 6px;
+}
+
+.project-pane-section-header .project-pane-section-title {
+  margin: 0;
+  /* 先頭の fold chevron と隣接させ、末尾の操作 chip は右側へ寄せる。 */
+  margin-inline-end: auto;
+}
+
+/* セクション / Book group 折りたたみ用の chevron ボタン（header 高さを増やさない）。 */
+.project-pane-fold-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-pane-fold-toggle:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.project-pane-fold-toggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.project-pane-fold-chevron {
+  display: inline-block;
+  font-size: calc(10px * var(--ui-font-scale));
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.12s ease;
+}
+
+.project-pane-fold-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+
+.project-pane-book-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-pane-book-select {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+
+.project-pane-book-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-pane-book-field-label {
+  font-size: calc(10px * var(--ui-font-scale));
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-pane-book-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+
+.project-pane-book-row-actions,
+.project-pane-book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-pane-book-row-actions {
+  margin-top: 3px;
+}
+
+.project-pane-book-trigger,
+.project-pane-book-btn,
+.project-pane-book-move-btn {
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-button);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.project-pane-book-trigger {
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  padding: 1px 6px;
+}
+
+.project-pane-book-move-btn {
+  min-width: 1.6em;
+  padding: 2px 5px;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.2;
+  color: var(--text-secondary);
+}
+
+.project-pane-book-trigger:hover:not(:disabled),
+.project-pane-book-btn:hover:not(:disabled),
+.project-pane-book-move-btn:hover:not(:disabled) {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.project-pane-book-trigger:disabled,
+.project-pane-book-btn:disabled,
+.project-pane-book-move-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.project-pane-book-btn-danger {
+  color: var(--text-error, #c0392b);
+  border-color: color-mix(in srgb, var(--text-error, #c0392b) 45%, var(--border-input));
+}
+
+.project-pane-book-remove-message,
+.project-pane-book-edit-error {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  overflow-wrap: anywhere;
+}
+
+.project-pane-book-remove-message {
+  color: var(--text-secondary);
+}
+
+.project-pane-book-edit-error {
+  font-weight: 500;
+  color: var(--text-error, #c0392b);
+}
+
+/* 未登録ファイル。ファイル名 / path / chip 自体はクリック導線を持たず、
+   registry 編集時のみ行内に登録導線（Bookに追加 / 資料にする）を添える。 */
+.project-pane-unregistered-section-hint {
+  margin: 0 0 6px;
+  padding: 0 2px;
+  font-size: calc(10px * var(--ui-font-scale));
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.project-pane-unregistered-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-pane-unregistered-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 3px 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.45;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.project-pane-unregistered-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+/* 右ペイン幅が狭いので action group は折り返さず、テキスト側を ellipsis する。 */
+.project-pane-unregistered-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.project-pane-unregistered-action-group {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.project-pane-unregistered-action-group .project-pane-book-select {
+  width: auto;
+  min-width: 6em;
+  max-width: 12em;
+}
+
+.project-pane-unregistered-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.project-pane-unregistered-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-secondary);
+}
+
+.project-pane-extension-chip {
+  flex: 0 0 auto;
+  font-size: calc(9px * var(--ui-font-scale));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border-input);
+  background: var(--bg-button);
+  color: var(--text-secondary);
+}
+
+/* Materials filter chips（role 別セクションを廃した代わりの絞り込み）。
+   右ペイン幅で折り返しても破綻しないよう wrap させ、chip は小さく保つ。 */
+/* Materials filter toolbar: left = filter icon + label (ellipsis), right = icon toggle
+   buttons. One row by default; the label shrinks to ellipsis before the buttons, and the
+   button group wraps only in extreme narrow widths so the pane never scrolls horizontally. */
+.project-pane-materials-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin: 2px 0 4px;
+  min-width: 0;
+}
+
+.project-pane-materials-filter-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+.project-pane-materials-filter-label-icon {
+  flex: 0 0 auto;
+  width: var(--ui-icon-size-sm);
+  height: var(--ui-icon-size-sm);
+}
+
+.project-pane-materials-filter-label-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.project-pane-materials-filter-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+/* Active toggle reads as selected while keeping the .project-pane-icon-btn shape. */
+.project-pane-icon-btn.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-button, #fff);
+}
+
+.project-pane-icon-btn.is-active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, var(--text-primary) 15%);
+  border-color: var(--accent);
+  color: var(--bg-button, #fff);
+}
+
+/* 本文 / Materials item の先頭 role アイコンが縮まないようにする。 */
+.project-pane-item > .project-role-icon {
+  flex: 0 0 auto;
+}
+
+/* 本文 / 資料の「行一覧」は薄い背景＋控えめな枠線でカード化し、section header /
+   toolbar（fold chevron・create-book トリガ・filter chip）と視覚的に分ける。
+   未登録ファイル一覧は別レイアウトなので対象にしない。 */
+.project-pane-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 3px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: color-mix(in srgb, var(--text-secondary) 5%, transparent);
+  border: 1px solid var(--border-subtle, var(--border-input));
+  border-radius: 6px;
+}
+
+.project-pane-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-pane-item-open,
+.project-pane-item-select {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  text-align: left;
+  font-size: calc(12px * var(--ui-font-scale));
+  padding: 3px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.project-pane-item-open:hover,
+.project-pane-item-select:hover {
+  background: var(--bg-hover);
+}
+
+.project-pane-item-open.is-current,
+.project-pane-item-select.is-current {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.project-pane-item.is-missing .project-pane-item-open,
+.project-pane-item.is-missing .project-pane-item-select {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.project-pane-item.is-missing .project-pane-item-open:disabled,
+.project-pane-item.is-missing .project-pane-item-select:disabled,
+.project-pane-item.is-missing .project-pane-item-open-center:disabled {
+  opacity: 0.72;
+}
+
+.registry-missing-badge {
+  display: inline-block;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  padding: 0 5px;
+  font-size: calc(10px * var(--ui-font-scale));
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle, color-mix(in srgb, var(--text-secondary) 35%, transparent));
+  border-radius: 3px;
+  vertical-align: baseline;
+}
+
+.project-pane-item-select.is-selected {
+  background: var(--highlight-bg);
+}
+
+.project-pane-item-open-center {
+  flex: 0 0 auto;
+}
+
+/* 行内の label / role 編集・登録解除 panel。
+   編集を開いている行だけ flex を折り返し、panel を行直下へ十分な幅で表示する。
+   通常行（is-editing なし）は従来どおり 1 行 nowrap + title ellipsis を保つ。 */
+.project-pane-item.is-editing {
+  flex-wrap: wrap;
+}
+
+/* 編集中の行は wrap するが、タイトル button の content 由来 basis が「中央で開く」など
+   固定幅ボタンを次行へ押し出さないよう basis 0 にする。これで 1 行目は
+   icon + title(ellipsis) + 操作ボタン、2 行目に edit panel という並びを保てる。 */
+.project-pane-item.is-editing > .project-pane-item-open,
+.project-pane-item.is-editing > .project-pane-item-select {
+  flex-basis: 0;
+}
+
+.project-pane-item.is-editing > .project-pane-book-label-edit,
+.project-pane-item.is-editing > .project-pane-book-remove-confirm {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin-top: 3px;
+  /* 編集状態だけが分かる控えめな panel（カードを過剰に増やさない）。 */
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle, var(--border-input));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* 資料編集 panel は label input と role select を縦積みする。狭幅でも各 field が
+   full-width になり、select / input / buttons が破綻しない。 */
+.project-pane-book-material-edit .project-pane-book-field {
+  width: 100%;
+}
+
+/* Book manifest v3 の Book metadata 編集 / 登録解除 panel。header 行（nowrap）に押し込めず、
+   header 直下へ full-width で開く。狭い右ペインでも name / credits / actions を圧縮しない。 */
+.project-pane-book-edit-panel {
+  min-width: 0;
+  margin-top: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle, var(--border-input));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* Book manifest v3 credits（著者 / 訳者）入力。文字列配列を 1 件ずつ縦積みで編集する。
+   各行は input + icon button 群。狭幅でも横スクロールを出さず full-width で折り返す。 */
+.project-pane-v3-credits {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+
+.project-pane-v3-credit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-pane-v3-credit-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-pane-v3-credit-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.project-pane-v3-credit-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.project-pane-v3-credit-add {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 1px;
+}
+
+.project-pane-v3-credit-add-text {
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-secondary);
+}
+
+/* 下部の preview 領域。索引とは独立に、この中だけでスクロールする。
+   縦 flex container にして header（固定）と preview/editor 本体（伸縮）を分け、
+   Preview / Edit を切り替えても content 高さに引きずられずセクション高を保てるようにする。
+   比率が未確定（divider 未操作）のときは content ベースだが上限はペイン半分。
+   比率確定後は inline style の height が効き、max-height は none に上書きされる。 */
+.project-pane-preview-section {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 50%;
+  overflow: hidden;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.project-pane-preview-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-pane-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+/* Preview / Edit 切替（segmented） */
+.project-pane-mode-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--border-input);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.project-pane-mode-btn {
+  font-size: calc(10px * var(--ui-font-scale));
+  padding: 2px 8px;
+  border: none;
+  background: var(--bg-button);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-pane-mode-btn + .project-pane-mode-btn {
+  border-left: 1px solid var(--border-input);
+}
+
+.project-pane-mode-btn:hover {
+  background: var(--bg-button-hover);
+  color: var(--text-primary);
+}
+
+.project-pane-mode-btn.active {
+  background: var(--accent);
+  color: var(--bg-button, #fff);
+}
+
+/* 資料編集（横書き textarea） */
+.project-pane-edit {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-pane-edit-textarea {
+  /* 本体は残り高さを埋めるが、min-height は 0 にして、狭い高さでも status / footer を
+     押し出さない（textarea の最小高さがセクション全体を拡張・縮小させない）。
+     通常時は flex でプレビューと同じ高さを占める。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  writing-mode: horizontal-tb;
+  font-family: var(--mono-font, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.project-pane-edit-textarea:read-only {
+  opacity: 0.7;
+}
+
+.project-pane-edit-status {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-pane-edit-notice {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+}
+
+.project-pane-edit-notice--warn {
+  color: var(--text-primary);
+}
+
+.project-pane-edit-notice--error {
+  color: var(--accent-danger, #d23);
+}
+
+.project-pane-edit-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.project-pane-edit-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-pane-edit-footer-spacer {
+  flex: 1 1 auto;
+}
+
+.project-pane-edit-dirty {
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-secondary);
+}
+
+.project-pane-edit-btn {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 3px 10px;
+  border: 1px solid var(--border-input);
+  border-radius: 4px;
+  background: var(--bg-button);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.project-pane-edit-btn:hover {
+  background: var(--bg-button-hover);
+}
+
+.project-pane-edit-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.project-pane-edit-btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-button, #fff);
+}
+
+.project-pane-edit-btn--danger {
+  border-color: var(--accent-danger, #d23);
+  color: var(--accent-danger, #d23);
+}
+
+/* ----------------------------------------------------------
+   Library Manager (read-only shell — Slice: 書庫管理画面)
+   ---------------------------------------------------------- */
+
+.library-manager-dialog {
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 20px;
+}
+
+.library-manager-helper {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.55;
+}
+
+.library-manager-count {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: calc(11px * var(--ui-font-scale));
+}
+
+.library-manager-status,
+.library-manager-empty {
+  margin: 4px 0;
+  color: var(--text-secondary);
+  font-size: calc(12px * var(--ui-font-scale));
+  line-height: 1.5;
+}
+
+.library-manager-status[data-state="error"] {
+  color: var(--accent-danger, #d23);
+}
+
+.library-manager-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 50vh;
+}
+
+.library-manager-row {
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--bg-surface, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-manager-row[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--bg-surface-emphasis, var(--bg-surface, transparent));
+}
+
+.library-manager-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.library-manager-name {
+  font-size: calc(13px * var(--ui-font-scale));
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.library-manager-active-badge {
+  font-size: calc(10px * var(--ui-font-scale));
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.library-manager-open-button {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 2px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.library-manager-open-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.library-manager-open-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.library-manager-row-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.library-manager-rename-button,
+.library-manager-reveal-button,
+.library-manager-rename-save,
+.library-manager-rename-cancel {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 2px 10px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.library-manager-rename-button:hover:not(:disabled),
+.library-manager-reveal-button:hover:not(:disabled),
+.library-manager-rename-save:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.library-manager-rename-button:disabled,
+.library-manager-reveal-button:disabled,
+.library-manager-rename-save:disabled,
+.library-manager-rename-cancel:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.library-manager-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: calc(13px * var(--ui-font-scale));
+  padding: 2px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-input, transparent);
+  color: var(--text-primary);
+}
+
+.library-manager-unregister-button,
+.library-manager-unregister-confirm-button,
+.library-manager-unregister-cancel-button {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 2px 10px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.library-manager-unregister-button:hover:not(:disabled),
+.library-manager-unregister-confirm-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.library-manager-unregister-button:disabled,
+.library-manager-unregister-confirm-button:disabled,
+.library-manager-unregister-cancel-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.library-manager-unregister-confirm {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  background: var(--bg-subtle, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.library-manager-unregister-confirm-text {
+  margin: 0;
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text-primary);
+}
+
+.library-manager-unregister-confirm-helper {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.library-manager-unregister-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.library-manager-unregister-confirm-button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.library-manager-row-path {
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: ltr;
+}
+
+.library-manager-row-last-opened {
+  font-size: calc(10px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-manager-row-last-opened-label {
+  opacity: 0.75;
+}
+
+.library-manager-placeholder-actions {
+  border-top: 1px solid var(--border-main);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.library-manager-placeholder-helper {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.library-manager-placeholder-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.library-manager-placeholder-button {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 4px 10px;
+  border: 1px dashed var(--border-main);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.library-manager-register-button {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.library-manager-register-button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg-button, #fff);
+}
+
+.library-manager-register-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.library-manager-create-button,
+.library-manager-create-pick-parent-button,
+.library-manager-create-submit-button,
+.library-manager-create-cancel-button {
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 4px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.library-manager-create-button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.library-manager-create-button:hover:not(:disabled),
+.library-manager-create-submit-button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--bg-button, #fff);
+}
+
+.library-manager-create-button:disabled,
+.library-manager-create-pick-parent-button:disabled,
+.library-manager-create-submit-button:disabled,
+.library-manager-create-cancel-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.library-manager-create-panel {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-main);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.library-manager-create-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: calc(12px * var(--ui-font-scale));
+  color: var(--text-secondary);
+}
+
+.library-manager-create-helper {
+  margin: 0;
+  font-size: calc(11px * var(--ui-font-scale));
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.library-manager-create-input {
+  font-size: calc(13px * var(--ui-font-scale));
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg-input, transparent);
+  color: var(--text-primary);
+}
+
+.library-manager-create-parent-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.library-manager-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.library-manager-create-submit-button {
+  border-color: var(--accent);
+  color: var(--accent);
 }

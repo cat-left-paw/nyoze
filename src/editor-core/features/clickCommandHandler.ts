@@ -1,5 +1,6 @@
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import { isModifiedLinkClick, resolveModifiedLinkClick } from './linkOpen'
+import { resolveNoteAnchorIdAtTarget } from './noteAnchorProtection'
 
 type Dispatch = (tr: Transaction) => void
 type LogPush = (event: string, detail: string) => void
@@ -32,6 +33,8 @@ type CreateEditorClickHandlerOptions = {
   emitFoldChange: () => void
   /** エディタ内の折りたたみトグル直前（Typewriter ジャンプ抑制など） */
   onHeadingFoldToggled?: () => void
+  /** noteAnchor marker の単純クリック（右ペイン表示など）。PM selection は変更しない。 */
+  onNoteAnchorReveal?: (id: string) => void
   openExternalUrl?: OpenExternalUrl
   pushLog: LogPush
 }
@@ -50,6 +53,7 @@ export function createEditorClickHandler({
   toggleHeadingFold,
   emitFoldChange,
   onHeadingFoldToggled,
+  onNoteAnchorReveal,
   openExternalUrl,
   pushLog,
 }: CreateEditorClickHandlerOptions): (event: MouseEvent) => void {
@@ -58,6 +62,22 @@ export function createEditorClickHandler({
     const rawTarget = event.target
     const targetElement = resolveClickTargetElement(rawTarget)
     if (!targetElement) return
+
+    const noteAnchorId = resolveNoteAnchorIdAtTarget(rawTarget)
+    if (
+      noteAnchorId &&
+      onNoteAnchorReveal &&
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      event.preventDefault()
+      event.stopPropagation()
+      onNoteAnchorReveal(noteAnchorId)
+      return
+    }
 
     const linkAnchor = targetElement.closest('a[href]')
     if (

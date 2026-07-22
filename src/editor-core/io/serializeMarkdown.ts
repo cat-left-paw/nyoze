@@ -8,6 +8,16 @@ import {
   escapeMarkdownUrlDestination,
 } from './markdownEscaping'
 import { encodeAozoraInlineNode } from './clipboardSlicePlainText'
+import { formatNoteAnchorComment } from './noteAnchor'
+import {
+  formatBlankPageToken,
+  formatDirectiveToken,
+  NYOZE_BLANK_PAGE_NODE_NAME,
+  NYOZE_DIRECTIVE_NODE_NAME,
+  NYOZE_PAGE_BREAK_NODE_NAME,
+  PAGE_BREAK_TOKEN,
+  type DirectiveAttrs,
+} from './customBlockDirective'
 
 /**
  * Serialize a ProseMirror document to Markdown.
@@ -26,7 +36,8 @@ const MARK_PRIORITY: Record<string, number> = {
   italic: 2,
   strike: 3,
   highlight: 4,
-  code: 5,
+  underline: 5,
+  code: 6,
 }
 
 function markPriority(mark: Mark): number {
@@ -43,6 +54,7 @@ function openDelim(mark: Mark): string {
     case 'italic': return '*'
     case 'strike': return '~~'
     case 'highlight': return '=='
+    case 'underline': return '||'
     case 'code': return '`'
     case 'link': return '['
     default: return ''
@@ -55,6 +67,7 @@ function closeDelim(mark: Mark): string {
     case 'italic': return '*'
     case 'strike': return '~~'
     case 'highlight': return '=='
+    case 'underline': return '||'
     case 'code': return '`'
     case 'link': {
       const href = (mark.attrs.href as string) ?? ''
@@ -149,11 +162,18 @@ class MarkdownWriter {
     doc.forEach((child) => {
       children.push(child)
     })
+    this.serializeBlockSequence(children)
+  }
 
+  /**
+   * block 子の列を doc と同じ separator / empty-paragraph 規則で直列化する。
+   * doc 直下と directive block の内側で共有する。
+   */
+  private serializeBlockSequence(children: PMNode[]): void {
     children.forEach((child, index) => {
       if (this.lastDocBlockType !== null) {
         if (this.lineBreakPolicy === 'obsidian-paragraph') {
-          this.appendObsidianSeparator(child.type.name)
+          this.appendObsidianSeparator(child)
         } else {
           this.blockSeparatorNeeded = true
         }
@@ -171,9 +191,24 @@ class MarkdownWriter {
     })
   }
 
-  private appendObsidianSeparator(nextBlockType: string): void {
+  private appendObsidianSeparator(nextBlock: PMNode): void {
     if (this.lastDocBlockType === null) return
-    void nextBlockType
+    // blockquote directly followed by a non-blockquote block with real
+    // content is ambiguous CommonMark (lazy continuation would re-absorb
+    // the next block on reparse), so force a blank line at that boundary.
+    // An empty paragraph (the per-line blank-line marker, e.g. a trailing
+    // newline) needs no extra separator — it already reads as a blank line.
+    const isEmptyParagraph = nextBlock.type.name === 'paragraph' && nextBlock.childCount === 0
+    if (this.lastDocBlockType === 'blockquote' && nextBlock.type.name !== 'blockquote' && !isEmptyParagraph) {
+      if (this.output.endsWith('\n\n')) {
+        // already separated
+      } else if (this.output.endsWith('\n')) {
+        this.output += '\n'
+      } else {
+        this.output += '\n\n'
+      }
+      return
+    }
     this.output += '\n'
   }
 
@@ -301,6 +336,23 @@ class MarkdownWriter {
         this.output += (node.attrs.raw as string) ?? ''
         break
 
+      case NYOZE_DIRECTIVE_NODE_NAME:
+        this.ensureBlockSeparator()
+        this.serializeDirectiveBlock(node, prefix)
+        break
+
+      case NYOZE_PAGE_BREAK_NODE_NAME:
+        this.ensureBlockSeparator()
+        this.output += prefix + ':::' + PAGE_BREAK_TOKEN + '\n' + prefix + ':::'
+        break
+
+      case NYOZE_BLANK_PAGE_NODE_NAME: {
+        this.ensureBlockSeparator()
+        const count = (node.attrs.count as number) ?? 1
+        this.output += prefix + ':::' + formatBlankPageToken(count) + '\n' + prefix + ':::'
+        break
+      }
+
       default:
         // Unknown block: try to serialize as text
         this.ensureBlockSeparator()
@@ -309,23 +361,66 @@ class MarkdownWriter {
     }
   }
 
+  private serializeDirectiveBlock(node: PMNode, prefix: string): void {
+    const token = formatDirectiveToken({
+      kind: node.attrs.kind,
+      name: node.attrs.name,
+      level: node.attrs.level,
+    } as DirectiveAttrs)
+
+    const innerWriter = new MarkdownWriter(this.lineBreakPolicy, this.options)
+    const innerChildren: PMNode[] = []
+    node.forEach((child) => innerChildren.push(child))
+    innerWriter.serializeBlockSequence(innerChildren)
+    const innerText = innerWriter.output
+
+    this.output += prefix + ':::' + token
+    if (innerText.length > 0) {
+      this.output += '\n' + innerText
+    }
+    this.output += '\n' + prefix + ':::'
+  }
+
   private serializeBlockquote(node: PMNode, prefix: string): void {
-    const childParts: string[] = []
-    node.forEach((child, _offset, index) => {
-      const writer = new MarkdownWriter(this.lineBreakPolicy)
-      if (index > 0) {
-        writer.blockSeparatorNeeded = true
-      }
-      writer.serializeBlock(child, '')
-      childParts.push(writer.output)
-    })
-    const combined = childParts.join('')
-    const lines = combined.split('\n')
+    const children: PMNode[] = []
+    node.forEach((child) => children.push(child))
+
+    const innerWriter = new MarkdownWriter(this.lineBreakPolicy, this.options)
+    innerWriter.serializeBlockquoteChildren(children)
+    const inner = innerWriter.output
+
+    const lines = inner.length > 0 ? inner.split('\n') : ['']
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
       if (i > 0) this.output += '\n'
-      this.output += prefix + '> ' + line
+      this.output += prefix + (line.length > 0 ? `> ${line}` : '>')
     }
+  }
+
+  /**
+   * blockquote 内の block 列を直列化する。blockquote の子は常に実 CommonMark
+   * block 規則で parse される (obsidian-paragraph の行単位分割の対象外) ため、
+   * paragraph が連続する箇所だけ blank line で区切り (lazy continuation で
+   * 再吸収されるのを防ぐ)、それ以外の隣接 block は単一改行で繋ぐ。
+   */
+  private serializeBlockquoteChildren(children: PMNode[]): void {
+    children.forEach((child, index) => {
+      if (index > 0) {
+        const previous = children[index - 1]
+        if (previous.type.name === 'paragraph' && child.type.name === 'paragraph') {
+          if (this.output.endsWith('\n\n')) {
+            // already separated
+          } else if (this.output.endsWith('\n')) {
+            this.output += '\n'
+          } else {
+            this.output += '\n\n'
+          }
+        } else {
+          this.output += '\n'
+        }
+      }
+      this.serializeBlock(child, '')
+    })
   }
 
   private serializeList(node: PMNode, prefix: string, markerFn: () => string): void {
@@ -393,6 +488,16 @@ class MarkdownWriter {
         } else {
           result += `![${safeAlt}](${safeSrc})`
         }
+        continue
+      }
+
+      if (child.type.name === 'noteAnchor') {
+        // 付箋アンカーは必ず正規 comment 形式へ戻す (Markdown 保存で位置を保持)
+        for (let i = activeMarks.length - 1; i >= 0; i--) {
+          result += closeDelim(activeMarks[i])
+        }
+        activeMarks = []
+        result += formatNoteAnchorComment((child.attrs.id as string) ?? '')
         continue
       }
 

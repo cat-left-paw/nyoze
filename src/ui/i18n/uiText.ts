@@ -15,7 +15,9 @@ export function resolveUiTextLocale(
 ): UiTextLocale {
   if (mode === 'ja') return 'ja'
   if (mode === 'en') return 'en'
-  return variant === 'helper' ? 'ja' : 'en'
+  // mixed: UI ラベル (label/tooltip) → en、helper/body → ja。
+  // body は本文側の表示文字列（役割ラベルなど）で日本語ユーザー向けに ja を返す。
+  return variant === 'helper' || variant === 'body' ? 'ja' : 'en'
 }
 
 export function getUiText(

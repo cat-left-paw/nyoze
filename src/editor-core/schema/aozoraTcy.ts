@@ -4,7 +4,7 @@ import { Node } from '@tiptap/core'
  * Inline node for tate-chu-yoko (horizontal-in-vertical text).
  *
  * Syntax: ｟body｠
- * Constraint: body must be 2-4 chars from [A-Za-z0-9!?]
+ * Constraint: body must be 1-4 chars from [A-Za-z0-9!?]
  * Invalid bodies are not converted to this node (remain as plain text).
  */
 export const AozoraTcy = Node.create({

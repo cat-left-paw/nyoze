@@ -65,6 +65,29 @@ export {
   selectHorizontalRuleAtEventTarget,
 } from './horizontalRule'
 export { createFoldTooltipController } from './foldTooltip'
+export {
+  applyNoteAnchorPreviewsToDom,
+  createNoteAnchorPreviewController,
+} from './noteAnchorPreviewController'
+export { findNoteAnchorPosition } from './noteAnchorNavigation'
+export { createNoteAnchorJumpController } from './noteAnchorJumpController'
+export {
+  NOTE_ANCHOR_DELETE_META_KEY,
+  NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY,
+  buildStripNoteAnchorMarksTransaction,
+  collectNoteAnchorIdsInDoc,
+  collectNoteAnchorIdsInRange,
+  noteAnchorExistsInDoc,
+  resolveNoteAnchorContextId,
+  resolveNoteAnchorIdAtTarget,
+  selectionTouchesNoteAnchor,
+  transactionRemovesNoteAnchor,
+} from './noteAnchorProtection'
+export {
+  buildRemoveNoteAnchorTransaction,
+  buildRemoveNoteAnchorTransactionAtDom,
+} from './noteAnchorDelete'
+export { handleNoteAnchorDeleteKey, wouldDeleteNoteAnchorWithKey } from './noteAnchorDeleteKey'
 export { createCompositionEventHandlers } from './compositionHandlers'
 export { bindEditorDomEvents } from './domEventBindings'
 export { createEditorLifecycleCallbacks } from './editorLifecycleCallbacks'
@@ -120,6 +143,12 @@ export {
 } from './viewportAnchor'
 export { createSearchController } from './searchController'
 export { createBasicCommandsController } from './basicCommandsController'
+export {
+  applyObsidianParagraphBlockquoteTransform,
+  applyObsidianParagraphCodeBlockTransform,
+  unwrapObsidianParagraphBlockquoteTransform,
+  unwrapObsidianParagraphCodeBlockTransform,
+} from './blockTransformCommands'
 export { createInlineAnnotationController } from './inlineAnnotationController'
 export { createCommandAvailabilityController } from './commandAvailabilityController'
 export { buildCommandAvailability } from './contextMenuAvailability'
@@ -130,3 +159,5 @@ export {
 } from './searchReplace'
 export type { SearchMatch } from './searchReplace'
 export { createVisualFocusCurrentLineController } from './visualFocusCurrentLine'
+export { createPseudoCaretController } from './pseudoCaretController'
+export type { PseudoCaretControllerHandle } from './pseudoCaretController'

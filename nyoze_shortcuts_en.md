@@ -179,3 +179,47 @@ In Source Mode, the entire document is edited as Markdown source.
 - `Cmd/Ctrl + Alt/Option + .` — Toggle the right pane
 
 Formatting shortcuts and list movement shortcuts for normal editing do not run as normal editing commands while Source Mode is active.
+
+---
+
+## Editing Sticky Notes
+
+The following keys are available in the sticky-note editing form in the right pane.
+
+- `Cmd/Ctrl + Enter` — Save the note from its body field
+- `Escape` — Cancel editing from the title or body field
+
+---
+
+## Page Viewer
+
+Use the following keys in the Page Viewer reading surface.
+
+- `PageDown` / `Space` — Next page
+- `PageUp` / `Shift + Space` — Previous page
+- `Home` — First page of the document
+- `End` — Last page of the document
+
+The left and right arrow directions depend on the writing direction.
+
+- Horizontal writing: `ArrowLeft` moves to the previous page and `ArrowRight` moves to the next page
+- Vertical writing: `ArrowLeft` moves to the next page and `ArrowRight` moves to the previous page
+
+When the bottom page scrubber has focus, use the left and right arrow keys to move one page at a time, and `Home` / `End` to move to the first / last page. The up and down arrow keys are also available in vertical writing.
+
+Press `Escape` to close menus such as Settings, Theme, Page Transition, and Outline.
+
+---
+
+## Web Book
+
+When the Web Book reader body has focus, use the following keys to move between pages.
+
+- `PageDown` — Next page
+- `PageUp` — Previous page
+- `Home` — First page of the document
+- `End` — Last page of the document
+- Horizontal writing: `ArrowLeft` moves to the previous page and `ArrowRight` moves to the next page
+- Vertical writing: `ArrowLeft` moves to the next page and `ArrowRight` moves to the previous page
+
+When Settings or Outline is open, press `Escape` to close it.

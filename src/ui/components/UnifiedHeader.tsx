@@ -1,9 +1,14 @@
 import {
-  IconSettings,
+  IconAlignCenter,
+  IconAlignRight,
   IconArrowBackUp,
   IconArrowForwardUp,
   IconBlockquote,
   IconBold,
+  IconIndentIncrease,
+  IconLayoutDistributeHorizontal,
+  IconLetterCase,
+  IconSquareOff,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
@@ -14,11 +19,8 @@ import {
   IconDiamond,
   IconEraser,
   IconGripVertical,
-  IconEye,
-  IconEyeOff,
+  IconFile,
   IconFilePlus,
-  IconFileCode,
-  IconPilcrow,
   IconFolderOpen,
   IconH1,
   IconH2,
@@ -46,16 +48,16 @@ import {
   IconSeparatorHorizontal,
   IconSeparatorVertical,
   IconStrikethrough,
-  IconSwitchHorizontal,
-  IconSwitchVertical,
+  IconTrash,
+  IconUnderline,
+  IconNote,
   IconNumber123,
-  IconSearch,
+  IconPageBreak,
   IconX,
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEventHandler, ReactNode, WheelEventHandler } from 'react'
 import type { CommandAvailability } from '../../editor-core/types'
-import type { DocumentType } from '../../editor-core/io/frontmatterDocumentSettings'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
 import { createUiTextGetter } from '../i18n/uiText'
 import {
@@ -63,12 +65,7 @@ import {
   resolveFormattingButtonState,
   resolvePlainModeKind,
 } from '../utils/plainModeCommandGate'
-import {
-  formatDocumentTypeHeaderTooltip,
-  formatDocumentTypeLabel,
-} from '../utils/documentTypePresentation'
 import { useWindowControlsOverlayReservation } from '../hooks/useWindowControlsOverlayReservation'
-import { TypewriterVisualFocusMenu } from './TypewriterVisualFocusMenu'
 
 const ICON_SIZE = 18
 const ICON_STROKE = 1.1
@@ -106,23 +103,13 @@ type UnifiedHeaderProps = {
   onToolbarOffsetChange: (offset: number) => void
   onToolbarOffsetReset: () => void
   // Toolbar
-  rubyVisible: boolean
   writingMode: WritingMode
   availability: CommandAvailability
   paragraphPlainModeActive: boolean
   fullPlainEditActive: boolean
   /** Built-in read-only internal doc (shortcut reference): hide Plain/Source affordances. */
   internalDocActive?: boolean
-  displaySettingsOpen: boolean
-  typewriterModeEnabled: boolean
-  onTypewriterModeEnabledChange: (enabled: boolean) => void
-  visualFocusBlockHighlightEnabled: boolean
-  onVisualFocusBlockHighlightEnabledChange: (enabled: boolean) => void
-  visualFocusDimNonFocusedBlocksEnabled: boolean
-  onVisualFocusDimNonFocusedBlocksEnabledChange: (enabled: boolean) => void
-  visualFocusCurrentLineHighlightEnabled: boolean
-  onVisualFocusCurrentLineHighlightEnabledChange: (enabled: boolean) => void
-  onRunMarkCommand: (commandName: 'bold' | 'italic' | 'strike' | 'highlight') => void
+  onRunMarkCommand: (commandName: 'bold' | 'italic' | 'strike' | 'highlight' | 'underline') => void
   onUndo: () => void
   onRedo: () => void
   onToggleInlineCode: () => void
@@ -133,30 +120,31 @@ type UnifiedHeaderProps = {
   onToggleChecklist: () => void
   onToggleBlockquote: () => void
   onToggleCodeBlock: () => void
+  /** 独自ブロック装飾を適用 / 置換する (token: align-center / indent-3 / style-letter 等)。 */
+  onApplyBlockDirective: (token: string) => void
+  /** 独自ブロック装飾を解除する。 */
+  onRemoveBlockDirective: () => void
+  /** 改ページ marker (`nyozePageBreak`) を挿入する。wrapper 装飾の apply/remove とは別の独立した挿入 action。 */
+  onInsertPageBreak: () => void
+  /** selection が改ページ marker のときだけ有効な削除 action。 */
+  onDeletePageBreak: () => void
+  /** 空白ページ marker (`nyozeBlankPage`) を挿入する。page-break とは別の独立した挿入 action。count は 1〜20 (省略時 1)。 */
+  onInsertBlankPage: (count?: number) => void
   onClearFormat: () => void
   onSetOrUnsetLink: () => void
   onInsertImage: () => void
   onInsertRubyBouten: () => void
+  onAddNoteAnchor: () => void
   onToggleTcy: () => void
-  onToggleRubyVisible: () => void
-  onToggleWritingMode: () => void
-  documentType: DocumentType
-  hasDocumentBehaviorOverride: boolean
-  onOpenDocumentSettings: () => void
-  onToggleParagraphPlainMode: () => void
-  onToggleFullPlainEdit: () => void
-  onOpenDisplaySettings: () => void
-  onOpenDisplaySettingsForTypewriter: () => void
   onShowEditorInlineHint: (message: string) => void
-  // Search
-  searchOpen: boolean
-  onOpenSearch: () => void
   onLoad: MouseEventHandler<HTMLButtonElement>
   onSave: MouseEventHandler<HTMLButtonElement>
   // Menu (Win/Linux)
   onOpenAppMenu: () => void
   appTitleVisible: boolean
   appTitleText: string
+  /** 同一 Book 内の前後章ボタン（前章 / 次章）。logic は container 側に閉じる。 */
+  chapterNavSlot?: ReactNode
 }
 
 export function UnifiedHeader({
@@ -174,21 +162,11 @@ export function UnifiedHeader({
   toolbarOffset,
   onToolbarOffsetChange,
   onToolbarOffsetReset,
-  rubyVisible,
   writingMode,
   availability,
   paragraphPlainModeActive,
   fullPlainEditActive,
   internalDocActive = false,
-  displaySettingsOpen,
-  typewriterModeEnabled,
-  onTypewriterModeEnabledChange,
-  visualFocusBlockHighlightEnabled,
-  onVisualFocusBlockHighlightEnabledChange,
-  visualFocusDimNonFocusedBlocksEnabled,
-  onVisualFocusDimNonFocusedBlocksEnabledChange,
-  visualFocusCurrentLineHighlightEnabled,
-  onVisualFocusCurrentLineHighlightEnabledChange,
   onRunMarkCommand,
   onUndo,
   onRedo,
@@ -200,33 +178,28 @@ export function UnifiedHeader({
   onToggleChecklist,
   onToggleBlockquote,
   onToggleCodeBlock,
+  onApplyBlockDirective,
+  onRemoveBlockDirective,
+  onInsertPageBreak,
+  onDeletePageBreak,
+  onInsertBlankPage,
   onClearFormat,
   onSetOrUnsetLink,
   onInsertImage,
   onInsertRubyBouten,
+  onAddNoteAnchor,
   onToggleTcy,
-  onToggleRubyVisible,
-  onToggleWritingMode,
-  documentType,
-  hasDocumentBehaviorOverride,
-  onOpenDocumentSettings,
-  onToggleParagraphPlainMode,
-  onToggleFullPlainEdit,
-  onOpenDisplaySettings,
-  onOpenDisplaySettingsForTypewriter,
   onShowEditorInlineHint,
-  searchOpen,
-  onOpenSearch,
   onLoad,
   onSave,
   onOpenAppMenu,
   appTitleVisible,
   appTitleText,
+  chapterNavSlot,
 }: UnifiedHeaderProps) {
   const t = createUiTextGetter(uiLanguageMode)
   const isVertical = writingMode === 'vertical-rl'
   const isMac = platform === 'darwin'
-  const documentTypeLabel = formatDocumentTypeLabel(documentType, uiLanguageMode)
   const headingItems = [
     { id: 'h1', label: t('editor.heading.level1'), level: 1, icon: IconH1 },
     { id: 'h2', label: t('editor.heading.level2'), level: 2, icon: IconH2 },
@@ -260,11 +233,48 @@ export function UnifiedHeader({
   ]
   const listMenuTriggerActive =
     availability.isBulletList || availability.isOrderedList || availability.isChecklist
+  const blockDecorationToken = availability.blockDirectiveToken
+  const blockDecorationActive = blockDecorationToken !== null
+  const blockDecorationGroups: Array<
+    Array<{ id: string; token: string; label: string; icon: typeof IconAlignCenter }>
+  > = [
+    [
+      { id: 'center', token: 'align-center', label: t('editor.blockDecoration.center'), icon: IconAlignCenter },
+      { id: 'end', token: 'align-end', label: t('editor.blockDecoration.end'), icon: IconAlignRight },
+    ],
+    [
+      { id: 'indent1', token: 'indent-1', label: t('editor.blockDecoration.indent1'), icon: IconIndentIncrease },
+      { id: 'indent2', token: 'indent-2', label: t('editor.blockDecoration.indent2'), icon: IconIndentIncrease },
+      { id: 'indent3', token: 'indent-3', label: t('editor.blockDecoration.indent3'), icon: IconIndentIncrease },
+      { id: 'indent4', token: 'indent-4', label: t('editor.blockDecoration.indent4'), icon: IconIndentIncrease },
+      { id: 'indent5', token: 'indent-5', label: t('editor.blockDecoration.indent5'), icon: IconIndentIncrease },
+      { id: 'indent6', token: 'indent-6', label: t('editor.blockDecoration.indent6'), icon: IconIndentIncrease },
+    ],
+    [
+      { id: 'styleLetter', token: 'style-letter', label: t('editor.blockDecoration.styleLetter'), icon: IconLetterCase },
+      { id: 'styleMuted', token: 'style-muted', label: t('editor.blockDecoration.styleMuted'), icon: IconLetterCase },
+      { id: 'styleHeading', token: 'style-heading', label: t('editor.blockDecoration.styleHeading'), icon: IconLetterCase },
+    ],
+  ]
+  // 空白ページ挿入の枚数プリセット。`nyozeBlankPage` の count 有効範囲 (1〜20) の
+  // うち、よく使う枚数だけを選択肢として並べる (align/indent/style の token item
+  // とは別の独立挿入 action のため、同じ blockDecorationGroups には混ぜない)。
+  const blankPageCountOptions: Array<{ count: number; label: string }> = [
+    { count: 1, label: t('editor.blockDecoration.blankPage') },
+    { count: 2, label: t('editor.blockDecoration.blankPage2') },
+    { count: 3, label: t('editor.blockDecoration.blankPage3') },
+    { count: 4, label: t('editor.blockDecoration.blankPage4') },
+    { count: 5, label: t('editor.blockDecoration.blankPage5') },
+    { count: 10, label: t('editor.blockDecoration.blankPage10') },
+    { count: 20, label: t('editor.blockDecoration.blankPage20') },
+  ]
   const [headingMenuOpen, setHeadingMenuOpen] = useState(false)
   const [listMenuOpen, setListMenuOpen] = useState(false)
+  const [blockDecorationMenuOpen, setBlockDecorationMenuOpen] = useState(false)
   const [shiftPressed, setShiftPressed] = useState(false)
   const headingMenuRef = useRef<HTMLDivElement | null>(null)
   const listMenuRef = useRef<HTMLDivElement | null>(null)
+  const blockDecorationMenuRef = useRef<HTMLDivElement | null>(null)
   const headerRef = useRef<HTMLElement | null>(null)
   const leftZoneRef = useRef<HTMLDivElement | null>(null)
   const centerRef = useRef<HTMLDivElement | null>(null)
@@ -398,20 +408,25 @@ export function UnifiedHeader({
   )
 
   useEffect(() => {
-    if (!headingMenuOpen && !listMenuOpen) return
+    if (!headingMenuOpen && !listMenuOpen && !blockDecorationMenuOpen) {
+      return
+    }
 
     const onMouseDown = (event: MouseEvent) => {
       const target = event.target as Node
       if (headingMenuRef.current?.contains(target)) return
       if (listMenuRef.current?.contains(target)) return
+      if (blockDecorationMenuRef.current?.contains(target)) return
       setHeadingMenuOpen(false)
       setListMenuOpen(false)
+      setBlockDecorationMenuOpen(false)
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       setHeadingMenuOpen(false)
       setListMenuOpen(false)
+      setBlockDecorationMenuOpen(false)
     }
 
     document.addEventListener('mousedown', onMouseDown, true)
@@ -420,12 +435,13 @@ export function UnifiedHeader({
       document.removeEventListener('mousedown', onMouseDown, true)
       document.removeEventListener('keydown', onKeyDown, true)
     }
-  }, [headingMenuOpen, listMenuOpen])
+  }, [headingMenuOpen, listMenuOpen, blockDecorationMenuOpen])
 
   useEffect(() => {
     if (!plainFormattingBlocked) return
     setHeadingMenuOpen(false)
     setListMenuOpen(false)
+    setBlockDecorationMenuOpen(false)
   }, [plainFormattingBlocked])
 
   const withPlainFormattingGuard = useCallback(
@@ -434,6 +450,7 @@ export function UnifiedHeader({
         onShowEditorInlineHint(plainFormattingTooltip)
         setHeadingMenuOpen(false)
         setListMenuOpen(false)
+        setBlockDecorationMenuOpen(false)
         return
       }
       action()
@@ -544,7 +561,7 @@ export function UnifiedHeader({
       {/* ---- Center: toolbar buttons ---- */}
       <div
         ref={centerRef}
-        className={`unified-header-center${toolbarVisible ? '' : ' collapsed'}`}
+        className={`unified-header-center toolbar-btn-scope${toolbarVisible ? '' : ' collapsed'}`}
         onWheel={handleToolbarCenterWheel}
       >
         {toolbarVisible && (
@@ -566,24 +583,11 @@ export function UnifiedHeader({
             </button>
         <button
           className='toolbar-btn-icon-only'
-          onClick={onToggleWritingMode}
-          disabled={internalDocActive}
-          type='button'
-          data-tooltip={isVertical ? t('editor.switchHorizontal') : t('editor.switchVertical')}
-          aria-label={isVertical ? t('editor.switchHorizontal') : t('editor.switchVertical')}
-        >
-          {isVertical ? (
-            <IconSwitchVertical size={ICON_SIZE} stroke={ICON_STROKE} />
-          ) : (
-            <IconSwitchHorizontal size={ICON_SIZE} stroke={ICON_STROKE} />
-          )}
-        </button>
-        <button
-          className='toolbar-btn-icon-only'
           onClick={onLoad}
           type='button'
-          data-tooltip={shiftPressed ? t('common.newDocument') : t('common.load')}
-          aria-label={shiftPressed ? t('common.newDocument') : t('common.load')}
+          data-toolbar-action='open-file'
+          data-tooltip={shiftPressed ? t('common.newDocument') : t('common.openFile', 'tooltip')}
+          aria-label={shiftPressed ? t('common.newDocument') : t('common.openFile')}
         >
           {shiftPressed ? (
             <IconFilePlus size={ICON_SIZE} stroke={ICON_STROKE} />
@@ -607,6 +611,8 @@ export function UnifiedHeader({
             <IconDeviceFloppy size={ICON_SIZE} stroke={ICON_STROKE} />
           )}
         </button>
+        {/* 同一 Book 内の前後章ボタン（file 操作群に隣接）。logic は container 側。 */}
+        {chapterNavSlot}
         <span className='toolbar-sep'>|</span>
         <button
           className='toolbar-btn-icon-only'
@@ -672,6 +678,17 @@ export function UnifiedHeader({
           {...getFormattingButtonProps(t('editor.highlight'), !availability.canHighlight)}
         >
           <IconHighlight size={ICON_SIZE} stroke={ICON_STROKE} />
+        </button>
+        <button
+          className={`toolbar-btn-icon-only${availability.isUnderline ? ' toggle-active' : ''}`}
+          onClick={withPlainFormattingGuard(() => onRunMarkCommand('underline'))}
+          type='button'
+          tabIndex={-1}
+          aria-label={t('editor.underline')}
+          aria-pressed={availability.isUnderline}
+          {...getFormattingButtonProps(t('editor.underline'), !availability.canUnderline)}
+        >
+          <IconUnderline size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
         <button
           className={`toolbar-btn-icon-only${availability.isInlineCode ? ' toggle-active' : ''}`}
@@ -833,6 +850,143 @@ export function UnifiedHeader({
         >
           <IconCodeDots size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
+        <div className='toolbar-block-decoration-menu-wrap' ref={blockDecorationMenuRef}>
+          <button
+            className={`toolbar-btn-icon-only toolbar-block-decoration-trigger${blockDecorationMenuOpen ? ' open' : ''}${blockDecorationActive ? ' toggle-active' : ''}`}
+            onClick={withPlainFormattingGuard(() => {
+              setBlockDecorationMenuOpen((prev) => {
+                const next = !prev
+                if (next) {
+                  setHeadingMenuOpen(false)
+                  setListMenuOpen(false)
+                }
+                return next
+              })
+            })}
+            type='button'
+            tabIndex={-1}
+            aria-label={t('editor.blockDecoration')}
+            aria-haspopup='menu'
+            aria-expanded={blockDecorationMenuOpen}
+            {...getFormattingButtonProps(t('editor.blockDecoration'), !availability.canBlockDirective)}
+          >
+            <IconLayoutDistributeHorizontal size={ICON_SIZE} stroke={ICON_STROKE} />
+            <IconChevronDown size={12} stroke={ICON_STROKE} />
+          </button>
+          {blockDecorationMenuOpen && (
+            <div
+              className='toolbar-select-menu'
+              role='menu'
+              aria-label={t('editor.blockDecoration.menu')}
+            >
+              {blockDecorationGroups.map((group, groupIndex) => (
+                <div key={`group-${groupIndex}`} className='toolbar-block-decoration-group'>
+                  {groupIndex > 0 ? (
+                    <div className='toolbar-heading-menu-separator' role='separator' />
+                  ) : null}
+                  {group.map((item) => {
+                    const Icon = item.icon
+                    const rowSelected = blockDecorationToken === item.token
+                    return (
+                      <button
+                        key={item.id}
+                        className={`toolbar-select-menu-item${rowSelected ? ' toolbar-select-menu-item--selected' : ''}`}
+                        type='button'
+                        role='menuitem'
+                        data-directive-token={item.token}
+                        disabled={plainFormattingBlocked}
+                        onClick={withPlainFormattingGuard(() => {
+                          onApplyBlockDirective(item.token)
+                          setBlockDecorationMenuOpen(false)
+                        })}
+                      >
+                        <Icon size={16} stroke={ICON_STROKE} />
+                        <span className='toolbar-select-menu-label'>{item.label}</span>
+                        <span className='toolbar-select-menu-check-slot' aria-hidden>
+                          {rowSelected ? (
+                            <IconCheck className='toolbar-select-menu-check' size={14} stroke={2} />
+                          ) : null}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+              <div className='toolbar-heading-menu-separator' role='separator' />
+              <button
+                className='toolbar-select-menu-item'
+                type='button'
+                role='menuitem'
+                data-directive-clear
+                disabled={plainFormattingBlocked || !blockDecorationActive}
+                onClick={withPlainFormattingGuard(() => {
+                  onRemoveBlockDirective()
+                  setBlockDecorationMenuOpen(false)
+                })}
+              >
+                <IconSquareOff size={16} stroke={ICON_STROKE} />
+                <span className='toolbar-select-menu-label'>
+                  {t('editor.blockDecoration.clear')}
+                </span>
+                <span className='toolbar-select-menu-check-slot' aria-hidden />
+              </button>
+              <div className='toolbar-heading-menu-separator' role='separator' />
+              <button
+                className='toolbar-select-menu-item'
+                type='button'
+                role='menuitem'
+                data-page-break-insert
+                disabled={plainFormattingBlocked}
+                onClick={withPlainFormattingGuard(() => {
+                  onInsertPageBreak()
+                  setBlockDecorationMenuOpen(false)
+                })}
+              >
+                <IconPageBreak size={16} stroke={ICON_STROKE} />
+                <span className='toolbar-select-menu-label'>
+                  {t('editor.blockDecoration.pageBreak')}
+                </span>
+                <span className='toolbar-select-menu-check-slot' aria-hidden />
+              </button>
+              <button
+                className='toolbar-select-menu-item'
+                type='button'
+                role='menuitem'
+                data-page-break-delete
+                disabled={plainFormattingBlocked || !availability.canDeletePageBreak}
+                onClick={withPlainFormattingGuard(() => {
+                  onDeletePageBreak()
+                  setBlockDecorationMenuOpen(false)
+                })}
+              >
+                <IconTrash size={16} stroke={ICON_STROKE} />
+                <span className='toolbar-select-menu-label'>
+                  {t('editor.blockDecoration.deletePageBreak')}
+                </span>
+                <span className='toolbar-select-menu-check-slot' aria-hidden />
+              </button>
+              {blankPageCountOptions.map((option) => (
+                <button
+                  key={`blank-page-${option.count}`}
+                  className='toolbar-select-menu-item'
+                  type='button'
+                  role='menuitem'
+                  data-blank-page-insert
+                  data-blank-page-count={option.count}
+                  disabled={plainFormattingBlocked}
+                  onClick={withPlainFormattingGuard(() => {
+                    onInsertBlankPage(option.count)
+                    setBlockDecorationMenuOpen(false)
+                  })}
+                >
+                  <IconFile size={16} stroke={ICON_STROKE} />
+                  <span className='toolbar-select-menu-label'>{option.label}</span>
+                  <span className='toolbar-select-menu-check-slot' aria-hidden />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span className='toolbar-sep'>|</span>
         <button
           className='toolbar-btn-icon-only'
@@ -874,6 +1028,16 @@ export function UnifiedHeader({
         >
           <IconNumber123 size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
+        <button
+          className='toolbar-btn-icon-only'
+          onClick={withPlainFormattingGuard(onAddNoteAnchor)}
+          type='button'
+          tabIndex={-1}
+          aria-label={t('editor.noteAnchor')}
+          {...getFormattingButtonProps(t('editor.noteAnchor'), false)}
+        >
+          <IconNote size={ICON_SIZE} stroke={ICON_STROKE} />
+        </button>
         <span className='toolbar-sep'>|</span>
         <button
           className='toolbar-btn-icon-only'
@@ -889,107 +1053,12 @@ export function UnifiedHeader({
             <IconSeparatorHorizontal size={ICON_SIZE} stroke={ICON_STROKE} />
           )}
         </button>
-        <span className='toolbar-sep'>|</span>
-        <button
-          className={`toolbar-btn-icon-only${searchOpen ? ' toggle-active' : ''}`}
-          onClick={onOpenSearch}
-          type='button'
-          disabled={fullPlainEditActive}
-          data-tooltip={t('common.search')}
-          aria-label={t('common.search')}
-          aria-pressed={searchOpen}
-        >
-          <IconSearch size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
-        <button
-          className={`toolbar-btn-icon-only${rubyVisible ? ' toggle-active' : ''}`}
-          onClick={onToggleRubyVisible}
-          type='button'
-          data-tooltip={t('editor.rubyView')}
-          aria-label={t('editor.rubyView')}
-          aria-pressed={rubyVisible}
-        >
-          {rubyVisible ? (
-            <IconEye size={ICON_SIZE} stroke={ICON_STROKE} />
-          ) : (
-            <IconEyeOff size={ICON_SIZE} stroke={ICON_STROKE} />
-          )}
-        </button>
-        <button
-          className={`toolbar-btn-icon-only${paragraphPlainModeActive ? ' toggle-active' : ''}`}
-          onPointerDown={(e) => e.preventDefault()}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={onToggleParagraphPlainMode}
-          disabled={fullPlainEditActive || (!availability.canParagraphPlain && !paragraphPlainModeActive) || internalDocActive}
-          type='button'
-          data-tooltip={t('editor.paragraphPlain')}
-          aria-label={t('editor.paragraphPlain')}
-          aria-pressed={paragraphPlainModeActive}
-        >
-          <IconPilcrow size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
-        <button
-          className={`toolbar-btn-icon-only${fullPlainEditActive ? ' toggle-active' : ''}`}
-          onClick={onToggleFullPlainEdit}
-          disabled={paragraphPlainModeActive || internalDocActive}
-          type='button'
-          data-tooltip={t('editor.sourceMode')}
-          aria-label={t('editor.sourceMode')}
-          aria-pressed={fullPlainEditActive}
-        >
-          <IconFileCode size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
-        <span className='toolbar-sep'>|</span>
-        <TypewriterVisualFocusMenu
-          uiLanguageMode={uiLanguageMode}
-          typewriterModeEnabled={typewriterModeEnabled}
-          onTypewriterModeEnabledChange={onTypewriterModeEnabledChange}
-          visualFocusBlockHighlightEnabled={visualFocusBlockHighlightEnabled}
-          onVisualFocusBlockHighlightEnabledChange={onVisualFocusBlockHighlightEnabledChange}
-          visualFocusDimNonFocusedBlocksEnabled={visualFocusDimNonFocusedBlocksEnabled}
-          onVisualFocusDimNonFocusedBlocksEnabledChange={onVisualFocusDimNonFocusedBlocksEnabledChange}
-          visualFocusCurrentLineHighlightEnabled={visualFocusCurrentLineHighlightEnabled}
-          onVisualFocusCurrentLineHighlightEnabledChange={
-            onVisualFocusCurrentLineHighlightEnabledChange
-          }
-          onOpenDisplaySettingsForTypewriter={onOpenDisplaySettingsForTypewriter}
-        />
-        <button
-          className={`toolbar-btn-icon-only${displaySettingsOpen ? ' toggle-active' : ''}`}
-          onClick={onOpenDisplaySettings}
-          type='button'
-          data-tooltip={t('editor.viewSettings')}
-          aria-label={t('editor.viewSettings')}
-          aria-pressed={displaySettingsOpen}
-        >
-          <IconSettings size={ICON_SIZE} stroke={ICON_STROKE} />
-        </button>
-            <span className='toolbar-sep'>|</span>
           </div>
         )}
       </div>
 
       {/* ---- Right zone ---- */}
       <div ref={rightZoneRef} className='unified-header-right'>
-        <button
-          type='button'
-          className='unified-header-line-break-policy-btn has-tooltip'
-          onClick={onOpenDocumentSettings}
-          aria-label={
-            hasDocumentBehaviorOverride
-              ? `${t('documentSettings.documentType')}: ${documentTypeLabel}. ${t('documentType.overrideLockedNotice', 'tooltip')}. ${t('documentSettings.openPanel', 'tooltip')}`
-              : `${t('documentSettings.documentType')}: ${documentTypeLabel}. ${t('documentSettings.openPanel', 'tooltip')}`
-          }
-          data-tooltip={formatDocumentTypeHeaderTooltip(documentType, hasDocumentBehaviorOverride, uiLanguageMode)}
-        >
-          <span className='editor-tab-policy-badge'>{documentTypeLabel}</span>
-          {hasDocumentBehaviorOverride ? (
-            <span className='unified-header-line-break-policy-doc' aria-hidden='true'>
-              {t('documentType.fixedBadge')}
-            </span>
-          ) : null}
-        </button>
-        <span className='unified-header-sep' aria-hidden='true' />
         <button
           className={`pane-toggle has-tooltip${rightPaneOpen ? ' active' : ''}`}
           onClick={onToggleRightPane}

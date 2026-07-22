@@ -59,10 +59,21 @@ export function classifyImageSrc(src: string): ImageSrcKind {
  * Works without Node.js path module (renderer-safe).
  */
 export function isAbsoluteImageSrc(src: string): boolean {
-  if (src.startsWith('/')) return true
+  if (src.startsWith('/') || src.startsWith('\\')) return true
   // Windows absolute: C:\, D:/, etc.
   if (/^[A-Za-z]:[/\\]/.test(src)) return true
   return false
+}
+
+/** SEC-5 の viewer/editor 共通: display 可能な相対ローカル image src だけを許可する。 */
+export function isSafeRelativeImageSrc(src: string): boolean {
+  const pathPart = src.split(/[?#]/)[0].replace(/\\/g, '/')
+  return (
+    classifyImageSrc(src) === 'local' &&
+    isAllowedImageExtension(src) &&
+    !isAbsoluteImageSrc(src) &&
+    !pathPart.split('/').some((segment) => segment === '..')
+  )
 }
 
 /**
@@ -77,10 +88,7 @@ export function isAbsoluteImageSrc(src: string): boolean {
  */
 export function buildImageDisplayUrl(src: string): string | null {
   if (!src) return null
-  if (classifyImageSrc(src) !== 'local') return null
-  if (!isAllowedImageExtension(src)) return null
-  // Beta: only relative paths — absolute paths could reference arbitrary files
-  if (isAbsoluteImageSrc(src)) return null
+  if (!isSafeRelativeImageSrc(src)) return null
 
   return `nyoze-img://img?src=${encodeURIComponent(src)}`
 }

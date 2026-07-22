@@ -951,23 +951,44 @@ type LoadSettingsJsonResult = {
   ok: boolean
 }
 
+// Multiple hooks/effects call loadSettingsJson() independently on mount,
+// before settingsJsonCache is populated. Without de-duping, each of those
+// first callers fires its own `settings:read` IPC round-trip; whichever one
+// resolves last unconditionally overwrites settingsJsonCache — even after a
+// concurrent patchSettingsJson()/saveSettingsJson() write (e.g. the
+// migration in settings/migration.ts) already populated it with fresher
+// data. That stale-read-wins race silently drops the migration's writes
+// (theme presets, etc.) from the in-memory cache. Coalescing concurrent
+// first reads into a single in-flight promise ensures there is only ever
+// one `settings:read` per app lifetime, so no later read can clobber an
+// earlier write.
+let settingsJsonLoadInFlight: Promise<LoadSettingsJsonResult> | null = null
+
 async function loadSettingsJsonWithStatus(): Promise<LoadSettingsJsonResult> {
   if (settingsJsonCache) {
     return { settings: settingsJsonCache, ok: true }
   }
-  try {
-    const api = bridge()
-    if (api) {
-      const data = await api.read()
-      if (data) {
-        settingsJsonCache = data as SettingsJson
-        return { settings: settingsJsonCache, ok: true }
-      }
-    }
-  } catch {
-    // ignore — fall through to empty
+  if (settingsJsonLoadInFlight) {
+    return settingsJsonLoadInFlight
   }
-  return { settings: {}, ok: false }
+  settingsJsonLoadInFlight = (async () => {
+    try {
+      const api = bridge()
+      if (api) {
+        const data = await api.read()
+        if (data) {
+          settingsJsonCache = data as SettingsJson
+          return { settings: settingsJsonCache, ok: true }
+        }
+      }
+    } catch {
+      // ignore — fall through to empty
+    } finally {
+      settingsJsonLoadInFlight = null
+    }
+    return { settings: {}, ok: false }
+  })()
+  return settingsJsonLoadInFlight
 }
 
 export async function loadSettingsJson(): Promise<SettingsJson> {
@@ -1050,6 +1071,7 @@ let settingsJsonWriteQueue: Promise<void> = Promise.resolve()
 
 export function __resetSettingsJsonStateForTests(): void {
   settingsJsonCache = null
+  settingsJsonLoadInFlight = null
   settingsJsonWriteQueue = Promise.resolve()
 }
 

@@ -11,6 +11,8 @@ export type FrontmatterFields = {
   documentType?: string
   nyozeType?: string
   type?: string
+  /** 表示方向の文書単位 read-only 指定。有効値は `vertical-rl` / `horizontal-tb`。 */
+  writingMode?: string
 }
 
 export type FrontmatterSplit = {
@@ -222,6 +224,7 @@ const SINGLE_FIELD_KEYS = new Set([
   'documentType',
   'nyozeType',
   'type',
+  'writingMode',
 ])
 const LIST_FIELD_KEYS = new Set(['co_authors', 'co_translators'])
 
@@ -249,6 +252,7 @@ export function parseFrontmatterFields(frontmatterPrefix: string): FrontmatterFi
       else if (key === 'documentType') fields.documentType = value
       else if (key === 'nyozeType') fields.nyozeType = value
       else if (key === 'type') fields.type = value
+      else if (key === 'writingMode') fields.writingMode = value
     } else if (LIST_FIELD_KEYS.has(key)) {
       const remaining = lines.slice(i + 1)
       const list = parseListValue(raw, remaining)

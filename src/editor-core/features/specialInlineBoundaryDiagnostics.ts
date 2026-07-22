@@ -325,6 +325,116 @@ export function emitSpecialInlineBoundaryDiag(
   pushDiagRing(line)
 }
 
+// --- IME-B1: special inline boundary sentinel decision diagnostics ---
+//
+// sentinel 経路の「入口(origin)」と「分岐(decision)」を実機で判別するための
+// 構造化ログ。`__NYOZE_DIAG_SPECIAL_INLINE__` が無効なら一切記録しない。
+// IME payload 本文は記録せず、長さのみを載せる。
+
+export type SpecialInlineSentinelDecisionOrigin =
+  | 'native-capture-input'
+  | 'native-capture-compositionend'
+  | 'pm-handle-dom-input'
+  | 'pm-handle-dom-compositionend'
+  | 'ruby-bridge-mirror'
+  | 'ruby-bridge-transfer'
+  | 'synthetic-transfer'
+  | 'escape-keydown'
+
+export type SpecialInlineSentinelDecision =
+  | 'mirror'
+  | 'transfer'
+  | 'suppressed'
+  | 'no-payload'
+  | 'no-insert-pos'
+  | 'no-sentinel'
+  | 'ignored'
+  | 'already-handled'
+  | 'reentrant'
+  | 'escape-recovery'
+
+export type SpecialInlineSentinelPayloadSource =
+  | 'compositionend-data'
+  | 'input-data'
+  | 'pending'
+  | 'dom'
+  | 'none'
+
+export type SpecialInlineStoredMarksState = 'null' | 'empty' | 'marks'
+
+/**
+ * `state.storedMarks` の診断分類。`[]` と `null` は ProseMirror の
+ * compositionstart 判定（truthiness）で挙動が異なるため、同値と見なさない。
+ */
+export function classifySpecialInlineStoredMarksState(
+  storedMarks: readonly unknown[] | null | undefined,
+): SpecialInlineStoredMarksState {
+  if (storedMarks == null) return 'null'
+  return storedMarks.length === 0 ? 'empty' : 'marks'
+}
+
+export type SpecialInlineSentinelDecisionDiag = {
+  origin: SpecialInlineSentinelDecisionOrigin
+  decision: SpecialInlineSentinelDecision
+  eventType: string
+  /** InputEvent のときのみ boolean、それ以外（CompositionEvent / synthetic / null）は null */
+  eventIsComposing: boolean | null
+  eventCancelable: boolean
+  directSentinelTarget: boolean
+  alreadyHandled: boolean
+  viewComposingBefore: boolean
+  /** transfer dispatch 後の `view.composing`。transfer 以外は null */
+  viewComposingAfter: boolean | null
+  storedMarksState: SpecialInlineStoredMarksState
+  payloadSource: SpecialInlineSentinelPayloadSource
+  /** 文字列本文は載せず長さのみ */
+  payloadLength: number
+  pendingLength: number
+  insertPos: number | null
+  /** reset 直前に sentinel が WORD JOINER 単独（canonical）だったか */
+  sentinelCanonicalBeforeReset: boolean | null
+  sentinelNodeType: string | null
+}
+
+let sentinelDecisionSeq = 0
+
+/** 純関数: sentinel decision 1 件を ring 用 JSON 行へ整形する（unit test 対象） */
+export function buildSpecialInlineSentinelDecisionLine(
+  diag: SpecialInlineSentinelDecisionDiag,
+  seq: number,
+  ts: number,
+): string {
+  return JSON.stringify({ phase: 'sentinelDecision', seq, ts, ...diag })
+}
+
+export function emitSpecialInlineSentinelDecisionDiag(
+  diag: SpecialInlineSentinelDecisionDiag,
+): void {
+  if (!isSpecialInlineBoundaryDiagEnabled()) return
+  sentinelDecisionSeq += 1
+  let line = ''
+  try {
+    line = buildSpecialInlineSentinelDecisionLine(
+      diag,
+      sentinelDecisionSeq,
+      Math.round(performance.now()),
+    )
+  } catch {
+    line = ''
+  }
+  if (line.length === 0 || line.length > DETAIL_MAX) {
+    line = JSON.stringify({
+      phase: 'sentinelDecision',
+      seq: sentinelDecisionSeq,
+      ts: Math.round(performance.now()),
+      diagError: 'serialize_overflow',
+      origin: diag.origin,
+      decision: diag.decision,
+    })
+  }
+  pushDiagRing(line)
+}
+
 let compositionUpdateDiagCounter = 0
 
 export function emitSpecialInlineCompositionUpdateDiag(

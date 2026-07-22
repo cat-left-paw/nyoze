@@ -5,6 +5,8 @@
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
+次の GitHub pre-release は `0.3.0-beta.1` です。Microsoft Store 版は今回は更新せず、公開中の `0.2.1-beta.1` / Store package version `1.2.1.0` を維持します。
+
 - 小説やエッセイを縦書きでそのまま書けます
 - Markdown 形式で保存されますが、普通のテキストとして扱えます
 - ルビや縦中横など、日本語の表現にも対応しています
@@ -25,13 +27,15 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 
 - **Markdown**: 見出しや強調などを、簡単な記号で書けるテキスト形式です
 - **frontmatter**: 文書のタイトルや著者名などを入れる、文書冒頭の `---` で囲まれた領域です
+- **作品**: `.nyoze/project.json` を持つフォルダです。内部仕様では Project と呼び、付箋や Book / Materials 管理の単位になります
+- **Book**: 作品内でまとめて閲覧・ナビゲーションする単位です（本編、外伝など）。作品内の Book 構造と表示 metadata（title / authors / translators）は `.nyoze/books.json` が正本です
 - **WYSIWYG**: 記号を直接見ながらではなく、見た目に近い形で編集できる表示です
 
 ## 主な特徴
 
 - 縦書きでそのまま編集できます
 - 見た目のまま書ける編集画面があります
-- Typewriter scroll と Visual Focus で、今書いている場所へ視線を戻しやすくできます
+- Typewriter scroll、Visual Focus、擬似キャレットで、今書いている場所へ視線を戻しやすくできます
 - ルビや縦中横に対応しています
 - `.md` だけでなく `.txt` もそのまま開いて保存できます
 - 原稿を壊さず保存往復することを重視しています
@@ -39,8 +43,8 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 ## この beta 版の位置づけ
 
 - 単体デスクトップアプリとして Markdown を編集し、縦書き・横書きで執筆できます
-- 文芸用途を主対象としつつ、ブログ記事や技術文書などの `Article` 文書も扱えます
-- `Document Type` を `Novel` / `Article` で切り替えることで、文書に合った改行解釈で執筆できます
+- 文芸用途を主対象としつつ、ブログ記事や技術文書などの `記事・文書`（Article）も扱えます
+- `Document Type` を `小説・本文`（Fiction）/ `記事・文書`（Article / Document）で切り替えることで、文書に合った改行解釈で執筆できます（内部値 `novel` / `article` は不変。Document Type は表示方向ではなく文書性格・改行スタイルの設定です）
 - beta では「執筆・保存・再読込・最低限の文書管理」までを提供範囲にします
 - 現時点では、執筆体験と原稿保全を優先しています
 
@@ -48,13 +52,28 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 
 - 縦書き / 横書きの切り替え
 - WYSIWYG 編集
-- Typewriter scroll、編集ブロックハイライト、現在行ハイライトなどの執筆補助表示
+- Typewriter scroll、編集ブロックハイライト、現在行ハイライト、擬似キャレットなどの執筆補助表示
+- 作品内の本文位置へ紐づく付箋（タイトル、複数行Markdownメモ、解決済み管理、Notesタブ）
+- 作品タブでの Books 一覧、Materials 一覧、複数 role filter、資料Markdown preview、右ペイン内の資料簡易編集（textarea + 明示保存）
+- `.nyoze/books.json` による Book / Materials 管理（Book 作成・名称変更・登録解除、本文/資料の title / authors / translators 編集、登録・並び替え・登録解除）
+- 右ペイン **Document Metadata** で frontmatter を編集・保存（作品内表示 metadata とは自動同期しない）
+- 作品未所属時に、作品名と最初の Book 名を確認して `.nyoze/project.json` と `.nyoze/books.json` を作成
+- 書庫管理画面による書庫の作成 / 登録 / 切り替え / 名前変更 / 登録解除 / Finder・Explorer 表示
+- 左ペイン File Explorer の「書庫 / 作品」タブ、作品一覧からの project root 表示、書庫外ファイル表示
+- 作品タブでの作品切り替え
+- 作品フォルダ配下の未登録 `.md` / `.markdown` / `.txt` を Books / Materials へ登録
+- Outline タブの `[現在の文書] [Book全体]` 切替、Book全体の章 / 見出しナビゲーション、前章 / 次章ボタン
+- Book 全体 export（File > 書き出し、LeME / でんでん / 青空文庫風 / Web Book、read-only disk、改ページ・作品情報・目次 options 確認 UI）
+- Web Book（現在文書 / Book 全体を、reader付きの単一HTMLまたはWeb公開用packageとして作成。Chrome / Edgeでの閲覧・簡易印刷/PDF保存向け。ユーザー向けHTML出力はこの経路のみ）
+- 独立した読み取り専用 Page Viewer（現在の文書 / Book 全体、CSS Columns によるページ単位の閲覧、目次・アウトラインからの見出しジャンプ、ローカル画像、`:::page-break` / `:::blank-page-N` の表示）
+- Book 本文の章頭 / 章末オーバーレイと `Option/Alt + wheel` による前章末尾 / 次章先頭への移動
 - 複数タブでの文書の表示と編集
-- File Explorer からのファイル作成 / 名前変更 / 複製 / 移動 / ゴミ箱への削除
+- File Explorer での一覧表示と軽い単一ファイル操作（作成 / 名前変更 / 複製 / 移動 / ゴミ箱への削除）。Finder / Explorer を置き換える本格ファイルマネージャではありません
 - WYSIWYG での 自動 TCY （縦中横）表示（表示のみ、初期 OFF、数字だけ対象のオプションあり、保存内容は不変）
 - 独自記法を使った明示 TCY（縦中横）
 - 青空文庫形式のルビ、傍点への対応
 - ルビ表示 / 非表示の切り替え
+- 縦書きでのルビ直後約物や inline 装飾を含む段落末閉じ括弧の表示補正（保存内容は不変）
 - WYSIWYG コードブロックの表示専用シンタックスハイライト、言語ラベル、本文コピー
 - `Paragraph Plain` による段落単位の Markdown ソース編集（その段落だけをテキストとして直接編集できます。単一ブロックなら見出し・リスト・引用などの Markdown 記法も通常表示へ反映されます）
 - `Source Mode` による全文 Markdown ソース編集（文書全体をテキストとして編集できます）
@@ -62,7 +81,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - ローカル画像参照付き Markdown の表示
 - frontmatter（文書のタイトルや著者名などを入れる領域）の読み取り表示
 - `Document Settings` からの限定編集（`Document Type` / `title` / `author` / `translator`）
-- `Document Type` の `Novel` / `Article` 切り替え
+- `Document Type` の `小説・本文`（Fiction）/ `記事・文書`（Article / Document）切り替え
 - `Document Type` の切り替えによる改行ポリシー変更
 - 文芸用途と、ブログ記事 / 技術文書系の両方に合わせた文書運用
 - 通常編集上のリンクを `Cmd/Ctrl + Click` で外部ブラウザに開く導線（`https://` の絶対 URL のみ）
@@ -77,24 +96,31 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 
 ## 今後対応予定のもの
 
-- `.md` の OS 全体関連付け
-- `Open With` からの起動引き渡し
-- OS からの drag and drop による文書読み込み
-- frontmatter の一般編集 UI
-- epub / pdf / 印刷 などへの出力
+- Project / Book の詳細設定 UI（著者情報、出力設定、テンプレート生成など）
+- 章順のドラッグ変更、missing file の再接続 UI
+- EPUB / PDF の Nyoze 本体直接生成、Vivliostyle 連携、印刷所入稿品質の固定ページ組版（外部ツール向け Book 全体書き出し、独立した Page Viewer、Web Book による Chrome / Edge 向けの簡易印刷/PDF保存は対応済み）
 - Windows の Store 版と GitHub zip 版での更新導線の追加整理
 - テーブルや数式への対応
 - ページレイアウト編集
-- 書籍モード
+- 前後章のグローバルショートカット
 - ショートカット再割り当て
 - 高度な競合解決 UI
 
+優先度が下がった候補:
+
+- `.md` の OS 全体関連付け
+- `Open With` からの起動引き渡し
+- OS からの drag and drop による文書読み込み
+
+Nyoze は Obsidian の Vault に近い **書庫** を通常の入口として扱います。書庫は File メニューの **書庫を管理** から作成 / 登録 / 切り替えでき、同時に active な書庫は 1 つだけです。OS 全体の関連付けや drag and drop の必要性は相対的に低いため、これらは急いで実装する対象ではありません。
+
 ## 正式な読み込み導線
 
-beta 版で正式にサポートする読み込み導線は **アプリ内の `Load`** です。
+beta 版で正式にサポートする読み込み導線は、単独ファイルを開く **ファイルを開く**（旧 `Load`）と、active 書庫内の File Explorer です。フォルダを書庫として使う場合は File メニューの **書庫を管理** から登録 / 作成します。
 
-- `Load`: ファイルまたはフォルダを開く
-- `Shift + Load`: 新規タブで空の文書を作る
+- `ファイルを開く`（旧 `Load`）: `.md` / `.markdown` / `.txt` の単独ファイルを開く
+- `Shift + ファイルを開く`: 新規タブで空の文書を作る
+- `File → 書庫を管理`: 書庫の作成 / 既存フォルダ登録 / 切り替え / 名前変更 / 登録解除 / Finder・Explorer 表示
 
 未対応導線:
 
@@ -107,7 +133,7 @@ beta 版で正式にサポートする読み込み導線は **アプリ内の `L
 
 Nyoze は `.md` だけでなく、`.txt` の文書もそのまま開いて編集できます。
 
-- `Load` では `.md` / `.markdown` / `.txt` を開けます
+- `ファイルを開く` では `.md` / `.markdown` / `.txt` を開けます
 - すでに `.txt` で書いている原稿も、そのまま読み込んで使えます
 - `.txt` で開いた文書は、`.txt` のまま保存できます
 - `.md` も `.txt` も中身はテキストです。違いは「この文書を Markdown として扱うことを、拡張子でわかりやすくしているかどうか」に近いです
@@ -137,15 +163,17 @@ author: 著者名
 
 ## frontmatter の扱い
 
+詳細な key 一覧・作品内外の正本・YAML 制限は [`docs/frontmatter-reference.md`](docs/frontmatter-reference.md) を参照してください。
+
 - frontmatter は文書先頭の raw prefix として保持します
 - 保存往復で勝手に壊さないことを優先しています
 - beta では一般的な YAML 編集 UI はありません
-- 右ペインの `Document Settings` から限定キーだけを明示操作で更新できます
+- 右ペインの **文書メタデータ / Document Metadata** から限定キーだけを明示操作で更新できます
 - 上記以外の frontmatter を編集したい場合は `Source Mode` を使ってください
 
 ## 対応環境
 
-2026-05-06 時点で公開済みの beta 配布対象は次の環境です。
+`0.3.0-beta.1` のGitHub pre-release配布対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
@@ -156,7 +184,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windows では、GitHub Releases の最新公開版は `0.2.1-beta.1` です。Microsoft Store 版も 2026-05-06 に公開開始しており、現在公開中の Store package version は `1.2.0.0` です。通常の Windows 利用では Store 版を優先し、GitHub zip は Store を使えない環境や検証用の代替配布として残します。
+Windowsでは、GitHub Releasesに`0.3.0-beta.1`をpre-releaseとして配布します。Microsoft Store公開版はアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`のままで、今回の新機能は含みません。Store版は通常利用向け、GitHub zipは新機能の観察またはStoreを使えない環境向けです。
 
 macOS 版は 2 種類あります。
 
@@ -178,8 +206,8 @@ Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run
   - Apple Silicon Mac: `arm64` の DMG をダウンロードして起動
   - Intel Mac: `x64` の DMG をダウンロードして起動
 - Windows:
-  - 通常利用: Microsoft Store から `Nyoze` を導入
-  - 代替導線: GitHub Releases の zip をダウンロードして展開し、同梱の `README.txt` を確認して `Nyoze.exe` を起動
+  - 公開済みStore版を使う: Microsoft Storeから`Nyoze`を導入
+  - `0.3.0-beta.1`を試す: GitHub Releasesのzipをダウンロードして展開し、同梱の`README.txt`を確認して`Nyoze.exe`を起動
 
 インストール時の注意:
 
@@ -283,7 +311,9 @@ npm run package:win:x64
 
 ## 既知の制限
 
-- 正式な読み込み導線は `Load` のみです
+- 正式なファイル読み込み導線はツールバーの「ファイルを開く」と、active 書庫内の File Explorer です
+- フォルダを書庫にする導線は File メニューの「書庫を管理」です
+- File Explorer は一覧表示と軽い単一ファイル操作用です。フォルダ配下一括移動、複数選択、Project 間の登録情報移管などの本格ファイルマネージャ機能は対象外です
 - drag and drop は未対応です
 - `Open With` は未対応です
 - `.md` の関連付けは未対応です
@@ -295,7 +325,6 @@ npm run package:win:x64
 - 文書内リンクは `Cmd/Ctrl + Click` で外部ページへ移動できます。通常クリックでは開きません
 - `Cmd/Ctrl + Click` で開ける文書内リンクは、`https://` の認証情報なし絶対 URL のみです。`http://`、`mailto:`、`tel:`、相対リンク、文書内アンカーは通常編集上の外部オープン対象ではありません
 - ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
-- 縦書きでルビ直後に句読点が続き、行頭 / 行末の境界にかかる場合、Chromium 系では句読点が行頭側に表示されることがあります
 - Windows の一部 AMD GPU + Chromium 系環境では、本文や `Source Mode` 上の I-beam カーソルが白く見えて視認しづらくなることがあります。その場合は `View Settings > 文書テーマ > エディタで矢印ポインターを使う` を有効にすると、本文上だけ矢印ポインターへ切り替えて回避できます
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
 - 重く感じたときは、まずルビ表示をオフにする、`Paragraph Plain` を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
@@ -307,6 +336,7 @@ npm run package:win:x64
 
 ## ドキュメント
 
+- 公式サイト・目的別ガイド: [Nyoze](https://cat-left-paw.github.io/nyoze/)
 - 操作マニュアル: [MANUAL.md](./MANUAL.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
 - プライバシーポリシー: [PRIVACY.md](./PRIVACY.md)

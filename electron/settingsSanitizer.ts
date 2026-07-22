@@ -27,6 +27,30 @@ import {
   normalizeVisualFocusDimNonFocusedBlocksOpacity,
 } from "../src/settings/visualFocusAppearance";
 import { normalizeUiLanguageMode } from "../src/settings/uiLanguageMode";
+import {
+  normalizePseudoCaretBlinkEnabled,
+  normalizePseudoCaretThickness,
+} from "../src/settings/pseudoCaretSettings";
+import {
+  normalizePageViewerBreakBeforeHeading,
+  normalizePageViewerBreakBeforeHeadingMaxLevel,
+} from "../src/settings/pageViewerHeadingPaginationSettings";
+import {
+  normalizePageViewerReadingFooterAlign,
+  normalizePageViewerReadingFooterEnabled,
+  normalizePageViewerReadingHeaderAlign,
+  normalizePageViewerReadingHeaderContent,
+  normalizePageViewerReadingHeaderEnabled,
+  normalizePageViewerReadingMarginBottom,
+  normalizePageViewerReadingMarginInline,
+  normalizePageViewerReadingMarginTop,
+  normalizePageViewerReadingPaperFrame,
+  normalizePageViewerReadingSimpleCoverEnabled,
+  normalizePageViewerReadingSimpleCoverLayout,
+  normalizePageViewerReadingSimpleCoverWritingMode,
+} from "../src/settings/pageViewerReadingSurfaceSettings";
+import { isWritingMode } from "../src/settings/writingModeDefaults";
+import { normalizeExternalExportOptionsDefaults } from "../src/settings/externalExportOptionsDefaults";
 
 // ---- Constants ----
 
@@ -434,6 +458,12 @@ export function sanitizeSettingsJson(
     out.frontmatterShowTranslators = raw.frontmatterShowTranslators;
   if (typeof raw.frontmatterShowRoleLabels === "boolean")
     out.frontmatterShowRoleLabels = raw.frontmatterShowRoleLabels;
+  if (typeof raw.frontmatterShowInProjectFiles === "boolean")
+    out.frontmatterShowInProjectFiles = raw.frontmatterShowInProjectFiles;
+  if (typeof raw.frontmatterProjectShowTitle === "boolean")
+    out.frontmatterProjectShowTitle = raw.frontmatterProjectShowTitle;
+  if (typeof raw.frontmatterProjectShowAuthors === "boolean")
+    out.frontmatterProjectShowAuthors = raw.frontmatterProjectShowAuthors;
   if (typeof raw.useEditorArrowPointer === "boolean")
     out.useEditorArrowPointer = raw.useEditorArrowPointer;
 
@@ -503,6 +533,27 @@ export function sanitizeSettingsJson(
     out.macosArrowScrollClampEnabled = raw.macosArrowScrollClampEnabled;
   }
 
+  if (typeof raw.pseudoCaretEnabled === "boolean") {
+    out.pseudoCaretEnabled = raw.pseudoCaretEnabled;
+  }
+
+  if (raw.pseudoCaretThickness !== undefined) {
+    out.pseudoCaretThickness = normalizePseudoCaretThickness(
+      raw.pseudoCaretThickness,
+    );
+  }
+
+  if (raw.pseudoCaretBlinkEnabled !== undefined) {
+    out.pseudoCaretBlinkEnabled = normalizePseudoCaretBlinkEnabled(
+      raw.pseudoCaretBlinkEnabled,
+    );
+  }
+
+  // 付箋 (Task 3A-3): 初回説明の確認済みフラグ。boolean のみ受け付ける。
+  if (typeof raw.noteAnchorNoticeConfirmed === "boolean") {
+    out.noteAnchorNoticeConfirmed = raw.noteAnchorNoticeConfirmed;
+  }
+
   if (typeof raw.paragraphPlainBehavior === "string") {
     const v = raw.paragraphPlainBehavior.trim();
     if (
@@ -544,6 +595,15 @@ export function sanitizeSettingsJson(
   )
     out.lineBreakPolicy = raw.lineBreakPolicy;
 
+  // --- Document Type 別の既定表示方向 ---
+  // 未設定文書を含め vertical-rl / horizontal-tb のみ受理する。
+  if (isWritingMode(raw.defaultNovelWritingMode))
+    out.defaultNovelWritingMode = raw.defaultNovelWritingMode;
+  if (isWritingMode(raw.defaultArticleWritingMode))
+    out.defaultArticleWritingMode = raw.defaultArticleWritingMode;
+  if (isWritingMode(raw.defaultUnsetDocumentWritingMode))
+    out.defaultUnsetDocumentWritingMode = raw.defaultUnsetDocumentWritingMode;
+
   // --- Fonts ---
   const registeredFonts = sanitizeRegisteredFonts(raw.registeredFonts);
   if (registeredFonts) out.registeredFonts = registeredFonts;
@@ -582,7 +642,7 @@ export function sanitizeSettingsJson(
   }
 
   // --- Caret color (BETA-DISP1) ---
-  if (raw.caretColorMode === "auto" || raw.caretColorMode === "custom")
+  if (raw.caretColorMode === "auto" || raw.caretColorMode === "custom" || raw.caretColorMode === "highlight")
     out.caretColorMode = raw.caretColorMode;
   if (raw.caretColorCustom === null) {
     out.caretColorCustom = null;
@@ -594,6 +654,91 @@ export function sanitizeSettingsJson(
   // --- Debug settings ---
   const debug = sanitizeDebugSettings(raw.debug);
   if (debug) out.debug = debug;
+
+  // --- PV-SET-4A: Page Viewer heading pagination default ---
+  if (raw.pageViewerBreakBeforeHeading !== undefined) {
+    out.pageViewerBreakBeforeHeading = normalizePageViewerBreakBeforeHeading(
+      raw.pageViewerBreakBeforeHeading,
+    );
+  }
+  if (raw.pageViewerBreakBeforeHeadingMaxLevel !== undefined) {
+    out.pageViewerBreakBeforeHeadingMaxLevel = normalizePageViewerBreakBeforeHeadingMaxLevel(
+      raw.pageViewerBreakBeforeHeadingMaxLevel,
+    );
+  }
+
+  // --- PV-READ-1: Page Viewer reading surface (margins / paper frame) ---
+  if (raw.pageViewerReadingMarginTop !== undefined) {
+    out.pageViewerReadingMarginTop = normalizePageViewerReadingMarginTop(
+      raw.pageViewerReadingMarginTop,
+    );
+  }
+  if (raw.pageViewerReadingMarginBottom !== undefined) {
+    out.pageViewerReadingMarginBottom = normalizePageViewerReadingMarginBottom(
+      raw.pageViewerReadingMarginBottom,
+    );
+  }
+  if (raw.pageViewerReadingMarginInline !== undefined) {
+    out.pageViewerReadingMarginInline = normalizePageViewerReadingMarginInline(
+      raw.pageViewerReadingMarginInline,
+    );
+  }
+  if (raw.pageViewerReadingPaperFrame !== undefined) {
+    out.pageViewerReadingPaperFrame = normalizePageViewerReadingPaperFrame(
+      raw.pageViewerReadingPaperFrame,
+    );
+  }
+
+  // --- PV-READ-2: Page Viewer reading furniture (header / footer) ---
+  if (raw.pageViewerReadingHeaderEnabled !== undefined) {
+    out.pageViewerReadingHeaderEnabled = normalizePageViewerReadingHeaderEnabled(
+      raw.pageViewerReadingHeaderEnabled,
+    );
+  }
+  if (raw.pageViewerReadingHeaderAlign !== undefined) {
+    out.pageViewerReadingHeaderAlign = normalizePageViewerReadingHeaderAlign(
+      raw.pageViewerReadingHeaderAlign,
+    );
+  }
+  if (raw.pageViewerReadingHeaderContent !== undefined) {
+    out.pageViewerReadingHeaderContent = normalizePageViewerReadingHeaderContent(
+      raw.pageViewerReadingHeaderContent,
+    );
+  }
+  if (raw.pageViewerReadingFooterEnabled !== undefined) {
+    out.pageViewerReadingFooterEnabled = normalizePageViewerReadingFooterEnabled(
+      raw.pageViewerReadingFooterEnabled,
+    );
+  }
+  if (raw.pageViewerReadingFooterAlign !== undefined) {
+    out.pageViewerReadingFooterAlign = normalizePageViewerReadingFooterAlign(
+      raw.pageViewerReadingFooterAlign,
+    );
+  }
+  if (raw.pageViewerReadingSimpleCoverEnabled !== undefined) {
+    out.pageViewerReadingSimpleCoverEnabled = normalizePageViewerReadingSimpleCoverEnabled(
+      raw.pageViewerReadingSimpleCoverEnabled,
+    );
+  }
+  if (raw.pageViewerReadingSimpleCoverWritingMode !== undefined) {
+    out.pageViewerReadingSimpleCoverWritingMode = normalizePageViewerReadingSimpleCoverWritingMode(
+      raw.pageViewerReadingSimpleCoverWritingMode,
+    );
+  }
+  if (raw.pageViewerReadingSimpleCoverLayout !== undefined) {
+    out.pageViewerReadingSimpleCoverLayout = normalizePageViewerReadingSimpleCoverLayout(
+      raw.pageViewerReadingSimpleCoverLayout,
+    );
+  }
+
+  if (raw.externalExportOptionsDefaults !== undefined) {
+    const externalExportOptionsDefaults = normalizeExternalExportOptionsDefaults(
+      raw.externalExportOptionsDefaults,
+    );
+    if (Object.keys(externalExportOptionsDefaults).length > 0) {
+      out.externalExportOptionsDefaults = externalExportOptionsDefaults;
+    }
+  }
 
   return out;
 }

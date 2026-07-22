@@ -1,5 +1,6 @@
 export type DisplaySettingsSectionKey =
   | 'basic'
+  | 'writingDirection'
   | 'tcy'
   | 'font'
   | 'ruby'
@@ -8,8 +9,8 @@ export type DisplaySettingsSectionKey =
   | 'frontmatter'
   | 'uiTheme'
   | 'toolbar'
-  | 'appLogo'
   | 'documentTheme'
+  | 'caret'
   | 'paragraphPlain'
   | 'typewriter'
   | 'support'
@@ -18,6 +19,7 @@ export type DisplaySettingsSectionOpenState = Record<DisplaySettingsSectionKey, 
 
 export const DEFAULT_DISPLAY_SETTINGS_SECTION_OPEN_STATE: DisplaySettingsSectionOpenState = {
   basic: false,
+  writingDirection: false,
   tcy: false,
   font: false,
   ruby: false,
@@ -26,8 +28,8 @@ export const DEFAULT_DISPLAY_SETTINGS_SECTION_OPEN_STATE: DisplaySettingsSection
   frontmatter: false,
   uiTheme: false,
   toolbar: false,
-  appLogo: false,
   documentTheme: false,
+  caret: false,
   paragraphPlain: false,
   typewriter: false,
   support: false,

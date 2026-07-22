@@ -1,5 +1,8 @@
 import type { LineBreakPolicy, MarkdownDocumentOptions } from "../types";
-import type { WritingMode } from "../../settings/types";
+import type {
+  DocumentTypeWritingModeDefaults,
+  WritingMode,
+} from "../../settings/types";
 import { splitLeadingFrontmatter, type FrontmatterFields } from "./frontmatter";
 
 export type DocumentType = "novel" | "article" | null;
@@ -10,6 +13,8 @@ export type FrontmatterKnownScalarPatch = {
   title?: string | null;
   author?: string | null;
   translator?: string | null;
+  /** 文書単位の表示方向。`vertical-rl` / `horizontal-tb` を書き込み、null で key を削除。 */
+  writingMode?: WritingMode | null;
 };
 
 type DocumentTypeScalarResolution = {
@@ -45,6 +50,7 @@ const EDITABLE_KEYS = new Set([
   "title",
   "author",
   "translator",
+  "writingMode",
 ]);
 
 function splitLinesPreserveEnding(value: string): FrontmatterLine[] {
@@ -265,7 +271,8 @@ function buildScalarLine(
     | "nyozePreserveEmptyParagraphs"
     | "title"
     | "author"
-    | "translator",
+    | "translator"
+    | "writingMode",
   value: string | boolean,
   inlineComment: string,
   ending: string,
@@ -282,6 +289,11 @@ function buildFrontmatterFromScratch(
   const documentType = normalizePatchValue(patch.documentType);
   if (documentType !== undefined && documentType !== null) {
     lines.push(buildScalarLine("documentType", documentType, "", eol));
+  }
+
+  const writingMode = normalizePatchValue(patch.writingMode);
+  if (writingMode !== undefined && writingMode !== null) {
+    lines.push(buildScalarLine("writingMode", writingMode, "", eol));
   }
 
   const preserveEmptyParagraphs = normalizeBooleanPatchValue(
@@ -364,6 +376,82 @@ export function resolveTypeRecommendedWritingMode(
   if (type === "novel") return "vertical-rl";
   if (type === "article") return "horizontal-tb";
   return null;
+}
+
+/**
+ * Document Type 別の既定表示方向を解決する（ユーザー設定可能）。
+ * frontmatter `writingMode` が無い文書にだけ適用する。未設定文書も明示的に
+ * 縦書き / 横書きを選んだ `defaults.unset` をそのまま使う。
+ */
+export function resolveTypeDefaultWritingMode(
+  type: DocumentType,
+  defaults: DocumentTypeWritingModeDefaults,
+): WritingMode {
+  if (type === "novel") return defaults.novel;
+  if (type === "article") return defaults.article;
+  return defaults.unset;
+}
+
+export type FrontmatterWritingModeResolution = {
+  /** 有効な frontmatter `writingMode` 指定。無効・未設定なら null。 */
+  writingMode: WritingMode | null;
+  /** `writingMode` key は存在するが値が無効（complex / 未知値）な場合 true。 */
+  unsupported: boolean;
+};
+
+/**
+ * frontmatter `writingMode` の read-only 解釈。
+ * 有効値は `vertical-rl` / `horizontal-tb` のみ。空・complex scalar・未知値は無効として無視する。
+ * 書き込みは行わない（read-only）。
+ */
+export function resolveFrontmatterWritingMode(
+  fields: Pick<FrontmatterFields, "writingMode">,
+): FrontmatterWritingModeResolution {
+  const raw = fields.writingMode;
+  if (raw === undefined) return { writingMode: null, unsupported: false };
+  const value = raw.trim();
+  if (value === "vertical-rl" || value === "horizontal-tb") {
+    return { writingMode: value, unsupported: false };
+  }
+  if (value.length === 0) return { writingMode: null, unsupported: false };
+  return { writingMode: null, unsupported: true };
+}
+
+export type EffectiveWritingModeInput = {
+  frontmatter: Pick<
+    FrontmatterFields,
+    "writingMode" | "documentType" | "nyozeType" | "type"
+  >;
+  /** タブ単位の現在値（手動切替後の値）。 */
+  tabWritingMode: WritingMode;
+  /** タブが Document Type 別の既定表示方向に追従しているか。手動切替で false。 */
+  followsTypeRecommendation: boolean;
+  /** Document Type 別の既定表示方向（ユーザー設定）。 */
+  typeDefaults: DocumentTypeWritingModeDefaults;
+};
+
+/**
+ * 実効表示方向を解決する pure helper。優先順位:
+ * 1. タブ単位の手動切替（followsTypeRecommendation=false → tabWritingMode）
+ * 2. frontmatter `writingMode`（read-only、有効値のみ）
+ * 3. Document Type 別の既定表示方向（ユーザー設定。未設定文書も明示的に縦/横）
+ */
+export function resolveEffectiveWritingMode(
+  input: EffectiveWritingModeInput,
+): WritingMode {
+  if (!input.followsTypeRecommendation) {
+    return input.tabWritingMode;
+  }
+  const frontmatterWritingMode = resolveFrontmatterWritingMode(
+    input.frontmatter,
+  ).writingMode;
+  if (frontmatterWritingMode) {
+    return frontmatterWritingMode;
+  }
+  return resolveTypeDefaultWritingMode(
+    resolveDocumentType(input.frontmatter),
+    input.typeDefaults,
+  );
 }
 
 function resolveManagedBooleanScalarValue(value: string | undefined): boolean {
@@ -558,6 +646,35 @@ export function patchFrontmatterKnownScalars(
     }
 
     insertions.push(buildScalarLine(key, nextValue, "", eol));
+  }
+
+  const nextWritingMode = normalizePatchValue(patch.writingMode);
+  if (nextWritingMode !== undefined) {
+    const existingEntry = parsed.entries.get("writingMode") ?? null;
+
+    if (nextWritingMode === null) {
+      if (existingEntry) {
+        mutations.push({
+          startIndex: existingEntry.startIndex,
+          endIndex: existingEntry.endIndex,
+          replacement: [],
+        });
+      }
+    } else if (existingEntry) {
+      const replacement = buildScalarLine(
+        "writingMode",
+        nextWritingMode,
+        existingEntry.inlineComment,
+        parsed.bodyLines[existingEntry.startIndex]?.ending || eol,
+      );
+      mutations.push({
+        startIndex: existingEntry.startIndex,
+        endIndex: existingEntry.endIndex,
+        replacement: [replacement],
+      });
+    } else {
+      insertions.push(buildScalarLine("writingMode", nextWritingMode, "", eol));
+    }
   }
 
   for (const mutation of mutations.sort((a, b) => b.startIndex - a.startIndex)) {

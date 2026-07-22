@@ -1,0 +1,2064 @@
+/*
+ * 色 (--bg-surface / --text-primary / --text-heading とその派生) と
+ * 本文フォント/文字サイズ/行間 (--pv-font-family / --pv-font-size /
+ * --pv-line-height)、見出し / ルビの appearance parity (--pv-heading-font-family /
+ * --pv-heading-margin-after / --pv-heading-divider-h1..h6 / --pv-heading-align-h /
+ * --pv-heading-align-v / --pv-ruby-size) は `PageViewerWindowRoot.tsx` の
+ * `buildPageViewerStyleVars()` が payload の表示設定 snapshot から
+ * `.page-viewer-window` ルートへ inline style として注入する
+ * (`deriveDocThemeTokens()` は本文 `.editor-panel` と共有)。
+ * ここでは固定色を持たず、それらの CSS variables を参照するだけにする。
+ */
+
+.page-viewer-window {
+  box-sizing: border-box;
+  position: relative;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface, #f4f1e7);
+  color: var(--text-primary, #2a2620);
+  font-family: var(--pv-font-family, system-ui, sans-serif);
+  font-size: var(--pv-font-size, 17px);
+  /* PV-COL-13: chrome surfaces share one header height token and theme-aware
+     backgrounds derived only from deriveDocThemeTokens() CSS variables
+     (--bg-surface / --text-primary). No JS theme branching for chrome colors. */
+  --pv-header-height: 32px;
+  --pv-chrome-bg: color-mix(in srgb, var(--bg-surface, #f4f1e7) 92%, var(--text-primary, #000) 8%);
+  --pv-chrome-panel-bg: color-mix(in srgb, var(--pv-chrome-bg) 88%, transparent);
+  /* P1 修正 (drag region overlap): `.page-viewer-window__header-actions` は
+     常に固定 6 個の 24px 角アイコンボタン (session-only pin / 書字方向切替 /
+     テーマ trigger / ページ遷移 trigger / outline toggle / Settings trigger) +
+     それらの間の 4px gap × 5 個で構成される (24*6 + 4*5 = 164px。PV-COL-16 で
+     ページ遷移 trigger を追加し 80px → 108px、PV-SET-4Aで136px、pinで164pxへ
+     更新)。下の `.page-viewer-window__header-drag-region`
+     がこの幅ぶん右端を避けるための固定値。ボタン構成が増減したときは
+     この値も合わせて調整すること。 */
+  --pv-header-actions-reserved-width: 164px;
+  /* PV-READ-2 follow-up: 読書面 header furniture が native window controls
+     と重ならないための chrome 側クリアランス。platform 別に下で上書きする。
+     paper outer が既に取っている分は furniture 側で差し引く。 */
+  --pv-reading-furniture-chrome-start: 0px;
+  --pv-reading-furniture-chrome-end: 0px;
+}
+
+.page-viewer-window[data-platform="darwin"] {
+  /* chrome header の traffic-light 予約と同じ 78px。 */
+  --pv-reading-furniture-chrome-start: 78px;
+}
+
+.page-viewer-window[data-platform="win32"],
+.page-viewer-window[data-platform="linux"] {
+  /* hook が実測値を inline で書くまでの CSS fallback。書いたあとも同名変数を
+     furniture が参照する。 */
+  --header-window-controls-fallback-width: 138px;
+  --header-window-controls-reserved-width: max(
+    0px,
+    calc(
+      100vw - env(titlebar-area-x, 0px) -
+        env(titlebar-area-width, calc(100vw - var(--header-window-controls-fallback-width)))
+    )
+  );
+  --pv-reading-furniture-chrome-end: var(--header-window-controls-reserved-width);
+}
+
+.page-viewer-window--status {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #6b6656);
+}
+
+/* ----------------------------------------------------------
+   Header — Reader Chrome: 読書専用画面として整えるため、本文に重なる
+   overlay とする。本文の layout 領域は一切占有しない (`position: absolute`)。
+   一定時間操作が無ければ header 全体を `transform` で上方向へスライドさせて
+   隠す (auto-hide)。
+
+   `.page-viewer-window__header` は常に:
+   - `position: absolute` overlay (`.page-viewer-window` 自身の
+     `position: relative` を containing block とする)。`.page-viewer-window__content`
+     の flex flow には一切参加しないため、header の有無・表示状態に関わらず
+     `__content` / `__body` / `__page-frame` は viewport 全体を使い続ける
+     (要件: body/frame の寸法・column metrics を変えない)。
+   - `pointer-events: auto` のまま — hidden 中 (画面外へ transform 退避済み)
+     でも、header 内 button への Tab focus は妨げられない (`transform` は
+     フォーカス可能性に影響しない)。`:focus-within` はその focus だけで
+     即座に反応し、画面外にあっても CSS だけで再表示できる。
+   - `background` は不透明 (overlay として本文の上に乗るので、透けて文字が
+     重なって見えないよう不透明にする — 半透明にするのは outline panel だけ、
+     という要件)。
+
+   PV-COL-15: header 自身の背景・境界線・icon button・tooltip・separator・
+   タイトル文字色は `--pv-ui-*` (起動元メインアプリの UI theme snapshot、
+   `pageViewerUiTheme.ts` 経由で `PageViewerWindowRoot.tsx` がルートへ注入)
+   を第一候補にし、省略時は PV-COL-13 までの chrome token
+   (`--pv-chrome-bg` / doc-theme 由来の color-mix) へフォールバックする。
+   本文 / outline panel / scrubber / TOC / code block、および下記テーマ
+   dropdown の popover 自体は今までどおり Reader theme のまま
+   (`--bg-surface` 等) — この節の対象外。
+
+   hidden 状態は `transform: translateY(-100%)` で header 全体を画面外へ
+   完全に退避する (opacity では隠さない — 要件)。画面外にあるあいだは
+   マウスで直接 hover できないため、常時マウントされた
+   `.page-viewer-window__header-reveal-zone` (window 最上端の薄い hit-zone、
+   header の transform 状態に関わらず常にそこにある) が「window 上端への
+   pointer hover」を拾う。常に横書き (縦書き文書でも header 自体は横書きの
+   まま)。高さは `--pv-header-height` を参照し、outline panel の
+   `padding-block-start` と同期する (PV-COL-13)。
+
+   `padding-inline-end` は既存 `useWindowControlsOverlayReservation` hook
+   (メインアプリ `UnifiedHeader.tsx` と共有) が書く
+   `--header-window-controls-reserved-width` ぶん追加で確保する。Windows/
+   Linux で native window-controls-overlay の minimize/maximize/close
+   ボタンと header 右端の action button 群が重ならないようにするため
+   (macOS は `titleBarOverlay` を使わない — traffic lights 用の左側予約は
+   別途 `[data-platform="darwin"]` ルールを参照)。
+
+   **レビュー指摘 (P1) と修正: ドラッグ領域を animate する header 自身から
+   分離した。** 初版は `.page-viewer-window__header` 自身に
+   `-webkit-app-region: drag` を付けていたが、この要素は同時に (1) native
+   drag hit-test、(2) DOM の hover/reveal 判定、(3) `transform:
+   translateY()` による auto-hide 退避、の 3 つを兼ねてしまっていた。
+   メインアプリの `.unified-header` は固定表示なので同じ構成でも問題に
+   ならないが、Page Viewer では header が animate して出入りするため、
+   Electron の native drag hit-test (transform 位置を追従しない) と DOM の
+   pointer/hover 判定が競合し、「ドラッグできたりできなかったり」
+   「header が不安定に出入りする」症状になった。
+   修正して、drag 領域を **transform しない専用の sibling**
+   (`.page-viewer-window__header-drag-region`、下記) へ分離し、
+   `.page-viewer-window__header` 自身からは `-webkit-app-region: drag` を
+   完全に外した。header は「視覚レイヤー + 操作ボタン」だけの役割になり、
+   タイトル / 境界線などの非操作領域は `pointer-events: none` にして
+   drag-region (背後の sibling) へ click-through させる。実際に操作する
+   `.page-viewer-window__header-actions`（pin・書字方向・各menu・outline・settings）
+   だけを `pointer-events: auto` で再度受け取り可能にし、
+   その中の `<button>` (と `.page-viewer-window__theme-menu-list` popover)
+   は既存どおり `-webkit-app-region: no-drag` を維持する。
+   ---------------------------------------------------------- */
+
+.page-viewer-window__header-reveal-zone {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 0;
+  /* 固定安全域を含む実効top inset（既定 32px）より確実に小さくし、本文の実際の
+     文字と重ならないようにする。 */
+  block-size: 10px;
+  z-index: 1;
+  pointer-events: auto;
+  /* P1 修正: reveal-zone は drag 判定から明示的に独立させる。もし下の
+     drag-region と重なった状態で drag 扱いになると、ここでの
+     hover/pointerdown による reveal 判定が native の drag hit-test と
+     競合しうる (この overlay 全体が不安定になった元の不具合と同種の問題)。
+     reveal-zone は常に「hover を検知するためだけの no-drag な領域」に
+     留める。 */
+  -webkit-app-region: no-drag;
+}
+
+/* P1 修正: header の `transform` を一切追従しない、常時固定の native drag
+   surface。`.page-viewer-window__header-reveal-zone` の 10px 分だけ避けて
+   その直下から header の下端まで (`--pv-header-height` の残り) を覆う ──
+   reveal-zone の hover 判定領域と物理的に重ならないようにするための意図的な
+   ズラしで、z-index の駆け引きに頼らない。header が auto-hide で画面外へ
+   退避していても、この drag-region は常にここに存在し続けるため、
+   Electron の native drag hit-test は header の表示状態や transform 位置と
+   一切連動しない、単純で安定した挙動になる。
+
+   P1 修正 (2 度目): この drag surface は元々 `inset-inline: 0` で全幅を
+   覆っていたため、縦中央に配置された 24px の操作ボタン群
+   (`.page-viewer-window__header-actions`、header の右端に justify-content:
+   space-between で配置) の大半と物理的に重なっていた。native
+   `-webkit-app-region: drag` は別 sibling 要素なので、ボタン側の `no-drag`
+   や `pointer-events` だけでは重なりを確実には打ち消せず、ボタンの hover
+   cursor が出ない・クリックが奪われる不具合が実機で再現した。
+   z-index/pointer-events の駆け引きに頼るのではなく、drag-region の
+   **幾何領域そのもの** から action 群と Windows/Linux の native
+   window-controls 予約幅を明示的に除外する ── header の右側 padding
+   (`10px + --header-window-controls-reserved-width`) と同じ式に
+   `--pv-header-actions-reserved-width` (164px 固定、上記 `.page-viewer-window`
+   参照) を足し込み、drag-region の右端をそこまで引っ込める。これにより
+   action 群の矩形と drag-region の矩形は常に非交差になり、重なりの有無を
+   実行時の stacking に委ねる必要がなくなる。
+   `header 操作後は隠さない」ための hover/pointerdown reveal も、
+   header 自身の非操作領域 (タイトル・余白) についてはこの drag-region が
+   代わりに受け持つ (header 自身はその範囲で `pointer-events: none` に
+   なるため)。 */
+.page-viewer-window__header-drag-region {
+  position: absolute;
+  inset-inline: 0
+    calc(10px + var(--header-window-controls-reserved-width, 0px) + var(--pv-header-actions-reserved-width));
+  inset-block-start: 10px;
+  block-size: calc(var(--pv-header-height) - 10px);
+  z-index: 4;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.page-viewer-window__header {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: 0;
+  z-index: 4;
+  writing-mode: horizontal-tb;
+  box-sizing: border-box;
+  height: var(--pv-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-inline: 14px calc(10px + var(--header-window-controls-reserved-width, 0px));
+  background: var(--pv-ui-header-bg, var(--pv-chrome-bg));
+  border-block-end: 1px solid
+    var(--pv-ui-header-border, color-mix(in srgb, var(--text-primary, #000) 14%, transparent));
+  /* P1 修正: header 自身はもう native drag region ではない (上の
+     `.page-viewer-window__header-drag-region` へ分離済み)。タイトル /
+     separator / 余白は `pointer-events: none` で背後の drag-region へ
+     click-through させ、実際に操作する `.page-viewer-window__header-actions`
+     だけを個別に `pointer-events: auto` へ戻す (下のルール)。 */
+  pointer-events: none;
+  user-select: none;
+  transform: translateY(-100%);
+  transition: transform 0.2s ease;
+}
+
+/* PV-COL-15: `useWindowControlsOverlayReservation` (メインアプリと共有する
+   同じ hook) が header 自身へ inline style で `--header-window-controls-
+   reserved-width` を書くのが正、これは CSS 側の fallback (main window の
+   `.unified-header` と同じ `env(titlebar-area-*)` ベースの近似式)。JS 側が
+   対象外の platform では inline style を明示的に削除するので、その場合は
+   このフォールバック値も参照されず `padding-inline-end` は素の `10px` になる。 */
+.page-viewer-window__header[data-platform="win32"],
+.page-viewer-window__header[data-platform="linux"] {
+  --header-window-controls-fallback-width: 138px;
+  --header-window-controls-reserved-width: max(
+    0px,
+    calc(
+      100vw - env(titlebar-area-x, 0px) -
+        env(titlebar-area-width, calc(100vw - var(--header-window-controls-fallback-width)))
+    )
+  );
+}
+
+/* P1 修正 (Windows/Linux で drag region が action 群と再び重なる):
+   `--header-window-controls-reserved-width` は CSS 変数なので子孫方向にしか
+   継承されない。上のルールは `.page-viewer-window__header` にしか付いて
+   おらず、sibling である `.page-viewer-window__header-drag-region` は
+   この値を継承できないため、win32/linux では reservation を `0px` と
+   見なしてしまい、drag-region の右端 (`.page-viewer-window__header-drag-
+   region` の `inset-inline-end`) が native window-controls 分だけ action
+   群へ侵入していた。header と全く同じ fallback-width・calc 式を
+   drag-region 自身の `[data-platform]` にも複製し(継承に頼らず両方の
+   要素に同じ値を独立に持たせる)、JS 実測後は `PageViewerWindowRoot.tsx`
+   側の effect が同じ実測値を drag-region の inline style にも直接複製する
+   (継承ではなく複製 — 詳細は TSX 側のコメント参照)。 */
+.page-viewer-window__header-drag-region[data-platform="win32"],
+.page-viewer-window__header-drag-region[data-platform="linux"] {
+  --header-window-controls-fallback-width: 138px;
+  --header-window-controls-reserved-width: max(
+    0px,
+    calc(
+      100vw - env(titlebar-area-x, 0px) -
+        env(titlebar-area-width, calc(100vw - var(--header-window-controls-fallback-width)))
+    )
+  );
+}
+
+/* macOS: Page Viewer の `BrowserWindow` も main window (`createWindow()`)
+   と同じ `titleBarStyle: "hidden"` + `trafficLightPosition` を使うため、
+   native traffic-light ボタンは web content の左上に重なって描画される。
+   header 左端に固定の左 inset を確保し、タイトル / separator / action
+   button 群が traffic lights の下に隠れないようにする。実測でメインアプリ
+   と同じ 66px だとタイトル 1 文字目が traffic lights にわずかに重なる
+   ことを確認したため、78px (+12px の余裕) へ広げた。win32/linux の
+   `padding-inline-end` 予約とは独立した左側専用の reservation (macOS は
+   ウィンドウ右側に native controls が無いため、右側の予約は不要)。 */
+.page-viewer-window__header[data-platform="darwin"] {
+  padding-inline-start: 78px;
+}
+
+.page-viewer-window__header.is-visible,
+.page-viewer-window__header:focus-within {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-viewer-window__header {
+    transition: none;
+  }
+}
+
+.page-viewer-window__title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--pv-ui-text-primary, var(--text-heading, var(--text-primary)));
+}
+
+/* Unified Header の `.unified-header-sep` に相当する separator。タイトルと
+   action button 群の間に置く。UI theme の `--pv-ui-separator` を第一候補、
+   省略時は既存 chrome の分離線 (`--text-primary` ベースの薄い color-mix) へ
+   フォールバックする。 */
+.page-viewer-window__header-separator {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 16px;
+  background: var(--pv-ui-separator, color-mix(in srgb, var(--text-primary, #000) 16%, transparent));
+}
+
+/* ----------------------------------------------------------
+   Header icon buttons — outline toggle (PV-COL-9), writing-mode toggle and
+   theme menu trigger (PV-COL-12) — reuse the app-wide icon-button / tooltip
+   *pattern* (`@tabler/icons-react`, `data-tooltip` attribute). This window
+   never gets `[data-theme]` on its own `documentElement` (that is set by the
+   main window's `useAppUiState` effect only), so the actual UI-theme CSS
+   rules in `src/styles.css` (`.toolbar-btn-icon-only` etc.) can't be reused
+   directly here. Instead (PV-COL-15), these buttons read the same *colors*
+   those rules use (`--bg-button-hover` / `--border-main` / `--accent` /
+   `--bg-dialog`) via the `--pv-ui-*` snapshot injected on `.page-viewer-window`
+   (`pageViewerUiTheme.ts`), so the header visually matches whichever UI theme
+   is active in the main window that launched this viewer. When no snapshot
+   is present, they fall back to the PV-COL-9..13 doc-theme-derived look.
+   All three share one rule set (base / hover / focus-visible / is-active /
+   tooltip) since they are visually identical controls.
+   ---------------------------------------------------------- */
+
+/* P1 修正: header 自身は `pointer-events: none` (上のルール) になったため、
+   実際に操作する action button 群だけをこの subtree で `pointer-events:
+   auto` へ戻す。header の drag-region 分離とは別の話 (drag/no-drag は
+   `-webkit-app-region`、click-through の可否は `pointer-events` ── 2 つの
+   独立した仕組みを両方正しく設定する必要がある)。
+   P1 修正 (2 度目): `-webkit-app-region: no-drag` もこの wrapper 自体に
+   明示する。drag-region の幾何領域を右側で除外済み (上記) なので本来
+   これが無くても重なりは起きないはずだが、将来 layout が変わって万一
+   drag-region の矩形とこの wrapper が重なった場合でも、ここで `no-drag`
+   を明示していれば action 群全体が常にドラッグ判定から確実に除外される
+   (幾何分離 + 明示的 no-drag の二重の安全策)。 */
+.page-viewer-window__header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+/* header 自身はもう drag region ではないが (上の P1 修正)、
+   `.page-viewer-window__header-actions` を `pointer-events: auto` で
+   再度クリック可能にしただけでは `-webkit-app-region` はまだ未設定
+   (初期値 `no-drag` 相当なのでこのままでも実害は無いが、明示しておく)。
+   実際にクリックする要素 (書字方向切替 / テーマ trigger / outline toggle /
+   テーマ menu の各選択肢) と、テーマ dropdown の popover 自体を対象に
+   `no-drag` を明示する (メインアプリ `.unified-header button` と同じ慣習)。 */
+.page-viewer-window__header button,
+.page-viewer-window__transition-popover,
+.page-viewer-window__settings-popover,
+.page-viewer-window__theme-menu-list {
+  -webkit-app-region: no-drag;
+}
+
+.page-viewer-window__outline-toggle,
+.page-viewer-window__header-pin-toggle,
+.page-viewer-window__writing-mode-toggle,
+.page-viewer-window__transition-toggle,
+.page-viewer-window__settings-toggle,
+.page-viewer-window__theme-toggle {
+  flex: 0 0 auto;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--pv-ui-text-primary, var(--text-secondary, var(--text-primary)));
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.page-viewer-window__outline-toggle:hover,
+.page-viewer-window__header-pin-toggle:hover,
+.page-viewer-window__writing-mode-toggle:hover,
+.page-viewer-window__transition-toggle:hover,
+.page-viewer-window__settings-toggle:hover,
+.page-viewer-window__theme-toggle:hover {
+  background: var(--pv-ui-button-hover-bg, color-mix(in srgb, var(--text-primary, #000) 10%, transparent));
+  border-color: var(--pv-ui-button-hover-border, transparent);
+  color: var(--pv-ui-text-primary, var(--text-heading, var(--text-primary)));
+}
+
+.page-viewer-window__outline-toggle:focus-visible,
+.page-viewer-window__header-pin-toggle:focus-visible,
+.page-viewer-window__writing-mode-toggle:focus-visible,
+.page-viewer-window__transition-toggle:focus-visible,
+.page-viewer-window__settings-toggle:focus-visible,
+.page-viewer-window__theme-toggle:focus-visible {
+  outline: 2px solid var(--pv-ui-accent, var(--accent-link, var(--text-heading, currentColor)));
+  outline-offset: 2px;
+}
+
+.page-viewer-window__outline-toggle.is-active,
+.page-viewer-window__header-pin-toggle.is-active,
+.page-viewer-window__transition-toggle.is-active,
+.page-viewer-window__settings-toggle.is-active,
+.page-viewer-window__theme-toggle.is-active {
+  background: color-mix(in srgb, var(--pv-ui-accent, var(--accent-link, var(--text-heading))) 16%, transparent);
+  border-color: var(--pv-ui-accent, color-mix(in srgb, var(--accent-link, var(--text-heading)) 40%, transparent));
+  color: var(--pv-ui-accent, var(--accent-link, var(--text-heading, currentColor)));
+}
+
+.page-viewer-window__outline-toggle[data-tooltip]::after,
+.page-viewer-window__header-pin-toggle[data-tooltip]::after,
+.page-viewer-window__writing-mode-toggle[data-tooltip]::after,
+.page-viewer-window__transition-toggle[data-tooltip]::after,
+.page-viewer-window__settings-toggle[data-tooltip]::after,
+.page-viewer-window__theme-toggle[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--pv-ui-text-primary, var(--text-primary));
+  background: var(--pv-ui-tooltip-bg, var(--bg-surface, #f4f1e7));
+  border: 1px solid var(--pv-ui-button-hover-border, color-mix(in srgb, var(--text-primary, #000) 20%, transparent));
+  border-radius: 4px;
+  padding: 5px 7px;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--text-primary, #000) 20%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 5;
+}
+
+.page-viewer-window__outline-toggle[data-tooltip]:hover::after,
+.page-viewer-window__outline-toggle[data-tooltip]:focus-visible::after,
+.page-viewer-window__header-pin-toggle[data-tooltip]:hover::after,
+.page-viewer-window__header-pin-toggle[data-tooltip]:focus-visible::after,
+.page-viewer-window__writing-mode-toggle[data-tooltip]:hover::after,
+.page-viewer-window__writing-mode-toggle[data-tooltip]:focus-visible::after,
+.page-viewer-window__transition-toggle[data-tooltip]:hover::after,
+.page-viewer-window__transition-toggle[data-tooltip]:focus-visible::after,
+.page-viewer-window__settings-toggle[data-tooltip]:hover::after,
+.page-viewer-window__settings-toggle[data-tooltip]:focus-visible::after,
+.page-viewer-window__theme-toggle[data-tooltip]:hover::after,
+.page-viewer-window__theme-toggle[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ----------------------------------------------------------
+   Theme menu (PV-COL-12) — lightweight custom listbox opened from the
+   `.page-viewer-window__theme-toggle` trigger above. Deliberately its own
+   self-contained markup/CSS rather than reusing the app-wide
+   `ThemeSwatchSelect` component: that component's CSS
+   (`.theme-swatch-select*` in `src/styles.css`) reads UI-theme tokens
+   (`--bg-input` / `--border-input` / `--bg-hover` / `--ui-font-scale`) that,
+   for the same `[data-theme]` reason explained above, never resolve in this
+   window — reusing it here would render an unstyled/invisible popover. The
+   *pattern* (role="listbox"/"option", swatch dots, a reserved check-icon
+   slot, outside-click + Escape close) is preserved; only the token source
+   changes to doc-theme tokens already on `.page-viewer-window`.
+
+   The menu is mounted as a DOM child of `<header>` (requirement) so it never
+   needs its own z-index or a dedicated `isHeaderChromeVisible` entry to stay
+   reachable — pointer/focus events inside it already bubble to `<header>`,
+   which is already the top of the z-index stack (`docs/page-viewer-css-
+   columns-design-2026-07.md` §16.1). `position: absolute` keeps it out of
+   the header's flex flow entirely, so it can never change `.content`/`.body`
+   layout even though it visually renders below the header strip.
+   ---------------------------------------------------------- */
+
+.page-viewer-window__transition-menu,
+.page-viewer-window__settings-menu,
+.page-viewer-window__theme-menu {
+  position: relative;
+}
+
+.page-viewer-window__theme-menu-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 4px;
+  min-width: 148px;
+  list-style: none;
+  background: var(--bg-surface, #f4f1e7);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #000) 20%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--text-primary, #000) 22%, transparent);
+}
+
+/* 第2次 follow-up: `.transition-menu-list` (`<ul role="listbox">`) は
+   speed slider (`.transition-speed`) の兄弟にするため、position:absolute の
+   positioned wrapper を `.transition-popover` として分離した (テーマ menu は
+   slider を持たないため `<ul>` 自身が引き続き popover を兼ねる)。ARIA 構造
+   (listbox/option) は無変更、slider は listbox の外に置くだけ。 */
+.page-viewer-window__transition-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  min-width: 168px;
+  background: var(--bg-surface, #f4f1e7);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #000) 20%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--text-primary, #000) 22%, transparent);
+}
+
+.page-viewer-window__transition-menu-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* speed slider: listbox とは独立した labeled control (依頼要件: listbox の
+   内部に入れない)。`none` 選択中は disabled にする (root 側の
+   `disabled={pageTurnTransition === 'none'}`)。 */
+.page-viewer-window__transition-speed {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px 3px;
+  border-block-start: 1px solid color-mix(in srgb, var(--text-primary, #000) 12%, transparent);
+}
+
+.page-viewer-window__transition-speed label {
+  font-size: 11px;
+  color: var(--text-secondary, var(--text-primary));
+  white-space: nowrap;
+}
+
+.page-viewer-window__transition-speed input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent-link, var(--text-heading, currentColor));
+}
+
+.page-viewer-window__transition-speed input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* PV-SET-4A: Page Viewer Settings popover。テーマ / ページ遷移 dropdown と
+   同じ position:absolute の自己完結 popover (doc-theme token だけを使い、
+   本文の page metrics には触れない)。中身は checkbox + native <select> の
+   compact な form であり、role="listbox"/"option" は使わない (依頼要件どおり
+   小さな custom popover に留め、右 sidebar 化しない)。 */
+.page-viewer-window__settings-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 9px;
+  min-width: 208px;
+  background: var(--bg-surface, #f4f1e7);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #000) 20%, transparent);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--text-primary, #000) 22%, transparent);
+}
+
+.page-viewer-window__settings-popover-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.page-viewer-window__settings-popover-section-heading {
+  margin: 0;
+  padding-block-start: 5px;
+  font-size: 11px;
+  color: var(--text-secondary, var(--text-primary));
+  border-block-start: 1px solid color-mix(in srgb, var(--text-primary, #000) 12%, transparent);
+}
+
+.page-viewer-window__settings-popover-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.page-viewer-window__settings-popover-toggle-row input[type="checkbox"] {
+  accent-color: var(--accent-link, var(--text-heading, currentColor));
+}
+
+.page-viewer-window__settings-popover-select-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.page-viewer-window__settings-popover-select-row select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-surface, #f4f1e7);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #000) 20%, transparent);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.page-viewer-window__settings-popover-select-row select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-viewer-window__transition-menu-option-btn,
+.page-viewer-window__theme-menu-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.page-viewer-window__transition-menu-option-btn:hover,
+.page-viewer-window__theme-menu-option-btn:hover {
+  background: color-mix(in srgb, var(--text-primary, #000) 10%, transparent);
+}
+
+.page-viewer-window__transition-menu-option.is-selected .page-viewer-window__transition-menu-option-btn,
+.page-viewer-window__theme-menu-option.is-selected .page-viewer-window__theme-menu-option-btn {
+  background: color-mix(in srgb, var(--accent-link, var(--text-heading)) 14%, transparent);
+}
+
+.page-viewer-window__transition-menu-option-btn:focus-visible,
+.page-viewer-window__theme-menu-option-btn:focus-visible {
+  outline: 2px solid var(--accent-link, var(--text-heading, currentColor));
+  outline-offset: -2px;
+}
+
+.page-viewer-window__theme-menu-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.page-viewer-window__theme-menu-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--text-primary, #000) 25%, transparent);
+}
+
+.page-viewer-window__transition-menu-option-label,
+.page-viewer-window__theme-menu-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-viewer-window__transition-menu-option-check,
+.page-viewer-window__theme-menu-option-check {
+  width: 12px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-link, var(--text-heading, currentColor));
+}
+
+/* ----------------------------------------------------------
+   Bottom scrubber — overlay on top of `.page-viewer-window__content`
+   (absolutely positioned sibling of body/outline-panel, so it never pushes
+   body content and is never resized by anything). Always laid out
+   horizontal-tb regardless of the document's own writing mode (requirement:
+   scrubber UI itself stays horizontal). Hidden by default; revealed on
+   hover / focus-within / while dragging (`.is-active`, set from
+   PageViewerWindowRoot.tsx while pointer-captured).
+
+   `z-index: 3` keeps it above the outline panel (`z-index: 2`) — the
+   scrubber spans the full content width regardless of whether the panel is
+   open, so it must never be visually/interactively obscured by the panel
+   overlay (same "app chrome must stay reachable" principle as the header).
+   ---------------------------------------------------------- */
+
+.page-viewer-window__scrubber-zone {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 3;
+  writing-mode: horizontal-tb;
+  block-size: 28px;
+  display: flex;
+  align-items: center;
+  padding-inline: 20px;
+}
+
+.page-viewer-window__scrubber-rail {
+  /* Interactive hit area is taller than the visible track so hover / click /
+     drag stay reliable; the painted track is the ::before pseudo-element. */
+  position: relative;
+  inline-size: 100%;
+  block-size: 24px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  touch-action: none;
+  background: transparent;
+}
+
+.page-viewer-window__scrubber-rail::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  translate: 0 -50%;
+  block-size: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-primary, #000) 16%, transparent);
+  transition: block-size 0.15s ease, background 0.15s ease;
+  pointer-events: none;
+}
+
+.page-viewer-window__scrubber-rail:focus-visible {
+  outline: 2px solid var(--accent-link, var(--text-heading, currentColor));
+  outline-offset: 3px;
+}
+
+.page-viewer-window__scrubber-zone:hover .page-viewer-window__scrubber-rail,
+.page-viewer-window__scrubber-zone:focus-within .page-viewer-window__scrubber-rail,
+.page-viewer-window__scrubber-zone.is-active .page-viewer-window__scrubber-rail {
+  opacity: 1;
+}
+
+.page-viewer-window__scrubber-zone:hover .page-viewer-window__scrubber-rail::before,
+.page-viewer-window__scrubber-zone:focus-within .page-viewer-window__scrubber-rail::before {
+  block-size: 4px;
+  background: color-mix(in srgb, var(--text-primary, #000) 22%, transparent);
+}
+
+.page-viewer-window__scrubber-zone.is-active .page-viewer-window__scrubber-rail::before {
+  block-size: 5px;
+  background: color-mix(in srgb, var(--text-primary, #000) 30%, transparent);
+}
+
+.page-viewer-window__scrubber-thumb {
+  position: absolute;
+  top: 50%;
+  translate: -50% -50%;
+  inline-size: 10px;
+  block-size: 10px;
+  border-radius: 50%;
+  background: var(--text-heading, currentColor);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg-surface, #fff) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, scale 0.1s ease;
+  z-index: 1;
+}
+
+.page-viewer-window__scrubber-zone:hover .page-viewer-window__scrubber-thumb,
+.page-viewer-window__scrubber-zone:focus-within .page-viewer-window__scrubber-thumb,
+.page-viewer-window__scrubber-zone.is-active .page-viewer-window__scrubber-thumb {
+  opacity: 0.95;
+}
+
+.page-viewer-window__scrubber-zone.is-active .page-viewer-window__scrubber-thumb {
+  opacity: 1;
+  scale: 1.3;
+  background: var(--accent-link, var(--text-heading, currentColor));
+}
+
+/* ----------------------------------------------------------
+   Body — documentInfo / toc / flow / fixedBlankPage はすべて同じ
+   content surface (this element) の中で writing-mode を共有する。
+   flex: 1 + min-height: 0 で高さを確定させる。header は overlay
+   (`position: absolute`) で layout に参加しないため、body は常に
+   `.page-viewer-window` の全高を使う (header の表示状態に左右されない)。
+
+   CSS multicol pagination (docs/page-viewer-css-columns-design-2026-07.md §12):
+   body はスクロールしない (overflow: hidden)。padding がページの外周余白で、
+   その内側の `__page-frame` が 1 ページぶんの可視マスク、さらに内側の
+   `__page-stage` 内に section ごとの `__page-frame` を重ねる。flow frame は
+   それぞれ `__page-flow` を持ち、fixed blank frame は空白ページ slot を持つ。
+   global page index から active frame だけを可視化し、flow 内の local page
+   移動は flow への transform (`usePageViewerColumnLayout.ts` が専有) だけで
+   行うため、前後ページが構造的に見えない。
+   ---------------------------------------------------------- */
+
+/* Reader Chrome (overlay 化): body の positioning context。outline panel /
+   scrubber はどちらもここへ `position: absolute` overlay として重ね、body
+   自身の幅・高さを一切変えない (要件: panel は本文を押し縮めない)。
+   `.page-viewer-window__content` 自身は z-index を明示しない (`auto`) ので、
+   position: relative があっても新しい stacking context は作らず、子要素
+   (panel / scrubber) の z-index は `.page-viewer-window` レベルまで突き抜けて
+   header / reveal-zone と直接比較される — これにより
+   `body(最背面) < reveal-zone(1) < outline-panel(2) < scrubber(3) < header(4)`
+   という一貫した重なり順が、ネストの深さに関わらず成立する。body は
+   `.page-stage`/`.page-frame` が自前の位置指定を持つため、これ以上の
+   positioning context を必要としない (単なる flex sizing の子のまま)。 */
+.page-viewer-window__content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.page-viewer-window__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  /* PV-READ-1: 旧 padding (22/28/28) を廃止し、paper outer + physical frame
+     inset（CSS 変数）で読書面 geometry を決める。 */
+  padding: 0;
+  line-height: var(--pv-line-height, 1.9);
+  box-sizing: border-box;
+}
+
+/* 用紙枠 ON: body はcanvas地色、内側のpage-surfaceだけが静止した紙面。 */
+.page-viewer-window__body[data-paper-frame="on"] {
+  background: color-mix(in srgb, var(--bg-surface, #f4f1e7) 88%, var(--text-primary, #000) 12%);
+}
+
+.page-viewer-window__body[data-paper-frame="off"] {
+  background: transparent;
+}
+
+/* Keyboard page navigation (PageDown/PageUp/Space/arrows) needs this surface
+   focusable (`tabIndex` in PageViewerWindowRoot.tsx); suppress the default
+   focus ring since it wraps the entire content area, not a form control. */
+.page-viewer-window__body:focus {
+  outline: none;
+}
+
+.page-viewer-window__body[data-writing-mode="vertical-rl"] {
+  writing-mode: vertical-rl;
+  overflow: hidden;
+}
+
+.page-viewer-window__body[data-writing-mode="horizontal-tb"] {
+  writing-mode: horizontal-tb;
+  overflow: hidden;
+}
+
+.page-viewer-window__page-surface {
+  position: relative;
+  /* visual canvas margin。topはintegrated header / traffic lightsを避けるが、
+     本文frameのselected top marginではない。 */
+  margin: var(--pv-reading-paper-outer-top, 0px) var(--pv-reading-paper-outer-inline, 0px)
+    var(--pv-reading-paper-outer-bottom, 0px);
+  width: calc(100% - (2 * var(--pv-reading-paper-outer-inline, 0px)));
+  height: calc(
+    100% - var(--pv-reading-paper-outer-top, 0px) - var(--pv-reading-paper-outer-bottom, 0px)
+  );
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.page-viewer-window__body[data-paper-frame="on"] .page-viewer-window__page-surface {
+  background: var(--bg-surface, #f4f1e7);
+  border: 1px solid color-mix(in srgb, var(--text-primary, #000) 18%, var(--bg-surface, #f4f1e7) 82%);
+  border-radius: 3px;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--text-primary, #000) 14%, transparent);
+}
+
+.page-viewer-window__body[data-paper-frame="off"] .page-viewer-window__page-surface {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* PV-READ-2: 読書面 header/footer overlay。page-surface を positioning
+   context にし、余白帯内だけに置く。page-stage / page-frame / page-flow の
+   size・padding・transform・metrics は変更しない。hit-test も受けない。 */
+.page-viewer-window__reading-header,
+.page-viewer-window__reading-footer {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  writing-mode: horizontal-tb;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  max-width: calc(100% - (2 * var(--pv-reading-margin-inline, 32px)));
+  padding: 0 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  line-height: 1.3;
+  color: color-mix(in srgb, var(--text-primary, #000) 72%, var(--bg-surface, #f4f1e7) 28%);
+}
+
+.page-viewer-window__reading-header {
+  top: 0;
+  height: var(--pv-reading-margin-top, 48px);
+  left: var(--pv-reading-margin-inline, 32px);
+  right: var(--pv-reading-margin-inline, 32px);
+  max-width: none;
+}
+
+/* 用紙枠 OFF のときだけ native traffic lights / window-controls を避ける。
+   用紙枠 ON では page-surface 自体が paper outer で titlebar 帯の外側に
+   下がるため、追加クリアランスは不要（二重に内側へ寄せない）。 */
+.page-viewer-window__body[data-paper-frame="off"] .page-viewer-window__reading-header {
+  left: calc(
+    var(--pv-reading-margin-inline, 32px) + var(--pv-reading-furniture-chrome-start, 0px)
+  );
+  right: calc(
+    var(--pv-reading-margin-inline, 32px) + var(--pv-reading-furniture-chrome-end, 0px)
+  );
+}
+
+.page-viewer-window__reading-footer {
+  bottom: 0;
+  height: var(--pv-reading-margin-bottom, 48px);
+  left: var(--pv-reading-margin-inline, 32px);
+  right: var(--pv-reading-margin-inline, 32px);
+  max-width: none;
+}
+
+.page-viewer-window__reading-header[data-align="start"],
+.page-viewer-window__reading-footer[data-align="start"] {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.page-viewer-window__reading-header[data-align="center"],
+.page-viewer-window__reading-footer[data-align="center"] {
+  justify-content: center;
+  text-align: center;
+}
+
+.page-viewer-window__reading-header[data-align="end"],
+.page-viewer-window__reading-footer[data-align="end"] {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.page-viewer-window__reading-header[data-enabled="off"],
+.page-viewer-window__reading-footer[data-enabled="off"] {
+  visibility: hidden;
+}
+
+.page-viewer-window__reading-header-title,
+.page-viewer-window__reading-header-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.page-viewer-window__reading-header-title + .page-viewer-window__reading-header-author::before {
+  content: "·";
+  margin-inline: 0.35em;
+  opacity: 0.7;
+}
+
+/* 本文content stageはpaper visualと分離する。fade / zoomはここだけをanimateし、
+   border / shadow / canvasは常に静止する。 */
+.page-viewer-window__page-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* PV-COL-14: ユーザー操作で global page index が変わったときだけ、現在ページ
+   表示層 (page-stage) を短く animate する。flow の transform / column
+   metrics は対象外。header / outline / scrubber は page-stage の外なので
+   影響しない。`key={pageIndex}` remount は使わない。
+   PV-COL-16 第2次 follow-up: mode ごとの固定 duration (旧 fade=400ms /
+   slide=220ms / zoom=220ms) を廃止し、`none` を除く全 mode 共通の runtime
+   speed slider 値 (200〜1000ms、既定 500ms) へ統一した。JS
+   (`restartPageTurnTransitionAnimation()` / `beginPageTurnFadeOutPhase()` /
+   `beginPageTurnFadeInPhase()`) が animation 開始と同期して
+   `--pv-page-turn-duration` custom property を対象要素の inline style へ
+   書き込み、cleanup timer もこの同じ ms 値を使うため、CSS
+   animation-duration と JS timer が構造的にずれない。
+   PV-COL-16 第3次 follow-up (2026-07-13): `fade` を「新ページが既に切り替
+   わった後に fade-in するだけ」の単相から、Tategaki プラグインの
+   paged-reading-mode 参考実装と同じ「旧ページを fade-out → (fade-out 完了
+   後に) page index 切替 → 新ページを fade-in」という二相へ作り直した
+   (Tategaki のスクロール実装そのものは移植していない — page-stage の
+   fade/opacity choreography だけを踏襲)。二相は別 class
+   (`is-page-turning-fade-out` / `-fade-in`) を使う。速度 slider の値は
+   総 duration とし、`pageViewerPageTurnTransition.ts` の
+   `resolvePageTurnFadePhaseDurationsMs()` が fade-out 45% / fade-in 55%
+   (`PAGE_VIEWER_PAGE_TURN_FADE_OUT_RATIO` / `_IN_RATIO`) に分割した ms を
+   `--pv-page-turn-duration` へ書き込む。page index の実切替は fade-out の
+   `animationend`（主）/ 保護付き fallback timer（従）で検知した「fade-out
+   完了」の瞬間にだけ起こる — root 側 (`PageViewerWindowRoot.tsx`) が
+   `navigateToPage` を deferred にし、fade-out 中は旧ページがそのまま
+   表示され続ける。 */
+@keyframes page-viewer-page-turn-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.page-viewer-window__page-stage.is-page-turning-fade-out {
+  /* `forwards` で終了後も opacity: 0 を保持する。正常完了時は JS が
+     fade-out class を残したまま page index を切り替えるため、handoff 中に
+     一瞬 opacity 1 へ戻ってちらつくことを防ぐ。class の除去は
+     `beginPageTurnFadeInPhase()` / cancel / `none` / snapshot / unmount 側。 */
+  animation: page-viewer-page-turn-fade-out var(--pv-page-turn-duration, 225ms) ease-in forwards;
+}
+
+@keyframes page-viewer-page-turn-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.page-viewer-window__page-stage.is-page-turning-fade-in {
+  animation: page-viewer-page-turn-fade-in var(--pv-page-turn-duration, 275ms) ease-out;
+}
+
+@keyframes page-viewer-page-turn-zoom {
+  from {
+    opacity: 0.35;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.page-viewer-window__page-stage.is-page-turning-zoom {
+  transform-origin: 50% 50%;
+  animation: page-viewer-page-turn-zoom var(--pv-page-turn-duration, 500ms) ease-out;
+}
+
+/* PV-COL-16 第3次 follow-up (2026-07-13): `slide` を「半透明 overlay 単独の
+   sweep + stage の控えめな opacity fade」から「不透明 mask + 半透明 overlay
+   の 2 層が同じ方向・同じ duration で一緒に動く」choreography へ作り直した
+   (stage 自体の opacity fade は完全に廃止 — slide では page-stage は一切
+   animate しない)。
+   `.page-viewer-window__transition-mask` (新規、下記) と
+   `.page-viewer-window__transition-overlay` (既存) はどちらも静止した
+   `.page-viewer-window__page-surface` の子として置く。paper ON では紙面の
+   rect、OFF では読書面全体と厳密に同じ `inset: 0` の範囲だけを覆うため、
+   header / native drag region / outline / scrubber を覆わない。`pointer-events:
+   none` + surface内の `z-index: 1` により、本文stageより前面、surface外の
+   outline panel / scrubber は従来どおり操作可能なまま。mask/overlay は同じ
+   z-index だが DOM 順で mask → overlay の順に置くため、overlay (半透明の
+   紙端の影) は常に mask (不透明) の前面に重なる。
+   mask はテキストを一切持たず、`--bg-surface` (Reader theme の実際の
+   読書面背景色 token、テーマ切替時にも自動追従する) を単色で塗るだけ。
+   `clip-path` / CSS `mask` プロパティは使わない (本文を途中から reveal
+   する実装はしない、という要件 — この mask はあくまで完全に不透明な
+   ordinary な DOM overlay 要素であって、CSS clip-path/mask ではない)。
+   page index の実切替は、mask が `translateX(0%)` (＝画面全体を覆っている
+   静止位置) にある間、つまり完全に不透明な瞬間に行われる (root 側の
+   `useLayoutEffect` が DOM 更新の直後・ペイントの直前に mask/overlay の
+   class を付けるのと同じコミットで page index も既に新しい値になっている
+   ため、ブラウザが実際に描く最初のフレームでは「新ページの内容 + 完全に
+   覆う mask」が同時に成立する)。その後 mask と overlay は同じ
+   `--pv-page-turn-duration` で同じ方向 (`--pv-page-turn-slide-exit-x`) へ
+   一緒に画面外まで退出し、新ページを露出させる。stage・page-frame・
+   page-flow は一切 transform しない。opacity は class 付与時に固定 `1` の
+   まま (mask/overlay とも sweep 中ずっと不透明) で、transform (translateX)
+   だけを animate する。overlay の gradient は
+   `color-mix(in srgb, var(--text-primary) 14%, transparent)` を頂点にした
+   控えめな半透明の帯 (紙端の影の質感) で、mask と完全に重なって同じ動きを
+   するため、退出していく mask の縁に影が付いているように見える。 */
+.page-viewer-window__transition-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background: var(--bg-surface, #f4f1e7);
+}
+
+.page-viewer-window__transition-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+}
+
+@keyframes page-viewer-page-turn-slide-layer {
+  from {
+    transform: translateX(0%);
+  }
+  to {
+    transform: translateX(var(--pv-page-turn-slide-exit-x, 0%));
+  }
+}
+
+.page-viewer-window__transition-mask.is-page-turning-slide {
+  opacity: 1;
+  animation: page-viewer-page-turn-slide-layer var(--pv-page-turn-duration, 500ms) ease-out forwards;
+}
+
+.page-viewer-window__transition-overlay.is-page-turning-slide {
+  opacity: 1;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--text-primary, #000) 14%, transparent) 45%,
+    transparent 85%
+  );
+  animation: page-viewer-page-turn-slide-layer var(--pv-page-turn-duration, 500ms) ease-out forwards;
+}
+
+/* 方向表 (`PAGE_VIEWER_PAGE_TURN_SLIDE_OVERLAY_MAPPING` の最終仕様と一致、
+   両 writing mode とも物理 x 軸 (横方向) だけを使う — y 軸は使わない):
+   | 書字方向 | next | previous |
+   | vertical-rl | 左 → 右 | 右 → 左 |
+   | horizontal-tb | 右 → 左 | 左 → 右 |
+   `--pv-page-turn-slide-exit-x` は退出先 (符号は
+   `PAGE_VIEWER_PAGE_TURN_SLIDE_OVERLAY_MAPPING` の `fromSign` の反転、
+   大きさは要素自身の全幅ぶん `100%` — mask/overlay とも `translateX(0%)`
+   (画面を覆う静止位置) から出発するため、完全に画面外へ出るには最低でも
+   自身の全幅ぶんの移動が必要)。mask と overlay の両方に同じ値を適用する
+   ことで「同じ方向・同じ速度で一緒に動く」を保証する。`data-writing-mode`
+   は mask/overlay 要素自身にそれぞれ複製されている (body の子孫ではなく
+   `.content` の兄弟のため、descendant selector では届かない — drag-region
+   が `data-platform` を複製しているのと同じ既存パターン)。 */
+.page-viewer-window__transition-mask[data-writing-mode="vertical-rl"].is-page-turning-slide[data-page-turn-direction="next"],
+.page-viewer-window__transition-overlay[data-writing-mode="vertical-rl"].is-page-turning-slide[data-page-turn-direction="next"] {
+  --pv-page-turn-slide-exit-x: 100%;
+}
+
+.page-viewer-window__transition-mask[data-writing-mode="vertical-rl"].is-page-turning-slide[data-page-turn-direction="previous"],
+.page-viewer-window__transition-overlay[data-writing-mode="vertical-rl"].is-page-turning-slide[data-page-turn-direction="previous"] {
+  --pv-page-turn-slide-exit-x: -100%;
+}
+
+.page-viewer-window__transition-mask[data-writing-mode="horizontal-tb"].is-page-turning-slide[data-page-turn-direction="next"],
+.page-viewer-window__transition-overlay[data-writing-mode="horizontal-tb"].is-page-turning-slide[data-page-turn-direction="next"] {
+  --pv-page-turn-slide-exit-x: -100%;
+}
+
+.page-viewer-window__transition-mask[data-writing-mode="horizontal-tb"].is-page-turning-slide[data-page-turn-direction="previous"],
+.page-viewer-window__transition-overlay[data-writing-mode="horizontal-tb"].is-page-turning-slide[data-page-turn-direction="previous"] {
+  --pv-page-turn-slide-exit-x: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-viewer-window__page-stage.is-page-turning-fade-out,
+  .page-viewer-window__page-stage.is-page-turning-fade-in,
+  .page-viewer-window__page-stage.is-page-turning-zoom {
+    animation: none;
+  }
+  .page-viewer-window__transition-mask.is-page-turning-slide,
+  .page-viewer-window__transition-overlay.is-page-turning-slide {
+    animation: none;
+  }
+}
+
+/* 1 ページぶんの可視マスク。すべて同じ stage 上へ重ね、active frame だけ
+   visible にする。inactive flow も display:none にはせず layout/measurement
+   可能な状態を維持する。
+   PV-READ-1: inset は固定安全域＋選択余白の実効値。clientWidth/Height が
+   そのまま CSS Columns の frame 実測になる。 */
+.page-viewer-window__page-frame {
+  position: absolute;
+  top: var(--pv-reading-margin-top, 48px);
+  right: var(--pv-reading-margin-inline, 32px);
+  bottom: var(--pv-reading-margin-bottom, 48px);
+  left: var(--pv-reading-margin-inline, 32px);
+  width: auto;
+  height: auto;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.page-viewer-window__page-frame[data-page-sequence-active="true"] {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* CSS multicol container。column-width / column-gap / padding / width / height /
+   transform は `usePageViewerColumnLayout.ts` が inline style で書く (実測値
+   由来のため CSS 側に固定値を持たない)。column-fill: auto は必須 — balance
+   されると 1 column = 1 ページの前提が崩れる。
+
+   PV-COL-10: editor 本文 (`.editor-core-host .ProseMirror`, `src/styles.css`
+   BETA-TY1) と同じ組版指定をここへ集約する。すべて継承プロパティなので、
+   flow root 1 箇所への指定で paragraph/heading/list/blockquote/... すべてに
+   及ぶ (editor 側が `.ProseMirror` 直下に 1 回だけ書いているのと同じ設計)。
+   これらは「行がどこで折り返すか」を変えるだけで、column fragmentation は
+   常に確定済みの line box の境界で起こる (§1 の不変条件: page boundary は
+   CSS multi-column の column boundary が正本) ため、CSS Columns の
+   no-clipping 不変条件とは独立している。 */
+.page-viewer-window__page-flow {
+  box-sizing: border-box;
+  column-fill: auto;
+  line-break: strict;
+  word-break: normal;
+  overflow-wrap: break-word;
+  hanging-punctuation: first allow-end;
+  text-wrap: pretty;
+}
+
+/* PV-COL-10: editor と同じ縦書き均等揃え (`BETA-TY1`)。継承プロパティなので、
+   TOC / code block / task 行など「justify させたくない」要素は、対象の
+   ルール側で個別に `text-align` を明示して上書きする (下記)。directive の
+   align-center/-end は既存どおり自身の class で明示済みのため対象外、
+   outline panel / header はそもそもこの flow の子孫ではないため対象外。 */
+.page-viewer-window__body[data-writing-mode="vertical-rl"] .page-viewer-window__page-flow {
+  text-align: justify;
+  text-align-last: auto;
+  text-justify: inter-character;
+}
+
+/* PV-COL-10 (BETA-TY-VLB1 相当): Chromium 縦書き inline 境界の列末巻き戻り
+   回避。段落末の全角閉じ括弧等が列末に来たときに inline 境界まで折り返し
+   位置が巻き戻る Chromium バグの回避策 — 段落末に generated content の
+   ゼロ幅スペースで折り返し機会を与える (詳細: editor 側の実装コメント、
+   `docs/vertical-inline-boundary-line-break-investigation.md`)。
+   - generated content なので DOM text / clipboard には混入しない。
+   - 空 paragraph (`<p><br></p>` だけの内容) は対象外にする。editor 側は PM
+     由来の `br.ProseMirror-trailingBreak` class で判定するが、viewer の
+     read-only renderer にはその class が無い (`renderParagraph()` は
+     content.size === 0 のとき素の `<br>` を描く) ため、`:has(> br:only-child)`
+     (paragraph の子が br 1 個だけ) で近似する。これは「本文が無いので閉じ
+     括弧問題が起きない」場合を正しく拾う (真の空 paragraph に加え、内容が
+     hardBreak だけの縮退ケースも同様に対象外になるが、どちらも問題ない)。 */
+.page-viewer-window__body[data-writing-mode="vertical-rl"] .page-viewer-window__paragraph::after {
+  content: "\200B" / "";
+}
+
+.page-viewer-window__body[data-writing-mode="vertical-rl"]
+  .page-viewer-window__paragraph:has(> br:only-child)::after {
+  content: none;
+}
+
+/* `:::page-break` 由来の breakBefore (CSS columns mode)。ページ境界そのものが
+   表現になるため視覚装飾は付けない (`__block--break-before` の破線 divider とは
+   別 class。renderPageViewerFlowBlock の breakBeforeStyle option で切り替える)。 */
+.page-viewer-window__block--column-break-before {
+  break-before: column;
+}
+
+.page-viewer-window__section {
+  margin-block-end: 2em;
+}
+
+.page-viewer-window__section--blank {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+/* The per-top-level-block wrapper itself never contributes spacing — each
+   typed inner element below (paragraph/heading/list/blockquote/codeBlock/
+   directive) owns its own margin-block-end, matching the editor's own rule
+   set (`.editor-surface .ProseMirror p { margin: 0 }` for plain paragraphs
+   in the default obsidian-paragraph flow, with only headings/lists/quotes/
+   code blocks getting real spacing). Without this split, every top-level
+   block — including plain paragraphs — got a uniform ~1-line gap here that
+   the editor never shows for ordinary body text. */
+.page-viewer-window__block {
+  margin: 0;
+}
+
+.page-viewer-window__block--break-before {
+  padding-block-start: 1.4em;
+  border-block-start: 1px dashed var(--text-muted, #cfc8ae);
+}
+
+/* ----------------------------------------------------------
+   Rich content (`pageViewerNodeRenderer.tsx`) — minimal, read-only subset
+   of the editor's own block/mark styling (`src/styles.css`), reusing the
+   same doc-theme CSS variables `deriveDocThemeTokens()` already injects on
+   `.page-viewer-window` (`--text-heading` / `--text-secondary` /
+   `--text-muted` / `--accent-link` / `--ruby-text` / `--highlight-bg` /
+   `--blockquote-*` / `--code-*`), so colors stay in sync with Display
+   Settings / document theme without redefining a palette here.
+   ---------------------------------------------------------- */
+
+/* Plain body paragraphs stay tightly packed (zero gap), matching the
+   editor's default obsidian-paragraph look — spacing between paragraphs
+   comes from line-height alone, not a paragraph margin. */
+.page-viewer-window__paragraph {
+  margin: 0;
+}
+
+/* Page Viewer image: source は scoped nyoze-img URL だけ。画像自身を回転せず、
+   logical max size で本文 column / CSS columns からはみ出させない。inline 軸は
+   page pitch ではなく、gap/2 の両端 padding を除いた column-width を使う。 */
+.page-viewer-window__image-wrapper {
+  display: inline-block;
+  max-inline-size: var(--page-viewer-content-inline-size, 100%);
+  max-block-size: var(--page-viewer-frame-block-size, 100%);
+  vertical-align: middle;
+  line-height: 0;
+  break-inside: avoid;
+}
+
+.page-viewer-window__image {
+  display: block;
+  inline-size: auto;
+  block-size: auto;
+  max-inline-size: var(--page-viewer-content-inline-size, 100%);
+  max-block-size: var(--page-viewer-frame-block-size, 100%);
+  object-fit: contain;
+}
+
+.page-viewer-window__image-placeholder {
+  display: inline-block;
+  max-inline-size: 100%;
+  padding-inline: 0.35em;
+  border-inline-start: 1px solid var(--text-secondary, currentColor);
+  color: var(--text-secondary, var(--text-primary));
+  line-height: normal;
+}
+
+.page-viewer-window__heading {
+  margin: 0;
+  margin-block-end: var(--pv-heading-margin-after, 0.45em);
+  font-weight: 700;
+  line-height: 1.35;
+  font-family: var(--pv-heading-font-family, var(--pv-font-family));
+  color: var(--text-heading, var(--text-primary));
+  border-block-end-style: solid;
+  border-block-end-width: 0;
+  border-block-end-color: color-mix(in srgb, var(--text-heading, var(--text-primary)) 34%, var(--bg-surface) 66%);
+}
+
+/* PV-SET-1A: 見出し配置 (横書き=水平、縦書き=行内軸方向) は editor と同じ、
+   writing-mode ごとの独立 CSS variable で分ける。 */
+.page-viewer-window__body[data-writing-mode="horizontal-tb"] .page-viewer-window__heading {
+  text-align: var(--pv-heading-align-h, start);
+}
+
+.page-viewer-window__body[data-writing-mode="vertical-rl"] .page-viewer-window__heading {
+  text-align: var(--pv-heading-align-v, start);
+}
+
+.page-viewer-window__heading--level-1 { font-size: 1.55em; border-block-end-width: calc(var(--pv-heading-divider-h1, 0) * 1px); }
+.page-viewer-window__heading--level-2 { font-size: 1.35em; border-block-end-width: calc(var(--pv-heading-divider-h2, 0) * 1px); }
+.page-viewer-window__heading--level-3 { font-size: 1.2em; border-block-end-width: calc(var(--pv-heading-divider-h3, 0) * 1px); }
+.page-viewer-window__heading--level-4 { font-size: 1.1em; border-block-end-width: calc(var(--pv-heading-divider-h4, 0) * 1px); }
+.page-viewer-window__heading--level-5 { font-size: 1.05em; border-block-end-width: calc(var(--pv-heading-divider-h5, 0) * 1px); }
+.page-viewer-window__heading--level-6 { font-size: 1em; border-block-end-width: calc(var(--pv-heading-divider-h6, 0) * 1px); }
+
+.page-viewer-window__list {
+  margin: 0;
+  margin-block-end: 1.2em;
+  padding-inline-start: 1.6em;
+}
+
+.page-viewer-window__list-item {
+  margin-block-end: 0.35em;
+}
+
+/* Nested lists inside a list item must not also carry the outer list's
+   trailing margin, or the following sibling item gets pushed away. */
+.page-viewer-window__list-item > .page-viewer-window__list {
+  margin-block-end: 0;
+}
+
+/* ----------------------------------------------------------
+   Task list items (`- [ ]` / `- [x]`) — a real, disabled/readOnly <input>
+   (not editor-state-mutating) laid out in a flex row with the *first*
+   paragraph's inline content only, so checkbox and body text sit on the
+   same line/column start. `flex-direction: row`'s default main axis is the
+   writing mode's inline axis, so this naturally follows vertical-rl's
+   top-to-bottom line direction too, with no extra override needed.
+   Additional paragraphs / nested lists after the first render as normal
+   block children below the row (unchanged from a plain list item).
+   ---------------------------------------------------------- */
+
+.page-viewer-window__list-item--task {
+  list-style: none;
+}
+
+.page-viewer-window__task-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  /* PV-COL-10: vertical-rl flow の `text-align: justify` を継承させない
+     (task 本文が複数行に折り返したときに justify で間延びして見えるのを防ぐ)。 */
+  text-align: start;
+}
+
+.page-viewer-window__checkbox {
+  flex: 0 0 auto;
+}
+
+.page-viewer-window__list-item--task[data-task-checked="true"] .page-viewer-window__task-content {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.page-viewer-window__blockquote {
+  margin: 0;
+  margin-block-end: 1.2em;
+  padding-block: 0.3em;
+  padding-inline: 0.6em 0.9em;
+  border-inline-start: 2px solid var(--blockquote-rule, var(--text-muted, #cfc8ae));
+  border-radius: 6px;
+  background: var(--blockquote-bg, transparent);
+  color: var(--blockquote-text, var(--text-secondary, var(--text-primary)));
+}
+
+.page-viewer-window__blockquote .page-viewer-window__paragraph + .page-viewer-window__paragraph {
+  margin-block-start: 0.8em;
+}
+
+/* Editor と同じ nested blockquote の末尾余白補正。内側 quote が最後の child
+   のとき、その margin-block-end まで積み上げると多重引用の末尾に空の引用行の
+   ような帯が見える。親 quote の padding-block-end が閉じ側の余白を持つ。 */
+.page-viewer-window__blockquote .page-viewer-window__blockquote:last-child {
+  margin-block-end: 0;
+}
+
+.page-viewer-window__code-block {
+  margin: 0;
+  margin-block-end: 1.2em;
+  padding: 0.6em 0.8em;
+  border: 1px solid var(--code-block-border, var(--text-muted, #cfc8ae));
+  border-radius: 8px;
+  background: var(--code-block-bg, transparent);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  /* Vertical writing: Latin/code glyphs read sideways rather than stacked
+     one-per-line, matching the editor's own inline-code convention. */
+  text-orientation: sideways;
+  /* PV-COL-10: vertical-rl flow の `text-align: justify` を継承させない —
+     monospace のコード行は文字間隔が伸縮すると読みにくくなる。 */
+  text-align: start;
+}
+
+/* Numeric weight, not the `bold` keyword: some CJK Mincho font stacks ship
+   no true bold face, so the UA default `font-weight: bolder` (a relative
+   keyword) can compute to the same visual weight as regular text. A fixed
+   700 forces a visibly heavier weight (real or browser-synthesized). */
+.page-viewer-window__mark-bold {
+  font-weight: 700;
+}
+
+.page-viewer-window__mark-code {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  padding: 0 0.2em;
+  border: 1px solid var(--code-inline-border, var(--text-muted, #cfc8ae));
+  border-radius: 3px;
+  background: var(--code-inline-bg, transparent);
+  text-orientation: sideways;
+}
+
+.page-viewer-window__highlight {
+  background: var(--highlight-bg, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.05em;
+}
+
+.page-viewer-window__underline {
+  text-decoration: underline;
+}
+
+/* Japanese underline (傍線) is conventionally drawn to the right of the
+   glyphs in vertical text, not the left (the vertical-rl browser default). */
+.page-viewer-window__body[data-writing-mode="vertical-rl"] .page-viewer-window__underline {
+  text-underline-position: right;
+}
+
+.page-viewer-window__link {
+  color: var(--accent-link, var(--text-heading, currentColor));
+  text-decoration: underline;
+  /* Click is intentionally inert (requirement: link safety, no navigation
+     from inside the viewer) — no pointer cursor implying it's actionable. */
+  cursor: default;
+}
+
+.page-viewer-window__hr {
+  margin: 0.6em 0;
+  border: none;
+  border-block-start: 1px solid var(--text-muted, #cfc8ae);
+}
+
+.page-viewer-window__ruby rt {
+  font-size: var(--pv-ruby-size, 0.5em);
+  color: var(--ruby-text, var(--text-secondary, var(--text-primary)));
+}
+
+.page-viewer-window__tcy {
+  text-combine-upright: all;
+  -webkit-text-combine: horizontal;
+}
+
+.page-viewer-window__unsupported-block,
+.page-viewer-window__unsupported-inline {
+  color: var(--text-muted, var(--text-primary));
+}
+
+/* ----------------------------------------------------------
+   Nyoze custom block directive (`:::align-center` / `:::align-end` /
+   `:::indent-N` / `:::style-<id>`) — viewer-only class names, deliberately
+   independent of the editor's own `.nyoze-directive-block*` (`src/styles.css`)
+   so this stylesheet stays self-contained. Same visual intent as the editor:
+   align uses logical `text-align` (writing-mode aware), indent uses logical
+   `padding-inline-start` on the reading-direction leading edge, style is a
+   minimal palette-only treatment reusing the doc-theme variables above.
+   ---------------------------------------------------------- */
+
+.page-viewer-window__directive {
+  margin-block: 0.4em;
+}
+
+.page-viewer-window__directive--align-center {
+  text-align: center;
+}
+
+.page-viewer-window__directive--align-end {
+  text-align: end;
+}
+
+.page-viewer-window__directive[data-nyoze-kind="indent"] {
+  --nyoze-directive-indent-step: 1.4em;
+  padding-inline-start: calc(
+    var(--nyoze-directive-indent-step) * var(--nyoze-directive-indent-level, 1)
+  );
+}
+
+.page-viewer-window__directive--style-letter {
+  padding-block: 0.3em;
+  padding-inline: 0.6em;
+  color: var(--text-secondary, var(--text-primary));
+  line-height: 1.9;
+}
+
+.page-viewer-window__directive--style-muted {
+  color: var(--text-muted, var(--text-primary));
+  font-size: 0.92em;
+}
+
+.page-viewer-window__directive--style-heading {
+  color: var(--text-heading, var(--text-primary));
+  font-size: 1.15em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+/* Unknown style id: still shown, just without any special treatment (the
+   style id itself is preserved via data-nyoze-directive for inspection). */
+.page-viewer-window__directive--style-unknown {
+  color: inherit;
+}
+
+.page-viewer-window__blank-page {
+  display: none;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.page-viewer-window__blank-page[data-blank-page-active="true"] {
+  display: block;
+}
+
+/* PV-READ-3B: PageModelのfixedSyntheticPage。CSS Columns flowへ入れず、実効
+   page-frameと同じ矩形だけを使う。長文もfont-sizeを変えずframeでclipし、
+   frame / metrics / canonical flow transformには影響させない。 */
+.page-viewer-window__simple-cover {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: stretch;
+  box-sizing: border-box;
+  color: var(--text-primary, #1d1b18);
+}
+
+.page-viewer-window__simple-cover-group {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  gap: 1em;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-break: strict;
+  word-break: normal;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="horizontal-tb"]
+  .page-viewer-window__simple-cover-group {
+  writing-mode: horizontal-tb;
+  flex-direction: column;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"]
+  .page-viewer-window__simple-cover-group {
+  writing-mode: vertical-rl;
+  flex-direction: row;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-layout="normal"]
+  .page-viewer-window__simple-cover-group {
+  justify-content: space-between;
+  align-items: stretch;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-group {
+  justify-content: center;
+  align-items: center;
+}
+
+/* 縦書きnormalはtitleを物理右端に固定し、その自然幅のすぐ左へauthorを置く。
+   authorはflex-shrinkさせず、長いtitleだけが残り幅へ縮む（font-sizeは不変）ため、
+   titleの位置・authorの幅・両者の非重なりを同時に維持する。 */
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="normal"]
+  .page-viewer-window__simple-cover-group {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  align-items: stretch;
+  writing-mode: horizontal-tb;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="normal"]
+  .page-viewer-window__simple-cover-title-group {
+  writing-mode: vertical-rl;
+  flex: 0 1 auto;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="normal"]
+  .page-viewer-window__simple-cover-credit-group {
+  writing-mode: vertical-rl;
+  flex: 0 0 auto;
+}
+
+.page-viewer-window__simple-cover-title-group,
+.page-viewer-window__simple-cover-credit-group {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-title-group,
+.page-viewer-window__simple-cover[data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-credit-group {
+  text-align: center;
+}
+
+.page-viewer-window__simple-cover-title {
+  margin: 0;
+  font-family: var(--pv-heading-font-family, var(--pv-font-family));
+  font-size: 2.4em;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--text-primary, #1d1b18);
+  text-align: start;
+  border: 0;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.page-viewer-window__simple-cover-credit {
+  margin: 0;
+  color: var(--text-secondary, var(--text-primary, #1d1b18));
+  text-align: end;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-title,
+.page-viewer-window__simple-cover[data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-credit {
+  text-align: center;
+}
+
+/* 縦書きcenterはtitleを物理上端・左右中央、authorを物理下端・左右中央へ
+   分離する。通常長では両方を縦組のまま置き、自然寸法probeがtitle+authorを
+   同じframe inline sizeへ収められないと判定したときだけauthorを横書き下端帯
+   へ切り替える。 */
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: 0;
+  column-gap: 1em;
+  writing-mode: horizontal-tb;
+  justify-content: stretch;
+  align-items: stretch;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-title-group {
+  grid-column: 1;
+  grid-row: 1;
+  writing-mode: vertical-rl;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="center"]
+  .page-viewer-window__simple-cover-credit-group {
+  grid-column: 1;
+  grid-row: 3;
+  writing-mode: vertical-rl;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="center"][data-simple-cover-author-layout="horizontal-footer"]
+  .page-viewer-window__simple-cover-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* 横書きauthorの実際の行高（複数行ならその合計）だけを下端に確保し、
+     残りをtitleの折り返し領域として使う。固定比率の下端帯は持たない。 */
+  grid-template-rows: minmax(0, 1fr) max-content;
+  gap: 1em;
+  writing-mode: horizontal-tb;
+  justify-content: stretch;
+  align-items: stretch;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="center"][data-simple-cover-author-layout="horizontal-footer"]
+  .page-viewer-window__simple-cover-title-group {
+  grid-column: 1;
+  grid-row: 1;
+  writing-mode: vertical-rl;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.page-viewer-window__simple-cover[data-simple-cover-writing-mode="vertical-rl"][data-simple-cover-layout="center"][data-simple-cover-author-layout="horizontal-footer"]
+  .page-viewer-window__simple-cover-credit-group {
+  grid-column: 1;
+  grid-row: 2;
+  writing-mode: horizontal-tb;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  text-align: center;
+}
+
+.page-viewer-window__simple-cover-probes {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.page-viewer-window__simple-cover-probe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  writing-mode: vertical-rl;
+  inline-size: max-content;
+  block-size: max-content;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.page-viewer-window__simple-cover-probe--title {
+  font-family: var(--pv-heading-font-family, var(--pv-font-family));
+  font-size: 2.4em;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.page-viewer-window__simple-cover-probe--author {
+  color: var(--text-secondary, var(--text-primary, #1d1b18));
+}
+
+/* ----------------------------------------------------------
+   Synthetic sections (documentInfo / bookInfo / chapterInfo / toc)
+   — 本文と同じ writing-mode / 色 / フォントを継承する。横書き固定や
+   別テーマ色は付けない。HTML export の document-info / toc に近い余白
+   と地付き (text-align: end) を論理プロパティで再現する。
+   ---------------------------------------------------------- */
+
+.page-viewer-window__section--synthetic {
+  /* section 間の一律 margin は synthetic では大きすぎるので、内側の
+     info / toc ブロックが余白を持つ。
+     PV-COL-10: vertical-rl flow の `text-align: justify` を継承させない
+     (documentInfo/bookInfo/chapterInfo/toc をまとめて上書き — 個々の
+     `.info-credit` の `text-align: end` や `.toc-link` の `text-align: start`
+     はこの要素より内側の明示指定なのでそのまま優先される)。 */
+  margin-block-end: 0;
+  text-align: start;
+}
+
+.page-viewer-window__info {
+  margin-block-end: 5.7em;
+  break-inside: avoid;
+}
+
+.page-viewer-window__info--chapter {
+  /* 章ファイル情報は文書情報より控えめな見出しサイズにする。 */
+  margin-block-end: 5.7em;
+}
+
+.page-viewer-window__info-entry {
+  margin-block-end: 0.6em;
+}
+
+.page-viewer-window__info-title {
+  font-weight: 600;
+  font-size: 1.25em;
+  color: var(--text-heading, var(--text-primary));
+  margin-block-end: 0.45em;
+}
+
+.page-viewer-window__info--chapter .page-viewer-window__info-title {
+  font-size: 1.1em;
+}
+
+.page-viewer-window__info-credit {
+  margin: 0;
+  font-size: 0.92em;
+  color: var(--text-secondary, var(--text-primary));
+  text-align: end;
+}
+
+/* PV-COL-10: 本文より一回り小さくし、heading/list 本文と混同しない補助色へ
+   寄せる。`font-size` はコンテナに 1 箇所だけ指定し、内側の em ベースの
+   ルール (toc-heading の 1.05em 等) はこのコンテナ基準で相対的に縮む。
+   構造・jump 動作 (`onTocEntryActivate` 経由) は変更しない。 */
+.page-viewer-window__toc {
+  display: block;
+  margin-block-end: 3.8em;
+  break-inside: avoid;
+  font-size: 0.86em;
+}
+
+.page-viewer-window__toc-heading {
+  font-weight: 600;
+  font-size: 1.05em;
+  /* 実見出し (`--text-heading`) と混同しないよう、補助色 (`--text-secondary`)
+     へ寄せる — 「目次」という label 自体が本文見出しに見えないようにする。 */
+  color: var(--text-secondary, var(--text-primary));
+  margin-block-end: 0.6em;
+}
+
+.page-viewer-window__toc-list {
+  margin: 0;
+  padding-inline-start: 1em;
+  list-style: none;
+}
+
+.page-viewer-window__toc-item {
+  margin-block: 0.15em;
+  color: var(--text-secondary, var(--text-primary));
+}
+
+/* TOC は本文ではなく、現在の viewer 内で見出しへ移動する action。色は本文 link
+   と同じ theme token を使い、writing-mode を継承したまま underline / focus ring
+   を論理方向で出す。 */
+.page-viewer-window__toc-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent-link, var(--text-heading, currentColor));
+  font: inherit;
+  line-height: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 0.12em;
+  cursor: pointer;
+}
+
+.page-viewer-window__toc-link:hover {
+  color: var(--text-heading, var(--accent-link, currentColor));
+  text-decoration-thickness: 0.12em;
+}
+
+.page-viewer-window__toc-link:focus-visible {
+  outline: 2px solid var(--accent-link, var(--text-heading, currentColor));
+  outline-offset: 0.18em;
+}
+
+.page-viewer-window__body[data-writing-mode="vertical-rl"] .page-viewer-window__toc-link {
+  text-underline-position: right;
+}
+
+/* 見出しレベル別の段階字下げ。物理 padding-left は使わず、縦書きでも
+   「読み進み方向の手前」へ字下げする。 */
+.page-viewer-window__toc-item--level-1 { padding-inline-start: 0; }
+.page-viewer-window__toc-item--level-2 { padding-inline-start: 1em; }
+.page-viewer-window__toc-item--level-3 { padding-inline-start: 2em; }
+.page-viewer-window__toc-item--level-4 { padding-inline-start: 3em; }
+.page-viewer-window__toc-item--level-5 { padding-inline-start: 4em; }
+.page-viewer-window__toc-item--level-6 { padding-inline-start: 5em; }
+
+/* ----------------------------------------------------------
+   Outline side panel — Reader Chrome (overlay 化): a read-only utility
+   surface that overlays the inline-end edge of the body as a
+   `position: absolute` overlay (sibling of body inside `.content`), rather
+   than a flex sibling that shares body's width. This means opening/closing
+   it can never change body's own `clientWidth`/`clientHeight` (structurally
+   guaranteed — body's flex sizing no longer has a competing sibling to
+   share space with, panel or not). `z-index: 2` puts it above body's own
+   page content but below the scrubber (`z-index: 3`) and header
+   (`z-index: 4`), so those two never get hidden behind the panel.
+
+   Background is a semi-transparent tint over `--pv-chrome-panel-bg` (NOT
+   `opacity` on the whole panel, which would also fade the panel's own text)
+   so body content shows through just slightly, while panel text stays fully
+   legible (text color rules below have no opacity of their own).
+   `backdrop-filter: blur(...)` is a progressive enhancement for extra
+   contrast against whatever page content sits behind the panel; the
+   semi-opaque background color alone is already the fallback for
+   environments without `backdrop-filter` support, so it's never the sole
+   thing keeping panel text readable.
+
+   Always laid out horizontal-tb, like the header/scrubber (same "app chrome
+   stays horizontal" convention already used above), and always scrolls
+   internally (`overflow-y: auto`) — it never affects body pagination or
+   turns the body itself back into a native scroller.
+
+   PV-COL-13: open/close uses `transform: translateX()` only (no width /
+   height / flex / opacity transition). The panel stays mounted; closed
+   state slides to the inline-end side (`translateX(100%)` — panel is always
+   horizontal-tb with `inset-inline-end: 0`, so physical right = inline-end).
+   `padding-block-start` syncs with `--pv-header-height` so the first outline
+   item is never hidden under the header overlay.
+   ---------------------------------------------------------- */
+
+.page-viewer-window__outline-panel {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  width: min(280px, 32vw);
+  min-width: 200px;
+  writing-mode: horizontal-tb;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-block-start: calc(var(--pv-header-height) + 10px);
+  padding-block-end: 18px;
+  padding-inline: 16px;
+  border-inline-start: 1px solid color-mix(in srgb, var(--text-primary, #000) 14%, transparent);
+  background: var(--pv-chrome-panel-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-size: 0.86rem;
+  line-height: 1.6;
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+  pointer-events: none;
+}
+
+.page-viewer-window__outline-panel.is-open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-viewer-window__outline-panel {
+    transition: none;
+  }
+}
+
+.page-viewer-window__outline-empty {
+  color: var(--text-muted, var(--text-secondary, var(--text-primary)));
+}
+
+.page-viewer-window__outline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.page-viewer-window__outline-item {
+  margin-block: 0.1em;
+}
+
+/* Book chapter boundary (要件: 章境界を視覚的に区別してよい、SoT は変えない).
+   A subtle rule + extra top space above the first heading of a new chapter —
+   never a duplicate list item, never sourced from anything but the existing
+   `PageAnchor.chapterIndex` already carried by heading anchors. */
+.page-viewer-window__outline-item[data-outline-chapter-boundary="true"] {
+  margin-block-start: 0.9em;
+  padding-block-start: 0.6em;
+  border-block-start: 1px solid color-mix(in srgb, var(--text-primary, #000) 12%, transparent);
+}
+
+.page-viewer-window__outline-link {
+  display: block;
+  width: 100%;
+  appearance: none;
+  border: 0;
+  padding: 0.2em 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.page-viewer-window__outline-link:hover {
+  color: var(--accent-link, var(--text-heading, currentColor));
+  text-decoration: underline;
+}
+
+.page-viewer-window__outline-link:focus-visible {
+  outline: 2px solid var(--accent-link, var(--text-heading, currentColor));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* 見出しレベル別の段階字下げ。TOC synthetic section と同じ論理
+   `padding-inline-start` の考え方 (物理 `padding-left` は使わない) だが、panel
+   自身は常に horizontal-tb 固定なので、ここでの inline-start は常に「左」。 */
+.page-viewer-window__outline-item--level-1 { padding-inline-start: 0; font-weight: 600; }
+.page-viewer-window__outline-item--level-2 { padding-inline-start: 1em; }
+.page-viewer-window__outline-item--level-3 { padding-inline-start: 2em; }
+.page-viewer-window__outline-item--level-4 { padding-inline-start: 3em; }
+.page-viewer-window__outline-item--level-5 { padding-inline-start: 4em; }
+.page-viewer-window__outline-item--level-6 { padding-inline-start: 5em; }

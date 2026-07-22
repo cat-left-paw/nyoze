@@ -9,7 +9,11 @@
 !/vite.config.ts
 !/electron-builder.json5
 !/README.md
+!/README.en.md
 !/MANUAL.md
+!/docs/
+!/docs/frontmatter-reference.md
+!/docs/document-type-writing-direction-audit-2026-06.md
 !/latest.json
 !/nyoze_shortcuts_ja.md
 !/nyoze_shortcuts_en.md

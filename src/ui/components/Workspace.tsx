@@ -13,17 +13,30 @@ import type {
 } from "../../settings/types";
 import { deriveDocThemeTokens } from "../../theme/deriveDocThemeTokens";
 import { deriveSyntaxThemeTokens } from "../../theme/deriveSyntaxThemeTokens";
-import type { FileExplorerVisibleEntry } from "../hooks/useFileExplorer";
+import type {
+  FileExplorerLeftPaneTab,
+  FileExplorerProjectsPaneView,
+  FileExplorerRegistrationApi,
+  FileExplorerVisibleEntry,
+} from "../hooks/useFileExplorer";
+import type { ProjectListUiState } from "../hooks/useProjectList";
+import type { DocumentContextInfo } from "../../project/documentContextRole";
 import type { EditorTab } from "../hooks/useAppUiState";
 import { createUiTextGetter } from "../i18n/uiText";
 import type { SourceModeController } from "../hooks/useSourceModeController";
 import type { TypewriterRuntimeRef } from "../hooks/typewriterRuntimeRef";
 import { resolveVisibleOutlineItems } from "../utils/outlineVisibility";
+import { OutlineModeToggle, type OutlineMode } from "./OutlineModeToggle";
 import { FileExplorerPane } from "./FileExplorerPane";
 import { FrontmatterView } from "./FrontmatterView";
+import type { ProjectDocumentStartDisplay } from "../../project/projectDocumentStartDisplay";
+import { ProjectDocumentStartViews } from "./ProjectDocumentStartViews";
 import { SourceModeEditor } from "./SourceModeEditor";
+import { RightPaneTabBar } from "./RightPaneTabBar";
+import type { FileExplorerRole } from "../../project/fileExplorerRoles";
+import { EditorTabStrip } from "./EditorTabStrip";
 
-type RightPaneTab = "outline" | "document" | "theme";
+type RightPaneTab = "outline" | "document" | "notes" | "project" | "theme";
 type ActiveDocumentInfo = {
   characterCount: number;
   createdAtText: string;
@@ -32,6 +45,10 @@ type ActiveDocumentInfo = {
   pathTitle: string;
   documentTypeLabel: string;
   eolKind: "lf" | "crlf";
+  titleText: string;
+  authorText: string;
+  translatorText: string;
+  writingModeLabel: string;
 };
 
 type OutlinePreviewMode = "context" | "hover";
@@ -58,6 +75,12 @@ type WorkspaceProps = {
   rightPaneOpen: boolean;
   rightWidth: number;
   fileExplorerDir: string | null;
+  fileExplorerLeftPaneTab: FileExplorerLeftPaneTab; fileExplorerProjectsPaneView: FileExplorerProjectsPaneView;
+  onFileExplorerSelectLibraryTab: () => void; onFileExplorerShowProjectList: () => void;
+  fileExplorerProjectListState: ProjectListUiState; onFileExplorerOpenProjectRoot: (projectRoot: string) => void;
+  fileExplorerShowLibraryOnboarding: boolean; onFileExplorerOpenLibraryManager: () => void;
+  fileExplorerExternalFileActive: boolean; fileExplorerExternalFileName: string;
+  fileExplorerDocumentContext: DocumentContextInfo;
   fileExplorerRootLoaded: boolean;
   fileExplorerEntries: FileExplorerVisibleEntry[];
   fileExplorerClipboardMode: "cut" | "copy" | null;
@@ -66,17 +89,27 @@ type WorkspaceProps = {
   activeDocumentInfo: ActiveDocumentInfo;
   canFileExplorerPaste: boolean;
   tabs: EditorTab[];
+  /**
+   * `filePath -> FileExplorerRole` の display-only map（`.nyoze/books.json` v3 正本）。
+   * タブアイコン表示にだけ使い、`EditorTab` の保存状態には持たせない。
+   */
+  tabRoles?: ReadonlyMap<string, FileExplorerRole>;
   activeTabId: string;
   fullPlainEditActive: boolean;
+  paragraphPlainModeActive: boolean;
   fullPlainEditValue: string;
   fullPlainEditError: string;
   /** Source Mode 起動時、CodeMirror を初期スクロールするドキュメントオフセット。 */
   fullPlainEditInitialScrollOffset: number | null;
   rubyVisible: boolean;
   frontmatterVisible: boolean;
-  frontmatterShowAuthors: boolean;
+  /** FrontmatterView 用 — Project/standalone の有効値（App.tsx で計算）。 */
+  frontmatterShowTitle: boolean;
+  /** FrontmatterView 用 — standalone の有効値（App.tsx で計算）。 */
+  frontmatterViewShowAuthors: boolean;
   frontmatterShowTranslators: boolean;
   frontmatterShowRoleLabels: boolean;
+  projectDocumentStartDisplay: ProjectDocumentStartDisplay;
   writingMode: WritingMode;
   effectiveLineBreakPolicy: LineBreakPolicy;
   editorInlineHintMessage: string | null;
@@ -92,6 +125,8 @@ type WorkspaceProps = {
   onDividerMouseDown: (side: "left" | "right", e: ReactMouseEvent) => void;
   onFileExplorerCreateNote: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerCreateFolder: (entry: FileExplorerVisibleEntry | null) => void;
+  onFileExplorerCreateProjectForFolder: (entry: FileExplorerVisibleEntry | null) => void;
+  fileExplorerRegistration: FileExplorerRegistrationApi;
   onFileExplorerRenameEntry: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerDeleteEntry: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerRevealInFileManager: (
@@ -119,12 +154,27 @@ type WorkspaceProps = {
   onEmptyUntitledSurfaceClick?: () => void;
   /** BETA-DISP1: resolved caret color string for --editor-caret-color */
   caretColor: string;
+  /** Task 2-4: hide the WYSIWYG native caret when the pseudo caret is enabled. */
+  pseudoCaretEnabled: boolean;
   useEditorArrowPointer: boolean;
   /** Live Typewriter + hidden macOS clamp flags for Source Mode (CodeMirror). */
   typewriterRuntimeRef?: TypewriterRuntimeRef;
   searchBarSlot?: ReactNode;
   documentSettingsSlot?: ReactNode;
+  notesPaneSlot?: ReactNode;
+  projectPaneSlot?: ReactNode;
+  /** Outline 拡張: Book全体モードで表示する read-only スロット。 */
+  bookOutlineSlot?: ReactNode;
   themeStudioSlot?: ReactNode;
+  /** 中央エディタ章境界ナビ（章頭=前章 / 章末=次章）の表示専用オーバーレイ。 */
+  chapterBoundaryNavSlot?: ReactNode;
+  /**
+   * タブ列右端（右ペインが開いていればそのすぐ左側）に固定表示する、非装飾系の
+   * エディタアクション（書字方向 / 検索 / ルビ表示 / Paragraph Plain / Source Mode /
+   * Typewriter・Visual Focus / Display Settings / Page Viewer）。`null` / `undefined`
+   * のときは actions 領域自体を描画しない（toolbar 非表示時など）。
+   */
+  editorTabActionsSlot?: ReactNode;
 };
 
 export function Workspace({
@@ -137,6 +187,12 @@ export function Workspace({
   rightPaneOpen,
   rightWidth,
   fileExplorerDir,
+  fileExplorerLeftPaneTab, fileExplorerProjectsPaneView,
+  onFileExplorerSelectLibraryTab, onFileExplorerShowProjectList,
+  fileExplorerProjectListState, onFileExplorerOpenProjectRoot,
+  fileExplorerShowLibraryOnboarding, onFileExplorerOpenLibraryManager,
+  fileExplorerExternalFileActive, fileExplorerExternalFileName,
+  fileExplorerDocumentContext,
   fileExplorerRootLoaded,
   fileExplorerEntries,
   fileExplorerClipboardMode,
@@ -145,16 +201,20 @@ export function Workspace({
   activeDocumentInfo,
   canFileExplorerPaste,
   tabs,
+  tabRoles,
   activeTabId,
   fullPlainEditActive,
+  paragraphPlainModeActive,
   fullPlainEditValue,
   fullPlainEditError,
   fullPlainEditInitialScrollOffset,
   rubyVisible,
   frontmatterVisible,
-  frontmatterShowAuthors,
+  frontmatterShowTitle,
+  frontmatterViewShowAuthors,
   frontmatterShowTranslators,
   frontmatterShowRoleLabels,
+  projectDocumentStartDisplay,
   writingMode,
   effectiveLineBreakPolicy,
   editorInlineHintMessage,
@@ -170,6 +230,8 @@ export function Workspace({
   onDividerMouseDown,
   onFileExplorerCreateNote,
   onFileExplorerCreateFolder,
+  onFileExplorerCreateProjectForFolder,
+  fileExplorerRegistration,
   onFileExplorerRenameEntry,
   onFileExplorerDeleteEntry,
   onFileExplorerRevealInFileManager,
@@ -194,13 +256,20 @@ export function Workspace({
   frontmatterFields,
   onEmptyUntitledSurfaceClick,
   caretColor,
+  pseudoCaretEnabled,
   useEditorArrowPointer,
   typewriterRuntimeRef,
   searchBarSlot,
   documentSettingsSlot,
+  notesPaneSlot,
+  projectPaneSlot,
+  bookOutlineSlot,
   themeStudioSlot,
+  chapterBoundaryNavSlot,
+  editorTabActionsSlot,
 }: WorkspaceProps) {
   const t = createUiTextGetter(uiLanguageMode);
+  const hideDocumentStartOverlays = paragraphPlainModeActive;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
   const openTabFilePaths = useMemo(
     () => tabs.map((t) => t.filePath).filter((p): p is string => p != null),
@@ -241,6 +310,8 @@ export function Workspace({
   );
   const [outlinePreview, setOutlinePreview] =
     useState<OutlinePreviewState | null>(null);
+  // Outline 拡張: [現在の文書] / [Book全体] の表示切替。既定は現在の文書。
+  const [outlineMode, setOutlineMode] = useState<OutlineMode>("document");
   const outlinePreviewRef = useRef<HTMLDivElement | null>(null);
   const hoverCloseTimerRef = useRef<number | null>(null);
 
@@ -420,6 +491,12 @@ export function Workspace({
         <FileExplorerPane
           uiLanguageMode={uiLanguageMode}
           fileExplorerDir={fileExplorerDir}
+          leftPaneTab={fileExplorerLeftPaneTab} projectsPaneView={fileExplorerProjectsPaneView}
+          onSelectLibraryTab={onFileExplorerSelectLibraryTab} onShowProjectList={onFileExplorerShowProjectList}
+          explorerProjectListState={fileExplorerProjectListState} onOpenProjectRoot={onFileExplorerOpenProjectRoot}
+          showLibraryOnboarding={fileExplorerShowLibraryOnboarding} onOpenLibraryManager={onFileExplorerOpenLibraryManager}
+          externalFileActive={fileExplorerExternalFileActive} externalFileName={fileExplorerExternalFileName}
+          documentContext={fileExplorerDocumentContext}
           rootDirLoaded={fileExplorerRootLoaded}
           visibleEntries={fileExplorerEntries}
           clipboardMode={fileExplorerClipboardMode}
@@ -431,6 +508,8 @@ export function Workspace({
           activeTabFilePath={activeTabFilePath}
           onCreateNote={onFileExplorerCreateNote}
           onCreateFolder={onFileExplorerCreateFolder}
+          onCreateProjectForFolder={onFileExplorerCreateProjectForFolder}
+          registration={fileExplorerRegistration}
           onRenameEntry={onFileExplorerRenameEntry}
           onDeleteEntry={onFileExplorerDeleteEntry}
           onRevealInFileManager={onFileExplorerRevealInFileManager}
@@ -453,47 +532,22 @@ export function Workspace({
       )}
 
       <div className="pane-center">
-        <div className="editor-tab-strip">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={`editor-tab${tab.id === activeTab?.id ? " active" : ""}`}
-              onClick={() => onSetActiveTab(tab.id)}
-              type="button"
-            >
-              <span className="editor-tab-title">{tab.title}</span>
-              {tab.dirty && <span className="editor-tab-dirty">●</span>}
-              {tabs.length > 1 && (
-                <span
-                  className="editor-tab-close"
-                  role="button"
-                  tabIndex={-1}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseTab(tab.id);
-                  }}
-                  title="タブを閉じる"
-                >
-                  ×
-                </span>
-              )}
-            </button>
-          ))}
-          <button
-            className="editor-tab-add"
-            type="button"
-            onClick={onAddTab}
-            disabled={tabLimitReached}
-            title={tabLimitReached ? "タブ数の上限に達しています" : "新しいタブ"}
-          >
-            +
-          </button>
-        </div>
+        <EditorTabStrip
+          tabs={tabs}
+          tabRoles={tabRoles}
+          activeTabId={activeTab?.id}
+          onSetActiveTab={onSetActiveTab}
+          onCloseTab={onCloseTab}
+          onAddTab={onAddTab}
+          tabLimitReached={tabLimitReached}
+          editorTabActionsSlot={editorTabActionsSlot}
+        />
         <div
           className="editor-panel"
           data-ruby-visible={rubyVisible ? "1" : "0"}
           data-writing-mode={writingMode}
           data-editor-pointer-mode={useEditorArrowPointer ? "arrow" : "text"}
+          data-pseudo-caret={pseudoCaretEnabled ? "on" : "off"}
           data-line-break-policy={effectiveLineBreakPolicy}
           data-doc-theme={documentTheme}
           data-doc-font={docFontAttr}
@@ -537,12 +591,23 @@ export function Workspace({
               onEmptyUntitledSurfaceClick?.();
             }}
           >
+            <ProjectDocumentStartViews
+              display={projectDocumentStartDisplay}
+              hidden={hideDocumentStartOverlays}
+              showRoleLabels={frontmatterShowRoleLabels}
+              t={t}
+            />
             <FrontmatterView
               fields={frontmatterFields}
-              visible={frontmatterVisible}
-              showAuthors={frontmatterShowAuthors}
+              visible={frontmatterVisible && !hideDocumentStartOverlays}
+              showTitle={frontmatterShowTitle}
+              showAuthors={frontmatterViewShowAuthors}
               showTranslators={frontmatterShowTranslators}
               showRoleLabels={frontmatterShowRoleLabels}
+              authorLabel={t("frontmatterCredit.author", "body")}
+              coAuthorLabel={t("frontmatterCredit.coAuthor", "body")}
+              translatorLabel={t("frontmatterCredit.translator", "body")}
+              coTranslatorLabel={t("frontmatterCredit.coTranslator", "body")}
             />
             <div ref={editorDivRef} className="editor-core-host" />
           </div>
@@ -563,6 +628,7 @@ export function Workspace({
               )}
             </>
           )}
+          {chapterBoundaryNavSlot}
         </div>
       </div>
 
@@ -578,32 +644,17 @@ export function Workspace({
         style={{ width: rightPaneOpen ? rightWidth : 0 }}
       >
         <div className="pane-inner pane-inner-right">
-          <div className="pane-header right-pane-tabs">
-            <button
-              type="button"
-              className={`right-pane-tab${rightPaneTab === "outline" ? " active" : ""}`}
-              onClick={() => onSetRightPaneTab("outline")}
-            >
-              {t("pane.outline")}
-            </button>
-            <button
-              type="button"
-              className={`right-pane-tab${rightPaneTab === "document" ? " active" : ""}`}
-              onClick={() => onSetRightPaneTab("document")}
-            >
-              {t("pane.document")}
-            </button>
-            <button
-              type="button"
-              className={`right-pane-tab${rightPaneTab === "theme" ? " active" : ""}`}
-              onClick={() => onSetRightPaneTab("theme")}
-            >
-              {t("pane.theme")}
-            </button>
-          </div>
+          <RightPaneTabBar
+            activeTab={rightPaneTab}
+            onSelect={onSetRightPaneTab}
+            t={t}
+          />
           {rightPaneTab === "outline" ? (
             <div className="outline-list">
-              {headings.length === 0 ? (
+              <OutlineModeToggle mode={outlineMode} onChange={setOutlineMode} t={t} />
+              {outlineMode === "book" ? (
+                <div className="book-outline-content">{bookOutlineSlot}</div>
+              ) : headings.length === 0 ? (
                 <p className="pane-placeholder">{t("workspace.outline.empty")}</p>
               ) : (
                 visibleOutlineItems.map(({ heading: h, originalIndex }) => {
@@ -702,6 +753,10 @@ export function Workspace({
                 </p>
               )}
             </div>
+          ) : rightPaneTab === "notes" ? (
+            <div className="notes-pane-content">{notesPaneSlot}</div>
+          ) : rightPaneTab === "project" ? (
+            <div className="project-pane-content">{projectPaneSlot}</div>
           ) : (
             <div className="theme-pane-content">
               {themeStudioSlot ?? <p className="pane-placeholder">{t("workspace.theme.unavailable")}</p>}

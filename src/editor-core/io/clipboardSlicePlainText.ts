@@ -24,6 +24,9 @@ function serializeClipboardLeafishNode(node: PMNode): string {
       return (node.attrs.raw as string) ?? ''
     case 'html_block_atom':
       return (node.attrs.raw as string) ?? ''
+    case 'noteAnchor':
+      // WYSIWYG の通常 copy では付箋アンカー comment を外部 clipboard へ含めない
+      return ''
     case 'hardBreak':
       return '\n'
     default:
@@ -49,6 +52,7 @@ function serializeInlineNodeForClipboard(node: PMNode): string {
   if (encoded !== null) return encoded
   if (node.type.name === 'hardBreak') return '\n'
   if (node.type.name === 'html_inline_atom') return (node.attrs.raw as string) ?? ''
+  if (node.type.name === 'noteAnchor') return ''
   if (node.content.size > 0) {
     return serializeInlineFragmentForClipboard(node.content)
   }

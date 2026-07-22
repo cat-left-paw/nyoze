@@ -1,4 +1,5 @@
 import type { ParagraphPlainBehavior } from './paragraphPlainBehavior'
+import type { ExternalExportOptionsDefaultsStore } from './externalExportOptionsDefaults'
 
 export type { ParagraphPlainBehavior } from './paragraphPlainBehavior'
 
@@ -59,6 +60,17 @@ export type DocumentColorSettings = {
 }
 
 export type WritingMode = 'vertical-rl' | 'horizontal-tb'
+
+/**
+ * Document Type 別の既定表示方向。frontmatter `writingMode` が無い文書にだけ効く。
+ * 未設定文書も含めて縦書き / 横書きを明示的に選ぶ。
+ * 初期値は互換のため novel=vertical-rl / article=horizontal-tb / unset=vertical-rl。
+ */
+export type DocumentTypeWritingModeDefaults = {
+  novel: WritingMode
+  article: WritingMode
+  unset: WritingMode
+}
 
 /** BETA-H1: H1–H6 共通。横書きでは text-align（左/中央/右）、縦書きでは行内軸方向の配置（上/中央/下）に対応 */
 export type HeadingAlign = 'start' | 'center' | 'end'
@@ -183,7 +195,29 @@ export type SettingsJson = {
   frontmatterShowAuthors?: boolean
   frontmatterShowTranslators?: boolean
   frontmatterShowRoleLabels?: boolean
+  /**
+   * Project 内ファイル（祖先に `.nyoze/project.json`）でも frontmatter display を
+   * 本文中に表示するか。既定 false。Project 外の単独文書には影響しない。
+   */
+  frontmatterShowInProjectFiles?: boolean
+  /**
+   * Project 内ファイルの frontmatter title / original_title / subtitle を表示するか。
+   * `frontmatterShowInProjectFiles=false` のときは無効。既定 true。
+   */
+  frontmatterProjectShowTitle?: boolean
+  /**
+   * Project 内ファイルの frontmatter author / co_authors を表示するか。
+   * `frontmatterShowInProjectFiles=false` のときは無効。既定 true。
+   */
+  frontmatterProjectShowAuthors?: boolean
   lineBreakPolicy?: 'obsidian-paragraph' | 'commonmark-strict'
+  /**
+   * Document Type 別の既定表示方向。frontmatter `writingMode` が無い文書にだけ効く。
+   * 未指定時は互換の既定（novel=vertical-rl / article=horizontal-tb / unset=vertical-rl）。
+   */
+  defaultNovelWritingMode?: WritingMode
+  defaultArticleWritingMode?: WritingMode
+  defaultUnsetDocumentWritingMode?: WritingMode
   /** Phase5-H Slice1: theme presets */
   uiThemePresets?: UiThemePreset[]
   activeUiThemePresetId?: string | null
@@ -193,7 +227,7 @@ export type SettingsJson = {
   themePresetSchemaVersion?: number
   debug?: DebugSettings
   /** BETA-DISP1: caret color setting (not stored in theme presets) */
-  caretColorMode?: 'auto' | 'custom'
+  caretColorMode?: 'auto' | 'custom' | 'highlight'
   caretColorCustom?: string | null
   /** Windows Chromium I-beam workaround: use arrow pointer inside editor surfaces */
   useEditorArrowPointer?: boolean
@@ -227,4 +261,66 @@ export type SettingsJson = {
    * Hidden: macOS のみ Arrow 後の過大スクロールを局所 clamp（UI なし / frontmatter 非連動）。
    */
   macosArrowScrollClampEnabled?: boolean
+  /**
+   * Task 2-4: 擬似キャレットの ON/OFF。表示専用オーバーレイ。未設定時は既定 true。
+   */
+  pseudoCaretEnabled?: boolean
+  /**
+   * Task 2-4: 擬似キャレットの太さ（px、短軸）。1〜8px、0.5px 刻み。既定 2。
+   */
+  pseudoCaretThickness?: number
+  /**
+   * 擬似キャレット点滅: overlay の opacity animation ON/OFF。既定 true。
+   */
+  pseudoCaretBlinkEnabled?: boolean
+  /**
+   * 付箋 (Task 3A-3): 初回付箋作成時の説明を確認済みか。既定 false。設定 UI なし。
+   */
+  noteAnchorNoticeConfirmed?: boolean
+  /**
+   * 外部書き出し options 確認 modal の scope × format 別既定選択。
+   * frontmatter / books.json には保存しない。
+   */
+  externalExportOptionsDefaults?: ExternalExportOptionsDefaultsStore
+  /**
+   * PV-SET-4A: Page Viewer（active document / Book Viewer 共通）の読書用
+   * pagination default「見出しの前で改ページ」。既定 false。外部 export の
+   * `pageBreakBeforeHeading` とは別 key・別既定値（値を共用しない）。
+   */
+  pageViewerBreakBeforeHeading?: boolean
+  /**
+   * PV-SET-4A: 対象見出し最大レベル。1=H1のみ 〜 6=H1〜H6。既定 1。
+   * toggle が OFF の間も値は保持するが、pagination には影響しない。
+   */
+  pageViewerBreakBeforeHeadingMaxLevel?: 1 | 2 | 3 | 4 | 5 | 6
+  /**
+   * PV-READ-1: Page Viewer 読書面の物理上余白（選択値 0〜80 / 8px 刻み）。
+   * 実効値は固定安全域 32px を加える。frontmatter / books.json / export には保存しない。
+   */
+  pageViewerReadingMarginTop?: number
+  /** PV-READ-1: 物理下余白（選択値）。実効は +32px。 */
+  pageViewerReadingMarginBottom?: number
+  /** PV-READ-1: 物理左右共通余白（選択値）。実効は +16px。 */
+  pageViewerReadingMarginInline?: number
+  /** PV-READ-1: 用紙枠（canvas / border / shadow）の ON/OFF。既定 true。 */
+  pageViewerReadingPaperFrame?: boolean
+  /**
+   * PV-READ-2: 読書面 header furniture の表示。既定 true。
+   * frontmatter / books.json / export には保存しない。
+   */
+  pageViewerReadingHeaderEnabled?: boolean
+  /** PV-READ-2: header の物理位置。既定 'start'（左）。 */
+  pageViewerReadingHeaderAlign?: 'start' | 'center' | 'end'
+  /** PV-READ-2: header 内容。既定 'title'。author は visibility hard gate 後。 */
+  pageViewerReadingHeaderContent?: 'title' | 'title-author'
+  /** PV-READ-2: 読書面 footer（現在/総ページ）の表示。既定 true。 */
+  pageViewerReadingFooterEnabled?: boolean
+  /** PV-READ-2: footer の物理位置。既定 'end'（右）。 */
+  pageViewerReadingFooterAlign?: 'start' | 'center' | 'end'
+  /** PV-READ-3B: Page Viewer冒頭の表示専用簡易表紙。 */
+  pageViewerReadingSimpleCoverEnabled?: boolean
+  /** PV-READ-3B: 簡易表紙groupだけの書字方向。 */
+  pageViewerReadingSimpleCoverWritingMode?: 'inherit' | 'vertical-rl' | 'horizontal-tb'
+  /** PV-READ-3B: Web Book / Tategakiと意味を揃えた通常/中央配置。 */
+  pageViewerReadingSimpleCoverLayout?: 'normal' | 'center'
 }

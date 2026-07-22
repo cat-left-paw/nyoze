@@ -7,14 +7,21 @@ import StarterKit from '@tiptap/starter-kit'
 import { NyozeCodeBlockHighlight } from './codeBlockHighlight'
 import { HtmlInlineAtom } from '../schema/htmlInlineAtom'
 import { HtmlBlockAtom } from '../schema/htmlBlockAtom'
+import { NoteAnchor } from '../schema/noteAnchor'
+import { NyozeDirectiveBlock } from '../schema/nyozeDirectiveBlock'
+import { NyozePageBreak } from '../schema/nyozePageBreak'
+import { NyozeBlankPage } from '../schema/nyozeBlankPage'
 import { AozoraRuby } from '../schema/aozoraRuby'
 import { AozoraTcy } from '../schema/aozoraTcy'
 import { Highlight } from '../schema/highlight'
+import { Underline } from '../schema/underline'
 import { NyozeImage } from '../schema/nyozeImage'
 import { AutoTcyDecoration } from './autoTcyDecoration'
 import { HeadingFold } from './headingFold'
 import { SearchHighlight } from './searchHighlight'
+import { RubyPunctuationNowrap } from './rubyPunctuationNowrap'
 import { SpecialInlineBoundarySentinel } from './specialInlineBoundarySentinel'
+import { NoteAnchorProtection } from './noteAnchorProtection'
 import { VisualFocusBlockDecoration } from './visualFocusBlockDecoration'
 import type { VisualFocusBlockDecorationOptions } from './visualFocusBlockDecoration'
 
@@ -37,6 +44,8 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
       bold: false,
       italic: false,
       strike: false,
+      underline: false,
+      link: false,
       listItem: false,
       code: {
         HTMLAttributes: {
@@ -104,12 +113,19 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
     }),
     NyozeCodeBlockHighlight,
     Highlight,
+    Underline,
     NyozeImage,
     HtmlInlineAtom,
     HtmlBlockAtom,
+    NoteAnchor,
+    NoteAnchorProtection,
+    NyozeDirectiveBlock,
+    NyozePageBreak,
+    NyozeBlankPage,
     AozoraRuby,
     AozoraTcy,
     SpecialInlineBoundarySentinel,
+    RubyPunctuationNowrap,
     options?.autoTcy ? AutoTcyDecoration.configure(options.autoTcy) : AutoTcyDecoration,
     HeadingFold,
     SearchHighlight,

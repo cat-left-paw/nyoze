@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import type { CommandAvailability } from '../../editor-core/types'
+import type { CommandAvailability, SelectionRange } from '../../editor-core/types'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
 import {
+  IconAlignCenter,
+  IconAlignRight,
   IconArrowDown,
   IconArrowBackUp,
   IconArrowForwardUp,
@@ -14,6 +16,7 @@ import {
   IconCopy,
   IconDiamond,
   IconEraser,
+  IconFile,
   IconH1,
   IconH2,
   IconH3,
@@ -23,15 +26,25 @@ import {
   IconHeading,
   IconHeadingOff,
   IconHighlight,
+  IconIndentIncrease,
   IconItalic,
+  IconLayoutDistributeHorizontal,
+  IconLetterCase,
   IconList,
   IconListNumbers,
+  IconPageBreak,
   IconScissors,
   IconSelectAll,
+  IconSquareOff,
   IconStrikethrough,
+  IconTrash,
+  IconUnderline,
   IconNumber123,
 } from '@tabler/icons-react'
 import { createUiTextGetter } from '../i18n/uiText'
+import { buildAddNoteContextMenuItem } from './noteAnchorAddContextMenuItem'
+import { buildNoteAnchorContextMenuItems } from './noteAnchorContextMenuItems'
+import type { NoteAnchorDeletePath } from '../utils/noteAnchorDeletePath'
 
 const ICON_SIZE = 16
 const ICON_STROKE = 1.2
@@ -45,9 +58,11 @@ type MenuItem = {
   disabled: boolean
   active?: boolean
   action?: MenuAction
-  submenu?: MenuItem[]
+  submenu?: MenuEntry[]
   separator?: false
   shortcut?: string
+  /** テスト / e2e 用の追加 data-* 属性 (例: directive token / page-break action の識別)。 */
+  dataAttrs?: Record<string, string>
 }
 type SeparatorItem = { separator: true; id: string }
 type MenuEntry = MenuItem | SeparatorItem
@@ -71,6 +86,7 @@ type EditorContextMenuProps = {
   onItalic: () => void
   onStrike: () => void
   onHighlight: () => void
+  onUnderline: () => void
   onHeading: (level: number) => void
   onBulletList: () => void
   onOrderedList: () => void
@@ -80,6 +96,23 @@ type EditorContextMenuProps = {
   onClearFormat: () => void
   onMoveListUp: () => void
   onMoveListDown: () => void
+  /** 独自ブロック装飾 (align-center / indent-3 / style-letter 等) を適用 / 置換する。 */
+  onApplyBlockDirective: (token: string) => void
+  /** 独自ブロック装飾を解除する。 */
+  onRemoveBlockDirective: () => void
+  /** 改ページ marker (`nyozePageBreak`) を挿入する。 */
+  onInsertPageBreak: () => void
+  /** selection が改ページ marker のときだけ有効な削除 action。 */
+  onDeletePageBreak: () => void
+  /** 空白ページ marker (`nyozeBlankPage`) を挿入する。count は 1〜20 (省略時 1)。 */
+  onInsertBlankPage: (count?: number) => void
+  noteAnchorContextId?: string | null
+  noteAnchorMarkerDeleteMode?: NoteAnchorDeletePath | null
+  onShowNoteInPanel?: (id: string) => void
+  onDeleteNoteAnchor?: (id: string) => void
+  showAddNoteAnchor?: boolean
+  contextMenuSelectionRange?: SelectionRange | null
+  onOpenNoteAnchorPrompt?: (range?: SelectionRange) => void | Promise<void>
   onClose: () => void
 }
 
@@ -102,6 +135,7 @@ export function EditorContextMenu({
   onItalic,
   onStrike,
   onHighlight,
+  onUnderline,
   onHeading,
   onBulletList,
   onOrderedList,
@@ -111,6 +145,18 @@ export function EditorContextMenu({
   onClearFormat,
   onMoveListUp,
   onMoveListDown,
+  onApplyBlockDirective,
+  onRemoveBlockDirective,
+  onInsertPageBreak,
+  onDeletePageBreak,
+  onInsertBlankPage,
+  noteAnchorContextId = null,
+  noteAnchorMarkerDeleteMode = null,
+  onShowNoteInPanel,
+  onDeleteNoteAnchor,
+  showAddNoteAnchor = false,
+  contextMenuSelectionRange = null,
+  onOpenNoteAnchorPrompt,
   onClose,
 }: EditorContextMenuProps) {
   const t = createUiTextGetter(uiLanguageMode)
@@ -145,6 +191,38 @@ export function EditorContextMenu({
     const shouldOpenLeft = left + rect.width + SUBMENU_ESTIMATED_WIDTH > vw - 4
     setSubmenuDirection(shouldOpenLeft ? 'left' : 'right')
   }, [visible, x, y])
+
+  /**
+   * submenu (例: ブロック装飾) はトリガー行の高さでウィンドウ下端をはみ出す
+   * ことがある (項目数が多い submenu ほど起こりやすい)。CSS の `:hover` 表示は
+   * 開閉状態を React state に持たないため、実際に表示された直後の
+   * `getBoundingClientRect()` を使って毎回はみ出しを判定し、はみ出す場合だけ
+   * 上端ではなく下端をトリガー行に揃えて上向きに開く (`bottom` アンカー) よう
+   * インライン style を直接設定する。毎回リセットしてから再計測するため、
+   * ウィンドウサイズ変更や別行への再ホバーでも古い値を引きずらない。
+   */
+  const handleSubmenuTriggerMouseEnter = useCallback(
+    (event: React.MouseEvent<HTMLDivElement> | React.FocusEvent<HTMLDivElement>) => {
+      const trigger = event.currentTarget
+      const submenu = trigger.querySelector<HTMLDivElement>('.editor-context-submenu')
+      if (!submenu) return
+      submenu.style.top = ''
+      submenu.style.bottom = ''
+      submenu.style.maxHeight = ''
+
+      const MARGIN = 8
+      const rect = submenu.getBoundingClientRect()
+      const vh = window.innerHeight
+      if (rect.bottom <= vh - MARGIN) return
+
+      const triggerRect = trigger.getBoundingClientRect()
+      submenu.style.top = 'auto'
+      submenu.style.bottom = '-4px'
+      submenu.style.maxHeight = `${Math.max(120, triggerRect.bottom - MARGIN)}px`
+      submenu.style.overflowY = 'auto'
+    },
+    [],
+  )
 
   if (!visible) return null
 
@@ -225,7 +303,134 @@ export function EditorContextMenu({
     },
   ]
 
-  const entries: MenuEntry[] = [
+  // 独自ブロック装飾 (align / indent / style) は既存 toolbar のブロック装飾メニューと
+  // 同じ token / command / availability を使う。page-break の挿入・削除は
+  // `nyozeDirectiveBlock` の apply/remove とは別の独立 action のため、
+  // token 系 item とは data attr (`data-directive-token` 等) で区別する。
+  const directiveTokenGroups: Array<
+    Array<{ id: string; token: string; label: string; icon: typeof IconAlignCenter }>
+  > = [
+    [
+      { id: 'ctx-align-center', token: 'align-center', label: t('editor.blockDecoration.center'), icon: IconAlignCenter },
+      { id: 'ctx-align-end', token: 'align-end', label: t('editor.blockDecoration.end'), icon: IconAlignRight },
+    ],
+    [
+      { id: 'ctx-indent1', token: 'indent-1', label: t('editor.blockDecoration.indent1'), icon: IconIndentIncrease },
+      { id: 'ctx-indent2', token: 'indent-2', label: t('editor.blockDecoration.indent2'), icon: IconIndentIncrease },
+      { id: 'ctx-indent3', token: 'indent-3', label: t('editor.blockDecoration.indent3'), icon: IconIndentIncrease },
+      { id: 'ctx-indent4', token: 'indent-4', label: t('editor.blockDecoration.indent4'), icon: IconIndentIncrease },
+      { id: 'ctx-indent5', token: 'indent-5', label: t('editor.blockDecoration.indent5'), icon: IconIndentIncrease },
+      { id: 'ctx-indent6', token: 'indent-6', label: t('editor.blockDecoration.indent6'), icon: IconIndentIncrease },
+    ],
+    [
+      { id: 'ctx-styleLetter', token: 'style-letter', label: t('editor.blockDecoration.styleLetter'), icon: IconLetterCase },
+      { id: 'ctx-styleMuted', token: 'style-muted', label: t('editor.blockDecoration.styleMuted'), icon: IconLetterCase },
+      { id: 'ctx-styleHeading', token: 'style-heading', label: t('editor.blockDecoration.styleHeading'), icon: IconLetterCase },
+    ],
+  ]
+
+  // 空白ページ挿入の枚数プリセット。toolbar 側 (`UnifiedHeader.tsx`) と同じ
+  // 選択肢。`nyozeBlankPage` の count 有効範囲 (1〜20) のうち、よく使う枚数
+  // だけを選択肢として並べる (align/indent/style の token item とは別の独立
+  // 挿入 action のため、directiveTokenGroups には混ぜない)。
+  const blankPageCountOptions: Array<{ count: number; label: string }> = [
+    { count: 1, label: t('editor.blockDecoration.blankPage') },
+    { count: 2, label: t('editor.blockDecoration.blankPage2') },
+    { count: 3, label: t('editor.blockDecoration.blankPage3') },
+    { count: 4, label: t('editor.blockDecoration.blankPage4') },
+    { count: 5, label: t('editor.blockDecoration.blankPage5') },
+    { count: 10, label: t('editor.blockDecoration.blankPage10') },
+    { count: 20, label: t('editor.blockDecoration.blankPage20') },
+  ]
+
+  const blockDecorationEntries: MenuEntry[] = [
+    ...directiveTokenGroups.flatMap((group, groupIndex): MenuEntry[] => [
+      ...(groupIndex > 0 ? [{ separator: true, id: `ctx-directive-sep-${groupIndex}` } as SeparatorItem] : []),
+      ...group.map((item): MenuItem => ({
+        id: item.id,
+        label: item.label,
+        icon: <item.icon size={ICON_SIZE} stroke={ICON_STROKE} />,
+        disabled: !a.canBlockDirective,
+        active: a.blockDirectiveToken === item.token,
+        action: wrap(() => onApplyBlockDirective(item.token)),
+        dataAttrs: { 'data-directive-token': item.token },
+      })),
+    ]),
+    { separator: true, id: 'ctx-directive-sep-clear' },
+    {
+      id: 'ctx-directive-clear',
+      label: t('editor.blockDecoration.clear'),
+      icon: <IconSquareOff size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canBlockDirective || a.blockDirectiveToken === null,
+      action: wrap(onRemoveBlockDirective),
+      dataAttrs: { 'data-directive-clear': '' },
+    },
+    { separator: true, id: 'ctx-directive-sep-pagebreak' },
+    {
+      id: 'ctx-page-break-insert',
+      label: t('editor.blockDecoration.pageBreak'),
+      icon: <IconPageBreak size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canBlockDirective,
+      action: wrap(onInsertPageBreak),
+      dataAttrs: { 'data-page-break-insert': '' },
+    },
+    {
+      id: 'ctx-page-break-delete',
+      label: t('editor.blockDecoration.deletePageBreak'),
+      icon: <IconTrash size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canDeletePageBreak,
+      action: wrap(onDeletePageBreak),
+      dataAttrs: { 'data-page-break-delete': '' },
+    },
+    ...blankPageCountOptions.map((option): MenuItem => ({
+      id: `ctx-blank-page-insert-${option.count}`,
+      label: option.label,
+      icon: <IconFile size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canBlockDirective,
+      action: wrap(() => onInsertBlankPage(option.count)),
+      dataAttrs: { 'data-blank-page-insert': '', 'data-blank-page-count': String(option.count) },
+    })),
+  ]
+
+  const resolvedNoteAnchorContextId = noteAnchorContextId
+
+  const noteAnchorEntries: MenuEntry[] =
+    resolvedNoteAnchorContextId && onShowNoteInPanel && onDeleteNoteAnchor
+      ? buildNoteAnchorContextMenuItems({
+          availability: a,
+          noteAnchorContextId: resolvedNoteAnchorContextId,
+          markerDeleteMode: noteAnchorMarkerDeleteMode,
+          uiLanguageMode,
+          onShowNoteInPanel,
+          onDeleteNoteAnchor,
+        }).map((entry) =>
+          entry.separator
+            ? entry
+            : {
+                ...entry,
+                action: entry.action ? wrap(entry.action) : undefined,
+              },
+        )
+      : []
+
+  const addNoteEntries: MenuEntry[] =
+    showAddNoteAnchor && onOpenNoteAnchorPrompt
+      ? [
+          { separator: true, id: 'sep-note' },
+          {
+            ...buildAddNoteContextMenuItem({
+              uiLanguageMode,
+              onAddNote: () =>
+                onOpenNoteAnchorPrompt(contextMenuSelectionRange ?? undefined),
+            }),
+            action: wrap(() =>
+              onOpenNoteAnchorPrompt(contextMenuSelectionRange ?? undefined),
+            ),
+          },
+        ]
+      : []
+
+  const standardEntries: MenuEntry[] = [
     {
       id: 'undo',
       label: t('common.undo'),
@@ -283,6 +488,7 @@ export function EditorContextMenu({
       shortcut: selectAllShortcut,
     },
     { separator: true, id: 'sep-clipboard' },
+    ...addNoteEntries,
     {
       id: 'bold',
       label: t('editor.bold'),
@@ -318,6 +524,14 @@ export function EditorContextMenu({
       active: a.isHighlight,
       action: wrap(onHighlight),
     },
+    {
+      id: 'underline',
+      label: t('editor.underline'),
+      icon: <IconUnderline size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canUnderline,
+      active: a.isUnderline,
+      action: wrap(onUnderline),
+    },
     { separator: true, id: 'sep-format' },
     {
       id: 'heading-submenu',
@@ -325,6 +539,13 @@ export function EditorContextMenu({
       icon: <IconHeading size={ICON_SIZE} stroke={ICON_STROKE} />,
       disabled: !a.canBlockTransforms,
       submenu: headingEntries,
+    },
+    {
+      id: 'block-decoration-submenu',
+      label: t('editor.blockDecoration'),
+      icon: <IconLayoutDistributeHorizontal size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canBlockDirective,
+      submenu: blockDecorationEntries,
     },
     {
       id: 'bulletList',
@@ -391,6 +612,9 @@ export function EditorContextMenu({
     },
   ]
 
+  const entries: MenuEntry[] =
+    noteAnchorEntries.length > 0 ? noteAnchorEntries : standardEntries
+
   return (
     <div
       ref={setRef}
@@ -409,28 +633,39 @@ export function EditorContextMenu({
             aria-haspopup='menu'
             tabIndex={0}
             onMouseDown={(event) => event.preventDefault()}
+            onMouseEnter={handleSubmenuTriggerMouseEnter}
+            onFocus={handleSubmenuTriggerMouseEnter}
           >
             <span className='editor-context-menu-icon'>{entry.icon}</span>
             <span className='editor-context-menu-label'>{entry.label}</span>
             <span className='editor-context-menu-submenu-caret'>›</span>
             <div className='editor-context-submenu' role='menu'>
-              {entry.submenu.map((subItem) => (
-                <button
-                  key={subItem.id}
-                  className={`editor-context-menu-item${subItem.active ? ' active' : ''}${subItem.disabled ? ' disabled' : ''}`}
-                  type='button'
-                  role='menuitem'
-                  disabled={subItem.disabled}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={subItem.action}
-                >
-                  <span className='editor-context-menu-icon'>{subItem.icon}</span>
-                  <span className='editor-context-menu-label'>{subItem.label}</span>
-                  {subItem.shortcut && (
-                    <span className='editor-context-menu-shortcut'>{subItem.shortcut}</span>
-                  )}
-                </button>
-              ))}
+              {entry.submenu.map((subItem) =>
+                subItem.separator ? (
+                  <div
+                    key={subItem.id}
+                    className='editor-context-menu-separator'
+                    role='separator'
+                  />
+                ) : (
+                  <button
+                    key={subItem.id}
+                    className={`editor-context-menu-item${subItem.active ? ' active' : ''}${subItem.disabled ? ' disabled' : ''}`}
+                    type='button'
+                    role='menuitem'
+                    disabled={subItem.disabled}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={subItem.action}
+                    {...(subItem.dataAttrs ?? {})}
+                  >
+                    <span className='editor-context-menu-icon'>{subItem.icon}</span>
+                    <span className='editor-context-menu-label'>{subItem.label}</span>
+                    {subItem.shortcut && (
+                      <span className='editor-context-menu-shortcut'>{subItem.shortcut}</span>
+                    )}
+                  </button>
+                ),
+              )}
             </div>
           </div>
         ) : (
@@ -442,6 +677,7 @@ export function EditorContextMenu({
             disabled={entry.disabled}
             onMouseDown={(event) => event.preventDefault()}
             onClick={entry.action}
+            {...(entry.dataAttrs ?? {})}
           >
             <span className='editor-context-menu-icon'>{entry.icon}</span>
             <span className='editor-context-menu-label'>{entry.label}</span>

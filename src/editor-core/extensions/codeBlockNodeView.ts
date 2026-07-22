@@ -44,7 +44,7 @@ export function createCodeBlockNodeView(
   node: PMNode,
   // Required by TipTap NodeView signature but unused here
   _view: EditorView, // eslint-disable-line @typescript-eslint/no-unused-vars
-  _getPos: (() => number) | boolean, // eslint-disable-line @typescript-eslint/no-unused-vars
+  _getPos: (() => number | undefined) | boolean, // eslint-disable-line @typescript-eslint/no-unused-vars
 ): CodeBlockNodeViewReturn {
   // --- Wrapper ---
   const wrapper = document.createElement('div')

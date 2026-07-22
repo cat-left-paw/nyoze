@@ -1,15 +1,24 @@
 import type { Editor } from '@tiptap/core'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
+import type { LineBreakPolicy } from '../types'
+import { selectionTouchesNoteAnchor } from './noteAnchorProtection'
 import { resolveSelectedTcyRanges } from './tcyFormatting'
+import {
+  applyObsidianParagraphBlockquoteTransform,
+  applyObsidianParagraphCodeBlockTransform,
+  unwrapObsidianParagraphBlockquoteTransform,
+  unwrapObsidianParagraphCodeBlockTransform,
+} from './blockTransformCommands'
 
 type Dispatch = (tr: Transaction) => void
 type LogPush = (event: string, detail: string) => void
 
-type ToggleMarkCommand = 'bold' | 'italic' | 'strike' | 'highlight'
+type ToggleMarkCommand = 'bold' | 'italic' | 'strike' | 'highlight' | 'underline'
 
 type CreateBasicCommandsControllerOptions = {
   editor: Editor
   getIsComposing: () => boolean
+  getLineBreakPolicy: () => LineBreakPolicy
   pushLog: LogPush
   clearCheckedChecklistItemsInRange: (
     state: EditorState,
@@ -26,6 +35,7 @@ type CreateBasicCommandsControllerOptions = {
 export function createBasicCommandsController({
   editor,
   getIsComposing,
+  getLineBreakPolicy,
   pushLog,
   clearCheckedChecklistItemsInRange,
   toggleChecklistItemAtSelection,
@@ -67,21 +77,25 @@ export function createBasicCommandsController({
 
   function execute(command: ToggleMarkCommand): void {
     if (getIsComposing()) return
+    if (selectionTouchesNoteAnchor(editor.state)) return
     if (command === 'bold') editor.chain().focus().toggleBold().run()
     if (command === 'italic') editor.chain().focus().toggleItalic().run()
     if (command === 'strike') editor.chain().focus().toggleStrike().run()
     if (command === 'highlight') editor.chain().focus().toggleMark('highlight').run()
+    if (command === 'underline') editor.chain().focus().toggleMark('underline').run()
     pushLog('command', `toggle-${command}`)
   }
 
   function toggleInlineCode(): void {
     if (getIsComposing()) return
+    if (selectionTouchesNoteAnchor(editor.state)) return
     editor.chain().focus().toggleCode().run()
     pushLog('command', 'toggle-inline-code')
   }
 
   function clearFormat(): void {
     if (getIsComposing()) return
+    if (selectionTouchesNoteAnchor(editor.state)) return
     const initialState = editor.state
     const initialSelection = initialState.selection
     const clearedTcyRanges = resolveSelectedTcyRanges(initialState)
@@ -134,12 +148,36 @@ export function createBasicCommandsController({
 
   function toggleBlockquote(): void {
     if (getIsComposing()) return
+    if (getLineBreakPolicy() === 'obsidian-paragraph') {
+      if (unwrapObsidianParagraphBlockquoteTransform(editor.state, dispatch)) {
+        editor.view.focus()
+        pushLog('command', 'toggleBlockquote obsidianParagraphUnwrap')
+        return
+      }
+      if (applyObsidianParagraphBlockquoteTransform(editor.state, dispatch)) {
+        editor.view.focus()
+        pushLog('command', 'toggleBlockquote obsidianParagraphMultiBlock')
+        return
+      }
+    }
     editor.chain().focus().toggleBlockquote().run()
     pushLog('command', 'toggleBlockquote')
   }
 
   function toggleCodeBlock(): void {
     if (getIsComposing()) return
+    if (getLineBreakPolicy() === 'obsidian-paragraph') {
+      if (unwrapObsidianParagraphCodeBlockTransform(editor.state, dispatch)) {
+        editor.view.focus()
+        pushLog('command', 'toggleCodeBlock obsidianParagraphUnwrap')
+        return
+      }
+      if (applyObsidianParagraphCodeBlockTransform(editor.state, dispatch)) {
+        editor.view.focus()
+        pushLog('command', 'toggleCodeBlock obsidianParagraphMultiBlock')
+        return
+      }
+    }
     editor.chain().focus().toggleCodeBlock().run()
     pushLog('command', 'toggleCodeBlock')
   }

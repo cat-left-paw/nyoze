@@ -176,3 +176,47 @@ Source Mode では、文書全体を Markdown ソースとして編集します�
 - `Cmd/Ctrl + Alt/Option + .` — 右ペインを開閉
 
 通常編集専用の装飾ショートカットやリスト移動ショートカットは、Source Mode 中は通常編集側のコマンドとしては動作しません。
+
+---
+
+## 付箋編集
+
+右ペインの付箋編集フォームでは、以下のキーを使えます。
+
+- `Cmd/Ctrl + Enter` — 本文入力欄から付箋を保存
+- `Escape` — タイトル入力欄または本文入力欄から編集をキャンセル
+
+---
+
+## Page Viewer
+
+Page Viewer の本文領域では、以下のキーでページを移動できます。
+
+- `PageDown` / `Space` — 次のページ
+- `PageUp` / `Shift + Space` — 前のページ
+- `Home` — 文書の先頭ページ
+- `End` — 文書の末尾ページ
+
+左右矢印キーの向きは書字方向によって変わります。
+
+- 横書き: `ArrowLeft` が前のページ、`ArrowRight` が次のページ
+- 縦書き: `ArrowLeft` が次のページ、`ArrowRight` が前のページ
+
+下部のページ scrubber にフォーカスがある場合は、左右矢印キーで1ページずつ移動し、`Home` / `End` で先頭 / 末尾へ移動できます。縦書きでは上下矢印キーも使えます。
+
+設定、テーマ、ページ遷移、Outline などのメニューは `Escape` で閉じられます。
+
+---
+
+## Web Book
+
+Web Book の reader 本文にフォーカスがある場合は、以下のキーでページを移動できます。
+
+- `PageDown` — 次のページ
+- `PageUp` — 前のページ
+- `Home` — 文書の先頭ページ
+- `End` — 文書の末尾ページ
+- 横書き: `ArrowLeft` が前のページ、`ArrowRight` が次のページ
+- 縦書き: `ArrowLeft` が次のページ、`ArrowRight` が前のページ
+
+Settings または Outline が開いている場合は、`Escape` で閉じられます。

@@ -18,8 +18,11 @@ import type {
 } from "./useAppUiState";
 import { generateTabId, generateUntitledName } from "./useAppUiState";
 import type { SavedFileStat } from "../utils/externalEditConflict";
-import { isMarkdownDifferentFromClean } from "./dirtyTracking";
 import { countBodyCharacters } from "../utils/countBodyCharacters";
+import {
+  buildTabLeaveContentFields,
+  resolveTabLeaveDirtyState,
+} from "./tabLeaveSnapshot";
 import {
   shouldGuardSourceModeBeforeTabClose,
   type GuardResult,
@@ -93,7 +96,7 @@ export type UnsavedChangesSaveTargetTab = Pick<
   "id" | "title" | "filePath" | "savedStat"
 >;
 
-type ParagraphPlainLeavePrep = {
+type TabLeaveSnapshotPrep = {
   dirty: boolean;
   markdown: string;
   frontmatterFields: FrontmatterFields;
@@ -139,38 +142,40 @@ export function useTabManager(deps: TabManagerDeps) {
   const depsRef = useRef(deps);
   depsRef.current = deps;
 
-  const commitParagraphPlainBeforeLeavingCurrentDocument = useCallback(
-    (): ParagraphPlainLeavePrep | null => {
-      const d = depsRef.current;
-      const core = d.coreRef.current;
-      if (!core) return null;
-      if (!core.commitParagraphPlainIfActive()) return null;
+  const prepareTabLeaveSnapshot = useCallback((): TabLeaveSnapshotPrep | null => {
+    const d = depsRef.current;
+    const core = d.coreRef.current;
+    if (!core) return null;
 
-      const markdown = core.peekMarkdown();
-      const { frontmatterPrefix } = splitLeadingFrontmatter(markdown);
-      const frontmatterFields = parseFrontmatterFields(frontmatterPrefix);
-      const characterCount = countBodyCharacters(markdown);
-      const dirty = isMarkdownDifferentFromClean(
-        d.activeTab.cleanMarkdownSnapshot,
-        markdown,
-      );
+    const paragraphPlainOverlayChanged =
+      core.hasParagraphPlainPendingOverlayChanges();
+    if (!core.commitParagraphPlainIfActive()) return null;
 
-      d.patchActiveTab({
-        dirty,
-        markdownSnapshot: markdown,
-        frontmatterFields,
-        characterCount,
-      });
+    const markdown = core.peekMarkdown();
+    const { frontmatterFields, characterCount } =
+      buildTabLeaveContentFields(markdown);
+    const dirty = resolveTabLeaveDirtyState({
+      internalDocId: d.activeTab.internalDocId,
+      paragraphPlainOverlayChanged,
+      currentDirty: d.activeTab.dirty,
+      cleanMarkdownSnapshot: d.activeTab.cleanMarkdownSnapshot,
+      currentMarkdown: markdown,
+    });
 
-      return {
-        dirty,
-        markdown,
-        frontmatterFields,
-        characterCount,
-      };
-    },
-    [],
-  );
+    d.patchActiveTab({
+      dirty,
+      markdownSnapshot: markdown,
+      frontmatterFields,
+      characterCount,
+    });
+
+    return {
+      dirty,
+      markdown,
+      frontmatterFields,
+      characterCount,
+    };
+  }, []);
 
   /**
    * Read the current active tab plus the live core markdown as a self-contained snapshot.
@@ -178,20 +183,19 @@ export function useTabManager(deps: TabManagerDeps) {
    */
   const captureActiveTabSnapshot = useCallback((): EditorTab | null => {
     const d = depsRef.current;
-    const paragraphPlainState =
-      commitParagraphPlainBeforeLeavingCurrentDocument();
-    if (!paragraphPlainState) return null;
+    const tabLeaveState = prepareTabLeaveSnapshot();
+    if (!tabLeaveState) return null;
     const scrollPosition = d.captureEditorScroll();
     return {
       ...d.activeTab,
-      dirty: paragraphPlainState.dirty,
-      markdownSnapshot: paragraphPlainState.markdown,
-      frontmatterFields: paragraphPlainState.frontmatterFields,
-      characterCount: paragraphPlainState.characterCount,
+      dirty: tabLeaveState.dirty,
+      markdownSnapshot: tabLeaveState.markdown,
+      frontmatterFields: tabLeaveState.frontmatterFields,
+      characterCount: tabLeaveState.characterCount,
       scrollTop: scrollPosition.scrollTop,
       scrollLeft: scrollPosition.scrollLeft,
     };
-  }, [commitParagraphPlainBeforeLeavingCurrentDocument]);
+  }, [prepareTabLeaveSnapshot]);
 
   /**
    * Snapshot the current active tab's editor content into its tab record.
@@ -338,11 +342,6 @@ export function useTabManager(deps: TabManagerDeps) {
         const shouldTemporarilyActivateDirtyTab =
           !wasActiveTab && tabToClose.dirty;
         let previousActiveTabSnapshot: EditorTab | null = null;
-        const activeParagraphPlainState =
-          wasActiveTab
-            ? commitParagraphPlainBeforeLeavingCurrentDocument()
-            : null;
-        if (wasActiveTab && !activeParagraphPlainState) return;
 
         let smResult: GuardResult = "proceed";
         if (
@@ -359,6 +358,12 @@ export function useTabManager(deps: TabManagerDeps) {
           if (smResult === "cancelled") return;
         }
 
+        const activeTabLeaveState =
+          wasActiveTab
+            ? prepareTabLeaveSnapshot()
+            : null;
+        if (wasActiveTab && !activeTabLeaveState) return;
+
         // If closing the active tab and it is dirty, run unsaved guard.
         // When smResult === "resolved", save/discard already handled the draft
         // and the user has been prompted — skip the normal dirty guard to avoid
@@ -366,7 +371,7 @@ export function useTabManager(deps: TabManagerDeps) {
         if (
           smResult !== "resolved" &&
           wasActiveTab &&
-          (activeParagraphPlainState?.dirty ?? tabToClose.dirty)
+          (activeTabLeaveState?.dirty ?? tabToClose.dirty)
         ) {
           const canProceed = await d.confirmContinueWithUnsavedChanges({
             forcePrompt: true,
@@ -426,7 +431,7 @@ export function useTabManager(deps: TabManagerDeps) {
         switchingRef.current = false;
       }
     },
-    [captureActiveTabSnapshot, commitParagraphPlainBeforeLeavingCurrentDocument, restoreTab],
+    [captureActiveTabSnapshot, prepareTabLeaveSnapshot, restoreTab],
   );
 
   /**
@@ -558,14 +563,13 @@ export function useTabManager(deps: TabManagerDeps) {
       // "proceed"  = Source Mode 非該当 or draft なし → dirty は PM Doc 基準で正確。
       const smResult = await d.guardSourceModeDraft();
       if (smResult === "cancelled") return "cancelled";
-      const activeParagraphPlainState =
-        commitParagraphPlainBeforeLeavingCurrentDocument();
-      if (!activeParagraphPlainState) return "cancelled";
+      const activeTabLeaveState = prepareTabLeaveSnapshot();
+      if (!activeTabLeaveState) return "cancelled";
 
       // When smResult === "resolved", save/discard already handled the draft
       // and the user has been prompted. Skip the normal dirty guard to avoid
       // a second prompt (depsRef.current is stale within this async continuation).
-      if (smResult !== "resolved" && activeParagraphPlainState.dirty) {
+      if (smResult !== "resolved" && activeTabLeaveState.dirty) {
         const canProceed = await d.confirmContinueWithUnsavedChanges();
         if (!canProceed) return "cancelled";
       }
@@ -625,7 +629,7 @@ export function useTabManager(deps: TabManagerDeps) {
       }
       return "loaded";
     },
-    [commitParagraphPlainBeforeLeavingCurrentDocument, switchTab],
+    [prepareTabLeaveSnapshot, switchTab],
   );
 
   const openOrFocusShortcutReferenceTab = useCallback(
