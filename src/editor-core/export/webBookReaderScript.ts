@@ -1193,11 +1193,37 @@ export function buildWebBookReaderScript(): string {
     return Number(match[1]) || 0;
   }
 
+  function chapterRootId(chapter) {
+    return 'wb-c' + String(chapter) + '-chapter-root';
+  }
+
+  function appendOutlineJumpButton(list, className, targetId, label) {
+    var li = document.createElement('li');
+    li.className = className;
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('data-wb-outline-target', targetId);
+    button.textContent = label;
+    button.addEventListener('click', function (event) {
+      var id = event.currentTarget.getAttribute('data-wb-outline-target');
+      jumpToHeadingId(id);
+      setOutlineOpen(false, { restoreFocus: true });
+    });
+    li.appendChild(button);
+    list.appendChild(li);
+  }
+
   function buildOutline() {
     if (!outline || !outlineToggle) return;
     var headings = flow.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]');
+    var chapterTitles = readChapterTitles();
+    var chapterNums = Object.keys(chapterTitles)
+      .map(function (key) { return Number(key); })
+      .filter(function (n) { return isFinite(n) && n >= 1; })
+      .sort(function (a, b) { return a - b; });
+    var hasBookChapters = chapterNums.length > 0;
     outline.innerHTML = '';
-    if (!headings.length) {
+    if (!hasBookChapters && !headings.length) {
       outlineToggle.disabled = true;
       outlineToggle.hidden = true;
       outline.hidden = true;
@@ -1218,38 +1244,60 @@ export function buildWebBookReaderScript(): string {
     list.className = 'nyoze-web-book-outline__list';
     outline.appendChild(list);
 
-    var chapterTitles = readChapterTitles();
-    var lastChapter = 0;
-
-    for (var i = 0; i < headings.length; i++) {
-      var heading = headings[i];
-      var id = heading.getAttribute('id') || '';
-      if (!id) continue;
-      var level = Number((heading.tagName || 'H1').replace(/H/i, '')) || 1;
-      level = Math.min(6, Math.max(1, level));
-      var chapter = chapterFromHeadingId(id);
-
-      if (chapter > 0 && chapter !== lastChapter) {
-        lastChapter = chapter;
-        var chapterLi = document.createElement('li');
-        chapterLi.className = 'nyoze-web-book-outline__chapter';
-        chapterLi.textContent = chapterTitles[chapter] || ('Chapter ' + chapter);
-        list.appendChild(chapterLi);
+    if (hasBookChapters) {
+      var headingsByChapter = {};
+      for (var hi = 0; hi < headings.length; hi++) {
+        var heading = headings[hi];
+        var headingId = heading.getAttribute('id') || '';
+        if (!headingId) continue;
+        var chapter = chapterFromHeadingId(headingId);
+        if (chapter < 1) continue;
+        if (!headingsByChapter[chapter]) headingsByChapter[chapter] = [];
+        headingsByChapter[chapter].push(heading);
       }
 
-      var li = document.createElement('li');
-      li.className = 'nyoze-web-book-outline__item nyoze-web-book-outline__level-' + level;
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.setAttribute('data-wb-outline-target', id);
-      button.textContent = (heading.textContent || '').replace(/\\s+/g, ' ').trim() || id;
-      button.addEventListener('click', function (event) {
-        var targetId = event.currentTarget.getAttribute('data-wb-outline-target');
-        jumpToHeadingId(targetId);
-        setOutlineOpen(false, { restoreFocus: true });
-      });
-      li.appendChild(button);
-      list.appendChild(li);
+      for (var ci = 0; ci < chapterNums.length; ci++) {
+        var chapterNum = chapterNums[ci];
+        var chapterLabel = chapterTitles[chapterNum] || ('Chapter ' + chapterNum);
+        appendOutlineJumpButton(
+          list,
+          'nyoze-web-book-outline__chapter',
+          chapterRootId(chapterNum),
+          chapterLabel
+        );
+        var chapterHeadings = headingsByChapter[chapterNum] || [];
+        for (var chi = 0; chi < chapterHeadings.length; chi++) {
+          var chapterHeading = chapterHeadings[chi];
+          var id = chapterHeading.getAttribute('id') || '';
+          if (!id) continue;
+          var level = Number((chapterHeading.tagName || 'H1').replace(/H/i, '')) || 1;
+          level = Math.min(6, Math.max(1, level));
+          var headingLabel = (chapterHeading.textContent || '').replace(/\\s+/g, ' ').trim() || id;
+          appendOutlineJumpButton(
+            list,
+            'nyoze-web-book-outline__item nyoze-web-book-outline__level-' + level,
+            id,
+            headingLabel
+          );
+        }
+      }
+      return;
+    }
+
+    for (var i = 0; i < headings.length; i++) {
+      var standaloneHeading = headings[i];
+      var standaloneId = standaloneHeading.getAttribute('id') || '';
+      if (!standaloneId) continue;
+      var standaloneLevel = Number((standaloneHeading.tagName || 'H1').replace(/H/i, '')) || 1;
+      standaloneLevel = Math.min(6, Math.max(1, standaloneLevel));
+      var standaloneLabel =
+        (standaloneHeading.textContent || '').replace(/\\s+/g, ' ').trim() || standaloneId;
+      appendOutlineJumpButton(
+        list,
+        'nyoze-web-book-outline__item nyoze-web-book-outline__level-' + standaloneLevel,
+        standaloneId,
+        standaloneLabel
+      );
     }
   }
 

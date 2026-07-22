@@ -19,7 +19,7 @@
 - Book 全体 Outline、前章 / 次章ナビゲーション、章頭・章末の移動導線を追加。現在の文書または Book 全体を、LeME / でんでん / 青空文庫風テキスト / Web Book へ書き出せるようにした
 - 作品内の本文位置に紐づく付箋を追加。色、タグ、表示フィルタ、Markdown preview、解決済み管理、不整合の整理に対応した。同一作品内の単一ファイルを Nyoze で移動・改名した場合は、Book と付箋の登録 path も安全に追従する
 - 現在の文書と Book 全体をページ単位で閲覧できる、読み取り専用の **Page Viewer** を追加。Outline、scrubber、Reader theme、画像、見出し前改ページ、余白・用紙枠、header / footer、簡易表紙、ページ遷移に対応した
-- 現在の文書と Book 全体を、reader 付きの単一 HTML または Web 公開用 package として作成できる **Web Book** を追加。画像埋め込み、目次、metadata、簡易表紙、Reader Settings、印刷 / PDF 用境界、容量警告に対応し、モバイルでは tap / swipe によるページ送りも利用できる。従来の standalone HTML 書き出しは Web Book に一本化した
+- 現在の文書と Book 全体を、reader 付きの単一 HTML または Web 公開用 package として作成できる **Web Book** を追加。画像埋め込み、見出しのない章も含む章タイトル単位の目次・Outline、metadata、簡易表紙、Reader Settings、印刷 / PDF 用境界、容量警告に対応し、モバイルでは tap / swipe によるページ送りも利用できる。従来の standalone HTML 書き出しは Web Book に一本化した
 - LeME 互換 Markdown、でんでんコンバーター向け Markdown、青空文庫風 TXT の書き出しを追加。実機確認に基づくルビ、縦中横、装飾、画像、改ページなどの変換に対応した
 - 中央寄せ・行末寄せ・字下げ・組み込みスタイルのブロック装飾、改ページ、複数枚指定可能な空白ページ、下線を追加し、通常編集と各書き出し経路で扱えるようにした
 - WYSIWYG 通常編集向けの擬似キャレットと、frontmatter を編集する **Document Metadata** を追加。作品内ファイルのタブには本文 / 資料の role icon を表示し、非装飾系の操作をタブ列右端へ整理した

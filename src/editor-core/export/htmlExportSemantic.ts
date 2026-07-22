@@ -221,6 +221,22 @@ export type HtmlChapterInfo = {
   translators?: readonly string[]
 }
 
+/**
+ * Book 全体 Web Book の Outline / 静的 TOC 用章タイトル（`includeChapterInfo` とは独立）。
+ * `chapter` は 1-based で、heading / chapter-root ID の `wb-c{n}-` namespace と一致する。
+ */
+export type HtmlOutlineChapter = {
+  chapter: number
+  title: string
+}
+
+/** Book Web Book の章先頭ナビ ID。タイトル非依存・同名章でも衝突しない。 */
+export function formatWebBookChapterRootId(chapter: number): string {
+  const n = Math.floor(Number(chapter))
+  if (!Number.isFinite(n) || n < 1) return 'wb-c1-chapter-root'
+  return `wb-c${n}-chapter-root`
+}
+
 const SUPPORTED_MARK_NAMES = new Set([
   'bold',
   'italic',
@@ -950,6 +966,9 @@ function serializeTopLevelDoc(
     ctx.currentAssetOrigin = { kind: 'active-document' }
   }
   let chapterInfoPtr = 0
+  // WB-R15: 章先頭ナビ root。`includeChapterInfo` とは独立に、各章開始位置で 1 回だけ挿む。
+  let chapterRootPtr = 0
+  const chapterStarts = hasChapterBoundary && chapterStartIndices ? [...chapterStartIndices] : []
 
   // blank-page 自身がすでに独立した固定ページのため、直後の content block の
   // 明示 page-break 由来 breakBefore はここで 1 回だけ抑止する
@@ -992,9 +1011,22 @@ function serializeTopLevelDoc(
     // (`nyoze-break-before-page`) は、最初に非空の章情報 block が生成された時点で
     // そちらへ移し、章本文側の block には二重に付けない（章情報 block が省略される
     // 場合は従来どおり章本文側の block に残る）。
+    //
+    // WB-R15: 章 root は章情報より先に挿み、章先頭の pending break を吸収する。
+    // root を break 付き要素の前に置くと pageIndex が前章末を指すため、break は root 自身が持つ。
+    let chapterRootHtml = ''
     let chapterInfoHtml = ''
     let pendingBreakClasses = shouldBreak ? ['nyoze-break-before-page'] : []
     const originalIndex = topLevelNodeIndex?.get(node)
+    if (chapterStarts.length > 0 && originalIndex !== undefined) {
+      while (chapterRootPtr < chapterStarts.length && chapterStarts[chapterRootPtr] <= originalIndex) {
+        const chapterOrdinal = chapterRootPtr + 1
+        chapterRootPtr++
+        const rootClasses = ['nyoze-chapter-root', ...pendingBreakClasses]
+        chapterRootHtml += `<div id="${formatWebBookChapterRootId(chapterOrdinal)}"${buildClassAttr(rootClasses)} aria-hidden="true"></div>`
+        pendingBreakClasses = []
+      }
+    }
     if (sortedChapterInfos && topLevelNodeIndex && originalIndex !== undefined) {
       while (
         chapterInfoPtr < sortedChapterInfos.length &&
@@ -1011,8 +1043,9 @@ function serializeTopLevelDoc(
     }
 
     const html = serializeBlock(ctx, node, pendingBreakClasses)
-    if (chapterInfoHtml.length > 0 || html.length > 0) {
-      rendered.push(concatTemplateParts(htmlPart(chapterInfoHtml), html))
+    const prefixHtml = chapterRootHtml + chapterInfoHtml
+    if (prefixHtml.length > 0 || html.length > 0) {
+      rendered.push(concatTemplateParts(htmlPart(prefixHtml), html))
     }
   })
 
@@ -1240,6 +1273,63 @@ function collectTocEntriesFromAssignedIds(
 }
 
 /**
+ * WB-R15: Book 全体の静的 TOC。各章の chapter-root を必ず level 1 で出し、
+ * 章内 Markdown 見出しは `maxLevel` でフィルタしたうえで表示 level を +1 する。
+ * 章タイトルと本文先頭 H1 が同文でも両方出す。
+ */
+function collectBookWebBookTocEntries(
+  doc: PMNode,
+  headingIds: Map<PMNode, string>,
+  maxLevel: number,
+  outlineChapters: readonly HtmlOutlineChapter[],
+  chapterStartIndices: readonly number[],
+): TocEntry[] {
+  const headingsByChapter = new Map<number, TocEntry[]>()
+  doc.descendants((node, pos) => {
+    if (node.type.name !== 'heading') return true
+    const text = node.textContent.trim()
+    if (!text) return true
+    const level = clampHeadingLevel((node.attrs.level as number) ?? 1)
+    if (level > maxLevel) return true
+    const id = headingIds.get(node)
+    if (!id) return true
+    const topLevelIndex = doc.resolve(pos).index(0)
+    const chapter = resolveChapterOrdinalForTopLevelIndex(chapterStartIndices, topLevelIndex) + 1
+    const list = headingsByChapter.get(chapter)
+    const entry = { level, id, text }
+    if (list) list.push(entry)
+    else headingsByChapter.set(chapter, [entry])
+    return true
+  })
+
+  const chapters = [...outlineChapters]
+    .map((ch) => ({
+      chapter: Math.floor(Number(ch.chapter)),
+      title: typeof ch.title === 'string' ? ch.title : '',
+    }))
+    .filter((ch) => Number.isFinite(ch.chapter) && ch.chapter >= 1)
+    .sort((a, b) => a.chapter - b.chapter)
+
+  const entries: TocEntry[] = []
+  for (const ch of chapters) {
+    entries.push({
+      level: 1,
+      id: formatWebBookChapterRootId(ch.chapter),
+      text: ch.title.trim() || `Chapter ${ch.chapter}`,
+    })
+    const kids = headingsByChapter.get(ch.chapter) ?? []
+    for (const heading of kids) {
+      entries.push({
+        level: Math.min(6, heading.level + 1),
+        id: heading.id,
+        text: heading.text,
+      })
+    }
+  }
+  return entries
+}
+
+/**
  * 目次 nav を組み立てる（`includeTableOfContents: true` かつ heading が
  * 1 つ以上あるときだけ、呼び出し側で条件付き呼び出しする）。ネストした
  * `<ol>` は作らず、flat list + `nyoze-toc-level-N` class で階層を表す。
@@ -1287,6 +1377,11 @@ export type HtmlSemanticPolicy = {
   /** Book Web Book only: top-level child indices of each chapter's first node. */
   chapterStartIndices?: readonly number[]
   /**
+   * WB-R15: Book 静的 TOC の章 root タイトル。`includeChapterInfo` とは独立。
+   * `chapterStartIndices` がある Book 全体 export で `outlineChapters` を渡す。
+   */
+  outlineChapters?: readonly HtmlOutlineChapter[]
+  /**
    * WB-R12: Web Book open-time auto TCY snapshot。
    * `variant === 'web-book'` かつ `enabled === true` のときだけ text 分割に使う。
    * standalone / 未指定 / disabled では通常 text のまま。
@@ -1323,9 +1418,22 @@ export function buildHtmlSemanticMainContent(
   if (policy.variant === 'web-book') {
     headingIds = new Map()
     assignWebBookHeadingIds(doc, headingIds, policy.chapterStartIndices)
-    tocEntries = includeTableOfContents
-      ? collectTocEntriesFromAssignedIds(doc, headingIds, tableOfContentsMaxLevel)
-      : []
+    if (includeTableOfContents) {
+      const starts = policy.chapterStartIndices
+      const outlineChapters = policy.outlineChapters
+      tocEntries =
+        starts && starts.length > 0 && outlineChapters && outlineChapters.length > 0
+          ? collectBookWebBookTocEntries(
+              doc,
+              headingIds,
+              tableOfContentsMaxLevel,
+              outlineChapters,
+              starts,
+            )
+          : collectTocEntriesFromAssignedIds(doc, headingIds, tableOfContentsMaxLevel)
+    } else {
+      tocEntries = []
+    }
   } else if (includeTableOfContents) {
     headingIds = new Map()
     tocEntries = collectHeadingTocEntries(doc, headingIds, tableOfContentsMaxLevel)

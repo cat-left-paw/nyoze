@@ -41,6 +41,7 @@ export type {
   HtmlExportWarning,
   HtmlExportWarningCode,
   HtmlExportWritingMode,
+  HtmlOutlineChapter,
 } from './htmlExportSemantic'
 export type {
   HtmlTemplatePart,
@@ -348,6 +349,7 @@ export function exportWebBookFromDoc(
   const semantic = buildHtmlSemanticMainContent(doc, options, {
     variant: 'web-book',
     chapterStartIndices: options?.chapterStartIndices,
+    outlineChapters: options?.outlineChapters,
     autoTcy: autoTcySnapshot,
   })
 
