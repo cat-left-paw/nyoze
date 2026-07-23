@@ -1956,6 +1956,29 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   transform: translateY(0);
 }
 
+/* Fixed tab-strip actions sit at the workspace top edge, so their tooltips
+   must open into the pane below rather than being clipped above it. */
+.editor-tab-actions .toolbar-btn-icon-only[data-tooltip]::after,
+.editor-tab-actions .has-tooltip[data-tooltip]::after {
+  top: calc(100% + 9px);
+  bottom: auto;
+  transform: translate(-50%, -4px);
+}
+
+.editor-tab-actions .toolbar-btn-icon-only[data-tooltip]::before,
+.editor-tab-actions .has-tooltip[data-tooltip]::before {
+  top: calc(100% + 4px);
+  bottom: auto;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.editor-tab-actions .toolbar-btn-icon-only[data-tooltip]:hover::after,
+.editor-tab-actions .toolbar-btn-icon-only[data-tooltip]:focus-visible::after,
+.editor-tab-actions .has-tooltip[data-tooltip]:hover::after,
+.editor-tab-actions .has-tooltip[data-tooltip]:focus-visible::after {
+  transform: translate(-50%, 0);
+}
+
 
 .toolbar-sep {
   display: inline-block;

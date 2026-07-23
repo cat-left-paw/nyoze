@@ -433,7 +433,7 @@ key の詳細・YAML 制限・legacy 互換の一覧は [`docs/frontmatter-refer
 
 右ペイン **Document Metadata** で編集する `title` / `author` / `translator` は **frontmatter** の正本です。作品内の登録済みファイルでは、Document Metadata の frontmatter 編集と 作品タブの books.json 編集は **自動同期しません**（詳細は [文書メタデータ（限定編集UI）](#文書メタデータ限定編集ui)）。
 
-Markdown frontmatter は、作品外の単独文書では従来どおり `title` / `author` / `translator` / `documentType` / `writingMode` などの文書 metadata として使えます。作品内の章ファイルや資料ファイルでも任意の frontmatter を書いて構いませんが、Nyoze の Book 構造は `book` / `order` / `role` frontmatter に依存しません。これらの key は未リリース移行期の案であり、正式な Project / Book 管理の正本ではありません。
+Markdown frontmatter は、作品外の単独文書では従来どおり `title` / `author` / `translator` / `documentType` / `writingMode` などの文書 metadata として使えます。作品内の章ファイルや資料ファイルでも任意の frontmatter を書いて構いませんが、Nyoze の Book 構造は `book` / `order` / `role` frontmatter に依存しません。これらの key は公開前の移行期に検討した案であり、正式な Project / Book 管理の正本ではありません。
 
 #### まだできないこと
 

@@ -7,7 +7,9 @@ Official website: [Nyoze](https://cat-left-paw.github.io/nyoze/)
 Nyoze is an editor that lets you **write vertically as-is**.
 Published by Left Paw Studio.
 
-The next GitHub pre-release is `0.3.0-beta.1`. The Microsoft Store build is not being updated in this cycle and remains at app version `0.2.1-beta.1` / Store package version `1.2.1.0`.
+The next GitHub pre-release is `0.3.0-beta.2`. The Microsoft Store build is not being updated in this cycle and remains at app version `0.2.1-beta.1` / Store package version `1.2.1.0`.
+
+`0.3.0-beta.1` has an issue that can keep renderer CPU usage high while chapter-boundary navigation is unavailable. This is fixed in `0.3.0-beta.2`, and updating is recommended once that build is published.
 
 - Write novels and essays directly in vertical writing
 - Save files in Markdown while keeping them usable as plain text
@@ -173,7 +175,7 @@ For supported keys, source-of-truth boundaries (standalone vs Project files), YA
 
 ## Supported Environments
 
-The `0.3.0-beta.1` GitHub pre-release targets are:
+The `0.3.0-beta.2` GitHub pre-release targets are:
 
 - macOS:
   - DMG for Apple Silicon (`arm64`)
@@ -184,7 +186,7 @@ The `0.3.0-beta.1` GitHub pre-release targets are:
 - Linux: no official package in the current beta
 
 Windows is 64-bit (`x64`) only. 32-bit Windows is not supported in the current beta.
-On Windows, `0.3.0-beta.1` is distributed as a GitHub pre-release. The Microsoft Store build remains at app version `0.2.1-beta.1` / package version `1.2.1.0` and does not yet contain the new features in this pre-release. Use the Store build for the currently published installation path, or the GitHub zip to observe the new features or when the Store is unavailable.
+On Windows, `0.3.0-beta.2` is distributed as a GitHub pre-release. The Microsoft Store build remains at app version `0.2.1-beta.1` / package version `1.2.1.0` and does not yet contain the new features in this pre-release. Use the Store build for the currently published installation path, or the GitHub zip to observe the new features or when the Store is unavailable.
 
 macOS has two variants:
 
@@ -207,7 +209,7 @@ Expected paths:
   - Intel Mac: download the `x64` DMG
 - Windows:
   - Use the currently published Store build: install `Nyoze` from Microsoft Store
-  - Try `0.3.0-beta.1`: download the GitHub Releases zip, extract it, read the bundled `README.txt`, and run `Nyoze.exe`
+  - Try `0.3.0-beta.2`: download the GitHub Releases zip, extract it, read the bundled `README.txt`, and run `Nyoze.exe`
 
 Installation notes:
 

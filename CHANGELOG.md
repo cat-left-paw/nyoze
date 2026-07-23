@@ -3,11 +3,25 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
-次の GitHub pre-release は `0.3.0-beta.1` です。Microsoft Store は今回は更新せず、公開中のアプリ表示 version `0.2.1-beta.1` / Store package version `1.2.1.0` を維持します。
+次の GitHub pre-release は `0.3.0-beta.2` です。Microsoft Store は今回は更新せず、公開中のアプリ表示 version `0.2.1-beta.1` / Store package version `1.2.1.0` を維持します。
 
 ## 未リリース
 
 - 現時点ではありません
+
+## 0.3.0-beta.2
+
+`0.3.0-beta.1` 公開後に確認された不具合を修正する pre-release です。
+
+### 不具合修正
+
+- 章境界ナビゲーションが無効な状態でrendererの再描画が繰り返され、アイドル時にもCPU使用率が高くなる問題を修正
+- 見出し先頭の全角空白が再解析や保存を繰り返すたびに増殖する問題を修正
+- タブ列右端の操作アイコンでtooltipが表示されない問題を修正
+
+### 表示・案内
+
+- 書庫未登録時の案内を、現在の書庫作成・登録手順に合わせて更新
 
 ## 0.3.0-beta.1
 

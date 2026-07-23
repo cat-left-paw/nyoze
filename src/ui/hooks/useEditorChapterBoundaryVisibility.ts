@@ -32,14 +32,23 @@ export function useEditorChapterBoundaryVisibility({
   eligibility,
   resetKey,
 }: UseEditorChapterBoundaryVisibilityOptions) {
+  const atStart = edges.atStart
+  const atEnd = edges.atEnd
+  const canShowStartGroup = eligibility.canShowStartGroup
+  const canShowEndGroup = eligibility.canShowEndGroup
   const getInteractionHostRef = useRef(getInteractionHost)
   const writingModeRef = useRef(writingMode)
-  const edgesRef = useRef(edges)
-  const eligibilityRef = useRef(eligibility)
+  const edgesRef = useRef<ScrollEdges>({ atStart, atEnd })
+  const eligibilityRef = useRef<BoundaryGroupEligibility>({
+    canShowStartGroup,
+    canShowEndGroup,
+  })
   getInteractionHostRef.current = getInteractionHost
   writingModeRef.current = writingMode
-  edgesRef.current = edges
-  eligibilityRef.current = eligibility
+  edgesRef.current.atStart = atStart
+  edgesRef.current.atEnd = atEnd
+  eligibilityRef.current.canShowStartGroup = canShowStartGroup
+  eligibilityRef.current.canShowEndGroup = canShowEndGroup
 
   const prevEdgesRef = useRef<ScrollEdges>({ atStart: false, atEnd: false })
   const controllerRef = useRef<ReturnType<
@@ -47,13 +56,21 @@ export function useEditorChapterBoundaryVisibility({
   > | null>(null)
 
   const [visibility, setVisibility] = useState<BoundaryGroupVisibility>(INITIAL_VISIBILITY)
+  const handleVisibilityChange = useCallback((next: BoundaryGroupVisibility) => {
+    setVisibility((prev) =>
+      prev.startGroupVisible === next.startGroupVisible &&
+      prev.endGroupVisible === next.endGroupVisible
+        ? prev
+        : next,
+    )
+  }, [])
 
   if (!controllerRef.current) {
     controllerRef.current = createEditorChapterBoundaryVisibilityController({
       getHideDelayMs: resolveChapterBoundaryHideDelayMs,
       scheduleTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
       cancelTimeout: (handle) => window.clearTimeout(handle),
-      onVisibilityChange: setVisibility,
+      onVisibilityChange: handleVisibilityChange,
     })
   }
 
@@ -99,9 +116,11 @@ export function useEditorChapterBoundaryVisibility({
     }
 
     const prev = prevEdgesRef.current
-    controller.onEdgesChanged(prev, edges, eligibility)
-    prevEdgesRef.current = edges
-  }, [enabled, edges, eligibility, resetKey])
+    const nextEdges = { atStart, atEnd }
+    const nextEligibility = { canShowStartGroup, canShowEndGroup }
+    controller.onEdgesChanged(prev, nextEdges, nextEligibility)
+    prevEdgesRef.current = nextEdges
+  }, [enabled, atStart, atEnd, canShowStartGroup, canShowEndGroup, resetKey])
 
   useEffect(() => {
     if (!enabled) return

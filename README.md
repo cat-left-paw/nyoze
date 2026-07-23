@@ -7,7 +7,9 @@
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
-次の GitHub pre-release は `0.3.0-beta.1` です。Microsoft Store 版は今回は更新せず、公開中の `0.2.1-beta.1` / Store package version `1.2.1.0` を維持します。
+次の GitHub pre-release は `0.3.0-beta.2` です。Microsoft Store 版は今回は更新せず、公開中の `0.2.1-beta.1` / Store package version `1.2.1.0` を維持します。
+
+`0.3.0-beta.1` では、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題が確認されています。`0.3.0-beta.2` で修正するため、公開後は更新を推奨します。
 
 - 小説やエッセイを縦書きでそのまま書けます
 - Markdown 形式で保存されますが、普通のテキストとして扱えます
@@ -175,7 +177,7 @@ author: 著者名
 
 ## 対応環境
 
-`0.3.0-beta.1` のGitHub pre-release配布対象は次の環境です。
+`0.3.0-beta.2` のGitHub pre-release配布対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
@@ -186,7 +188,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windowsでは、GitHub Releasesに`0.3.0-beta.1`をpre-releaseとして配布します。Microsoft Store公開版はアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`のままで、今回の新機能は含みません。Store版は通常利用向け、GitHub zipは新機能の観察またはStoreを使えない環境向けです。
+Windowsでは、GitHub Releasesに`0.3.0-beta.2`をpre-releaseとして配布します。Microsoft Store公開版はアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`のままで、今回の新機能は含みません。Store版は通常利用向け、GitHub zipは新機能の観察またはStoreを使えない環境向けです。
 
 macOS 版は 2 種類あります。
 
@@ -209,7 +211,7 @@ Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run
   - Intel Mac: `x64` の DMG をダウンロードして起動
 - Windows:
   - 公開済みStore版を使う: Microsoft Storeから`Nyoze`を導入
-  - `0.3.0-beta.1`を試す: GitHub Releasesのzipをダウンロードして展開し、同梱の`README.txt`を確認して`Nyoze.exe`を起動
+  - `0.3.0-beta.2`を試す: GitHub Releasesのzipをダウンロードして展開し、同梱の`README.txt`を確認して`Nyoze.exe`を起動
 
 インストール時の注意:
 

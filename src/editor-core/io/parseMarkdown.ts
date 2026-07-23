@@ -339,7 +339,10 @@ function parseObsidianPlainLine(schema: Schema, line: string, options?: ParseMar
       const headingType = schema.nodes.heading
       if (!headingType) return heading
 
-      const markerMatch = body.match(/^(#{1,6})([ \t\u3000]+)([\s\S]*)$/)
+      // markdown-it が見出し構文の delimiter (ASCII space / tab) を消費し、
+      // U+3000 は inline text としてすでに保持する。ここで U+3000 まで
+      // marker padding として復元すると、本文の先頭へ二重に追加してしまう。
+      const markerMatch = body.match(/^(#{1,6})([ \t]+)([\s\S]*)$/)
       const markerPadding = markerMatch && markerMatch[2].length > 1
         ? markerMatch[2].slice(1)
         : ''

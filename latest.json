@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0-beta.1",
-  "releaseUrl": "https://github.com/cat-left-paw/nyoze/releases/tag/v0.3.0-beta.1",
-  "notes": "Add Project and Book management, Page Viewer, Web Book, and book-wide external exports; improve mobile reading, manuscript safety, and editor UI"
+  "version": "0.3.0-beta.2",
+  "releaseUrl": "https://github.com/cat-left-paw/nyoze/releases/tag/v0.3.0-beta.2",
+  "notes": "Fix excessive idle renderer CPU use and heading full-width space duplication; restore tab action tooltips and update library guidance"
 }

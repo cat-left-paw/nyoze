@@ -151,6 +151,7 @@ export function createEditorChapterBoundaryVisibilityController(
   }
 
   const reset = () => {
+    const visibilityChanged = groups.start.visible || groups.end.visible
     sessionGeneration += 1
     for (const group of ['start', 'end'] as const) {
       cancelHideTimer(group)
@@ -158,7 +159,9 @@ export function createEditorChapterBoundaryVisibilityController(
       groups[group].visible = false
       groups[group].hideTimerGeneration = sessionGeneration
     }
-    emit()
+    if (visibilityChanged) {
+      emit()
+    }
   }
 
   const onEdgesChanged = (

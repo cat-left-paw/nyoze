@@ -3253,10 +3253,10 @@ export const UI_TEXT_REGISTRY = {
   },
   'library.empty': {
     // 「Load 経由で気軽にフォルダを開いて書庫追加」と読める文言は使わない。
-    // 書庫追加導線は次スライスでこの画面に追加する前提。
+    // 新規作成と既存フォルダ登録は、この管理画面の操作群から行う。
     label: {
-      ja: '書庫が登録されていません。書庫の追加は、次のスライスでこの画面に追加します。',
-      en: 'No libraries registered yet. Adding libraries will land here in the next slice.',
+      ja: '書庫が登録されていません。新しい書庫を作成するか、原稿のある既存フォルダを書庫として登録してください。',
+      en: 'No libraries are registered. Create a new library or register an existing folder containing your manuscripts.',
     },
   },
   'library.loading': {
