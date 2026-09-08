@@ -3,9 +3,9 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
-現行の GitHub Latest は `0.3.0-beta.2` です。次期版は `0.4.0-beta.1` に決定し、公開準備中です。Microsoft Store 公開版はアプリ表示 version `0.2.1-beta.1` / Store package version `1.2.1.0` で、次回更新ではアプリ表示 version `0.4.0-beta.1` / Store package version `1.2.2.0` に揃えます。
+現行の GitHub Latest は `0.4.0-beta.1` です。Microsoft Store版もアプリ表示 version `0.4.0-beta.1` / Store package version `1.2.2.0`へ更新します。Storeへの反映は審査完了後となるため、それまではアプリ表示 version `0.2.1-beta.1` / package version `1.2.1.0`が表示される場合があります。
 
-## 0.4.0-beta.1（公開準備中）
+## 0.4.0-beta.1
 
 ### 不具合修正
 
@@ -26,11 +26,6 @@
 - 狭幅headerへoverflow indicator、wheel / thumb操作、window drag grip、toolbar専用pan gripを追加
 - 左右pane開閉のwidth animationを撤去して長文時の開閉を軽くし、開閉後の擬似caret再配置を追加
 - 長文編集モード中の章境界navigation stackingを修正し、editorの横書き本文にも行末justifyを適用
-
-### 開発・検証
-
-- rendererのidle高CPUとPage Viewer lifecycle回帰を検知するperformance smokeを追加
-- test suiteをsmoke / normal / diagnostic / release tierへ整理し、件数ではなく実行時間・証拠重複・再現性で管理
 
 ## 0.3.0-beta.2
 
@@ -80,7 +75,7 @@
 
 ## 0.2.0-beta.1
 
-- Electron を `41.3.0` へ更新し、縦書き・scroll restore・shortcut E2E と macOS arm64 / Windows x64 package の確認を実施
+- Electron を `41.3.0` へ更新
 - Paragraph Plain 解除時に、単一 top-level block として解釈できる `# heading` / list / quote / fenced code / `---` を通常表示へ反映するよう改善
 - special inline boundary を `aozoraRuby` / `aozoraTcy` 共通へ整理し、WORD JOINER sentinel、delayed composition suppression、診断ログ改善で日本語 IME 境界入力を安定化
 - Windows / Linux の native titlebar overlay controls と header toolbar / Document Type badge が重ならないよう、window controls overlay reservation と狭幅 header layout を調整

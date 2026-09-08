@@ -7,9 +7,9 @@
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
-現行の GitHub Latest は `0.3.0-beta.2` です。次期版は `0.4.0-beta.1` に決定し、公開準備中です。Microsoft Storeも次回更新でアプリ表示version `0.4.0-beta.1` / Store package version `1.2.2.0`へ揃えます。公開まではStore版`0.2.1-beta.1` / package version `1.2.1.0`が現行です。
+現行の GitHub Latest は `0.4.0-beta.1` です。Microsoft Store版もアプリ表示version `0.4.0-beta.1` / Store package version `1.2.2.0`へ更新します。Storeへの反映は審査完了後となるため、それまではアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`が表示される場合があります。
 
-`0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。GitHub版は `0.3.0-beta.2` への更新を推奨します。
+`0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。`0.4.0-beta.1`にもこの修正が含まれています。
 
 - 小説やエッセイを縦書きでそのまま書けます
 - Markdown 形式で保存されますが、普通のテキストとして扱えます
@@ -179,7 +179,7 @@ author: 著者名
 
 ## 対応環境
 
-`0.4.0-beta.1`で予定している公式配布対象は次の環境です。公開まではGitHub Latest `0.3.0-beta.2`と現行Microsoft Store版を利用してください。
+`0.4.0-beta.1`の公式配布対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
@@ -190,7 +190,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windowsでは、`0.4.0-beta.1`をGitHub x64 zipとMicrosoft Storeの両方へ出す予定です。Store版もGitHub版と同じアプリ機能・表示versionへ更新し、通常利用ではStore版を優先します。GitHub zipはStoreを使えない環境向けの代替です。
+Windowsでは、`0.4.0-beta.1`をGitHub x64 zipで公開し、Microsoft Store版も同じアプリ機能・表示versionへ更新します。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
 
 macOS 版は 2 種類あります。
 
@@ -330,10 +330,12 @@ npm run package:win:x64
 - コードブロックのシンタックスハイライトは WYSIWYG 表示のみです。言語未指定・未対応言語では自動判定せず、プレーン表示になります
 - 文書内リンクは `Cmd/Ctrl + Click` で外部ページへ移動できます。通常クリックでは開きません
 - `Cmd/Ctrl + Click` で開ける文書内リンクは、`https://` の認証情報なし絶対 URL のみです。`http://`、`mailto:`、`tel:`、相対リンク、文書内アンカーは通常編集上の外部オープン対象ではありません
+- 長文編集モードで局所編集面が「編集中」の間は、タイプライターモードなど一部の表示・編集補助機能を同時に利用できません。これらの機能を使う場合は、長文編集モードをOFFにしてください
+- 長文編集モードを安全に維持できない場合、未確定の編集内容を保護したまま「回復（recovery）」状態になることがあります。この状態では、再試行、下書きのコピー、確認後の破棄を選択できます。macOS / Windows実機ではこの状態を自然に再現できなかったため、回復状態での実機確認は未了です
 - ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
 - Windows の一部 AMD GPU + Chromium 系環境では、本文や `Source Mode` 上の I-beam カーソルが白く見えて視認しづらくなることがあります。その場合は `View Settings > 文書テーマ > エディタで矢印ポインターを使う` を有効にすると、本文上だけ矢印ポインターへ切り替えて回避できます
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
-- 数十万文字級でルビ等を多く含む文書では、Windowsを中心に、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。長文編集モードをOFFにすると同モード固有の負荷は避けられますが、通常エディタの全文DOM負荷は残ります
+- 数十万文字級でルビ等を多く含む文書では、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。発生のしやすさは、端末の性能や文書の内容・構造によって異なります
 - 重く感じたときは、まず長文編集モードまたはルビ表示をOFFにする、`Paragraph Plain`を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
 - beta 版では、開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります
 - beta で完全保持しない代表例は、GFM table、reference-style link / link definition、footnote、definition list、複雑な list / blockquote、code fence の文字種・長さ・空行、softbreak / hardbreak の表記差分です

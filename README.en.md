@@ -7,9 +7,9 @@ Official website: [Nyoze](https://cat-left-paw.github.io/nyoze/)
 Nyoze is an editor that lets you **write vertically as-is**.
 Published by Left Paw Studio.
 
-The current GitHub Latest release is `0.3.0-beta.2`. The next release is fixed at `0.4.0-beta.1` and is being prepared. The Microsoft Store build will be updated to the same app version with Store package version `1.2.2.0`; until publication, the Store remains at app version `0.2.1-beta.1` / package version `1.2.1.0`.
+The current GitHub Latest release is `0.4.0-beta.1`. The Microsoft Store build will also be updated to app version `0.4.0-beta.1` with Store package version `1.2.2.0`. Until Store review is complete, app version `0.2.1-beta.1` / package version `1.2.1.0` may still be shown.
 
-The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable is fixed in `0.3.0-beta.2`. GitHub-build users should update to `0.3.0-beta.2`.
+The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable was fixed in `0.3.0-beta.2`. The fix is also included in `0.4.0-beta.1`.
 
 - Write novels and essays directly in vertical writing
 - Save files in Markdown while keeping them usable as plain text
@@ -177,7 +177,7 @@ For supported keys, source-of-truth boundaries (standalone vs Project files), YA
 
 ## Supported Environments
 
-The planned official targets for `0.4.0-beta.1` are listed below. Until publication, use GitHub Latest `0.3.0-beta.2` or the currently published Microsoft Store build.
+The official targets for `0.4.0-beta.1` are listed below.
 
 - macOS:
   - DMG for Apple Silicon (`arm64`)
@@ -188,7 +188,7 @@ The planned official targets for `0.4.0-beta.1` are listed below. Until publicat
 - Linux: no official package in the current beta
 
 Windows is 64-bit (`x64`) only. 32-bit Windows is not supported in the current beta.
-On Windows, `0.4.0-beta.1` is planned for both a GitHub x64 zip and Microsoft Store. The Store build will carry the same app features and displayed version as the GitHub build. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
+On Windows, `0.4.0-beta.1` is available as a GitHub x64 zip, and the Microsoft Store build will be updated to the same app features and displayed version. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
 
 macOS has two variants:
 
@@ -325,10 +325,12 @@ Packages are written to `release/<version>/`. The official scope for `0.4.0-beta
 - Code block syntax highlighting is WYSIWYG-only; unsupported or unspecified languages fall back to plain display
 - Document links open externally with `Cmd/Ctrl + Click`; normal click does not open them
 - External open is limited to absolute `https://` URLs without credentials; `http://`, `mailto:`, `tel:`, relative links, and document anchors are not opened from normal editing
+- While the localized editing surface is active, some display and editing assistance features, including Typewriter Mode, cannot be used at the same time. Disable Long Document Editing when you need these features
+- If Long Document Editing cannot safely keep the localized editing surface active, it may enter a Recovery state while preserving uncommitted draft content. From this state, you can retry, copy the draft, or discard it after confirmation. This state could not be reproduced naturally on macOS or Windows hardware, so real-device behavior in the Recovery state remains unverified
 - When starting Japanese IME input immediately after ruby text or explicit TCY, some environments may rarely stall on the second typed character right after the first one goes through; pressing `Escape` discards the unfinished input and returns to normal editing
 - On some Windows environments using AMD GPUs with Chromium-based rendering, the I-beam cursor over the editor or `Source Mode` may appear white and hard to see. In that case, enable `View Settings > Document Theme > Use arrow pointer in editor` as a workaround for the editor area
 - Around 100,000 characters, some environments may become slow for input or rendering; vertical writing, visible ruby, search ON, and Japanese IME input make this more likely
-- With very large documents containing extensive ruby or similar rich inline content, especially on Windows, a click or drag immediately after switching documents may take several seconds and Windows may temporarily report the app as not responding. Turning Long Editing Mode OFF avoids its additional cost, but the full-DOM cost of the normal editor remains
+- With very large documents containing extensive ruby or similar rich inline content, a click or drag immediately after switching documents may take several seconds and the app may temporarily appear unresponsive. How easily this occurs depends on the computer's performance and the document's content and structure
 - If performance feels heavy, first try turning Long Editing Mode or ruby display OFF, using `Paragraph Plain`, or splitting the manuscript into separate files by chapter
 - Opening and immediately saving in beta is not guaranteed to preserve the exact original Markdown spelling; content may be normalized to Nyoze’s Markdown representation
 - Typical examples not fully preserved in beta include GFM tables, reference-style links / link definitions, footnotes, definition lists, complex lists / blockquotes, code fence marker details / blank lines, and softbreak / hardbreak spelling differences

@@ -2,7 +2,7 @@
 
 この文書は、Nyoze が **現行実装** に基づいて Markdown frontmatter をどう読み、どこまで GUI から書き、どこを正本（source of truth）とするかをまとめたユーザー向け正本です。実装の正本は `src/editor-core/io/frontmatter.ts` と `src/editor-core/io/frontmatterDocumentSettings.ts` です。
 
-用語: 右ペインの限定編集 UI は **文書メタデータ / Document Metadata** と呼びます。作品（Project）管理の表示 metadata は **作品** タブと `.nyoze/books.json` v3 が正本です。
+用語: 右ペインの限定編集 UI は **文書メタデータ / Document Metadata** と呼びます。作品（Project）管理の表示 metadata は **作品** タブと `.nyoze/books.json` が正本です。
 
 ---
 
@@ -46,13 +46,13 @@ documentType: novel
 
 | key | 型・推奨記法 | Nyoze での用途 | Document Metadata から編集 | 作品外単独文書 | 作品内登録ファイル |
 | --- | --- | --- | --- | --- | --- |
-| `title` | 単一行 scalar（plain / quoted） | 冒頭表示の主タイトル、左ペイン文書情報など | **可** | **frontmatter が正本** | books.json v3 の `title` が表示正本。frontmatter は編集可能だが表示へは反映されない |
-| `original_title` | 単一行 scalar | 冒頭表示の原題 | **不可**（Source Mode） | frontmatter が正本。`FrontmatterView` で表示 | frontmatter に保持可能だが、**冒頭表示には使われない**（books.json v3 に原題フィールドはなく、`ProjectFileStartView` も表示しない） |
-| `subtitle` | 単一行 scalar | 冒頭表示の副題 | **不可**（Source Mode） | frontmatter が正本。`FrontmatterView` で表示 | frontmatter に保持可能だが、**冒頭表示には使われない**（v3 に副題フィールドはない） |
-| `author` | 単一行 scalar | 冒頭表示の著者（主） | **可** | **frontmatter が正本** | v3 の `authors[0]` 相当が表示正本。frontmatter は同期されない |
-| `co_authors` | **推奨**: block sequence（`- 名前`）。コード上は flow sequence `[a, b]`、カンマ区切り 1 行、単一 scalar も読める | 冒頭表示の共著者 | **不可**（Source Mode） | frontmatter が正本 | v3 の `authors` 配列が表示正本 |
-| `translator` | 単一行 scalar | 冒頭表示の訳者（主） | **可** | **frontmatter が正本** | v3 の `translators[0]` 相当が表示正本 |
-| `co_translators` | **推奨**: block sequence。`co_authors` と同様の読み取り範囲 | 冒頭表示の共訳者 | **不可**（Source Mode） | frontmatter が正本 | v3 の `translators` が表示正本 |
+| `title` | 単一行 scalar（plain / quoted） | 冒頭表示の主タイトル、左ペイン文書情報など | **可** | **frontmatter が正本** | books.json の `title` が表示正本。frontmatter は編集可能だが表示へは反映されない |
+| `original_title` | 単一行 scalar | 冒頭表示の原題 | **不可**（Source Mode） | frontmatter が正本。`FrontmatterView` で表示 | frontmatter に保持可能だが、**冒頭表示には使われない**（books.json に原題フィールドはなく、`ProjectFileStartView` も表示しない） |
+| `subtitle` | 単一行 scalar | 冒頭表示の副題 | **不可**（Source Mode） | frontmatter が正本。`FrontmatterView` で表示 | frontmatter に保持可能だが、**冒頭表示には使われない**（books.json に副題フィールドはない） |
+| `author` | 単一行 scalar | 冒頭表示の著者（主） | **可** | **frontmatter が正本** | books.json の `authors[0]` 相当が表示正本。frontmatter は同期されない |
+| `co_authors` | **推奨**: block sequence（`- 名前`）。コード上は flow sequence `[a, b]`、カンマ区切り 1 行、単一 scalar も読める | 冒頭表示の共著者 | **不可**（Source Mode） | frontmatter が正本 | books.json の `authors` 配列が表示正本 |
+| `translator` | 単一行 scalar | 冒頭表示の訳者（主） | **可** | **frontmatter が正本** | books.json の `translators[0]` 相当が表示正本 |
+| `co_translators` | **推奨**: block sequence。`co_authors` と同様の読み取り範囲 | 冒頭表示の共訳者 | **不可**（Source Mode） | frontmatter が正本 | books.json の `translators` が表示正本 |
 
 #### `co_authors` / `co_translators` の読み取り範囲（実装準拠）
 
@@ -176,12 +176,12 @@ frontmatter に `writingMode` が **無い** ときだけ、文書タイプ別�
 
 | 種類 | 正本 |
 | --- | --- |
-| Book 名・Book 著者、本文 / 資料の title / authors / translators | **`.nyoze/books.json` v3** |
-| 章順・Book 所属・資料 role | **books.json v3** |
+| Book 名・Book 著者、本文 / 資料の title / authors / translators | **`.nyoze/books.json`** |
+| 章順・Book 所属・資料 role | **books.json** |
 | 文書挙動（`documentType` / `writingMode` / `nyozePreserveEmptyParagraphs` など） | **frontmatter**（従来どおり） |
 
-- 作品タブ・文書冒頭（`ProjectFileStartView` の v3 表示）・左ペイン文書情報は **books.json v3 の title / authors / translators** から表示し、frontmatter の `title` / `author` / `translator` へ **fallback しません**。
-- `original_title` / `subtitle` は books.json v3 に相当フィールドがなく、作品内登録ファイルの冒頭表示にも **使われません**（frontmatter に書いて保持することは可能）。
+- 作品タブ・文書冒頭・左ペイン文書情報は **books.json の title / authors / translators** から表示し、frontmatter の `title` / `author` / `translator` へ **fallback しません**。
+- `original_title` / `subtitle` は books.json に相当フィールドがなく、作品内登録ファイルの冒頭表示にも **使われません**（frontmatter に書いて保持することは可能）。
 - Document Metadata で frontmatter を編集しても **books.json とは自動同期しません**。
 - 作品内でも任意の frontmatter は残せます（外部ツール連携・独自 metadata 用）。
 
@@ -199,11 +199,11 @@ frontmatter に `writingMode` が **無い** ときだけ、文書タイプ別�
 
 | key | 旧用途 | 現行の正本 |
 | --- | --- | --- |
-| `book` | 所属 Book 名 | books.json v3 の Book / item 所属 |
-| `order` | 作品内の並び順 | books.json v3 の配列順 |
-| `role` | 本文 / 資料種別 | books.json v3 の item / material 登録と `material.role` |
+| `book` | 所属 Book 名 | books.json の Book / item 所属 |
+| `order` | 作品内の並び順 | books.json の配列順 |
+| `role` | 本文 / 資料種別 | books.json の item / material 登録と `material.role` |
 
-`parseBookFrontmatterFields` は read-only でこれらを読めますが、Project タブ・Book 全体 Outline・前後章ナビ・File Explorer の role アイコンは **books.json v3** を参照します。File Explorer の role アイコンは **frontmatter `role` ではなく** v3 registry から解決します。
+`parseBookFrontmatterFields` は read-only でこれらを読めますが、Project タブ・Book 全体 Outline・前後章ナビ・File Explorer の role アイコンは **books.json** を参照します。File Explorer の role アイコンは **frontmatter `role` ではなく** books.json の登録情報から解決します。
 
 新規の作品管理用途で `book` / `order` / `role` を frontmatter に書くことは推奨しません。
 
@@ -301,7 +301,7 @@ writingMode: vertical-rl
 ---
 ```
 
-- 章の表示名・著者は **作品** タブ（books.json v3）が正本。
+- 章の表示名・著者は **作品** タブ（books.json）が正本。
 - この frontmatter は文書挙動と外部連携用 metadata として残せます。
 
 ### 7.5 legacy key を含む既存文書
@@ -327,4 +327,3 @@ author: 著者
 
 - 操作説明: [MANUAL.md](../MANUAL.md)（文書メタデータ / Document Metadata、作品管理）
 - 改行ポリシー詳細: [line-break-policy-rules.md](../line-break-policy-rules.md)
-- books.json v3 設計: [book-manifest-v3-design-2026-06.md](./book-manifest-v3-design-2026-06.md)

@@ -89,7 +89,9 @@ Paragraph Plain と Source Mode は同時に有効にできません。
 - ON にすると、通常本文の対応位置で入力用の局所編集面を自動的に取得します。ON にした時点ですでに本文へキャレットがあれば、追加クリックなしで開始できます。
 - 左下の状態アイコンは **オフ / 待機中 / 編集中** を示します。待機中は故障ではなく、現在位置を通常エディタが担当している状態です。
 - ルビ / 縦中横の境界、範囲選択、構造操作などは安全のため通常エディタへ戻ります。入力確定、書字方向切替、同一タブ内のファイル切替、対応するキャレット移動のあと、条件が整えば自動的に再開します。
+- 局所編集面が「編集中」の間は、タイプライターモードなど一部の表示・編集補助機能を同時に利用できません。これらの機能を使う場合は、長文編集モードを OFF にしてください。
 - OFF にすると、未確定の編集内容を本文へ反映してから停止します。処理を安全に完了できない場合は、未確定内容を保持した回復案内を表示し、再試行・下書きコピー・確認後の破棄を選べます。
+- 長文編集モードを安全に維持できない場合、未確定内容を保護したまま「回復（recovery）」状態になることがあります。macOS / Windows 実機ではこの状態を自然に再現できなかったため、回復状態での実機確認は未了です。
 - 保存 Markdown、Undo / Redo、未保存確認は通常編集と同じです。実験的機能なので、重要な原稿は通常どおりバックアップしてください。
 - macOS / Windowsを確認対象としています。Linuxでもソース版またはローカルbuildから試せますが、動作保証と公式サポートの対象外です。
 
@@ -347,9 +349,9 @@ File Explorer の左ペイン上部には **書庫** / **作品** のタブが�
 
 #### Books と資料
 
-作品内の Book 構造、資料分類、**表示 metadata**（Book 名 / 著者、本文・資料の title / authors / translators）の正本は、各 Markdown の frontmatter ではなく `.nyoze/books.json` **v3** です。作品タブの Book 作成、Book 名変更、本文・資料 metadata 編集、ファイル登録、並び替え、登録解除はこのファイルだけを更新します。Markdown 本文や frontmatter は自動で書き換えません。
+作品内の Book 構造、資料分類、**表示 metadata**（Book 名 / 著者、本文・資料の title / authors / translators）の正本は、各 Markdown の frontmatter ではなく `.nyoze/books.json` です。作品タブの Book 作成、Book 名変更、本文・資料 metadata 編集、ファイル登録、並び替え、登録解除はこのファイルだけを更新します。Markdown 本文や frontmatter は自動で書き換えません。
 
-最小例（v3）:
+構成例:
 
 ```json
 {
@@ -396,7 +398,7 @@ Mac と Windows の間では、日本語ファイル名の濁点 / 半濁点な�
 
 Books セクションでは Book ごとに本文ファイルを一覧表示し、章タイトルのクリックで通常タブへ開けます。Book が空でも Book 名、編集、登録解除、折りたたみ操作は表示されます。Materials セクションでは資料ファイルを 1 つの一覧にまとめ、`全て` / `人物` / `設定` / `梗概` / `資料` / `未整理` の chip で複数 role を同時に表示できます。`全て` は一括 ON/OFF のトグルです。資料名のクリックで下部 preview を切り替え、同じ資料をもう一度クリックするか索引の空白をクリックすると preview を解除できます。資料を通常タブで開く場合は、各項目の **中央で開く** を使います。現在ファイルは強調表示されます。
 
-作品タブには、作品切り替え、Books / Materials / 未登録ファイルセクションの折りたたみ、Book ごとの折りたたみもあります。未登録ファイルセクションは `.nyoze/books.json` が **v3 ready** であるか、まだ未初期化（manifest absent・warning なし）の Project で表示されます（未登録ファイルが 0 件でも空状態として表示されます）。対象は project root 配下の `.md` / `.markdown` / `.txt` です。一覧から **Book に追加**（本文・章として登録）または **資料にする**（資料として登録）できます。Book がまだない場合は本文として追加できませんが、資料としての登録は可能です。manifest が破損している場合は未登録一覧も表示しません。
+作品タブには、作品切り替え、Books / Materials / 未登録ファイルセクションの折りたたみ、Book ごとの折りたたみもあります。未登録ファイルセクションは `.nyoze/books.json` が利用可能であるか、まだ未初期化（manifest absent・warning なし）の Project で表示されます（未登録ファイルが 0 件でも空状態として表示されます）。対象は project root 配下の `.md` / `.markdown` / `.txt` です。一覧から **Book に追加**（本文・章として登録）または **資料にする**（資料として登録）できます。Book がまだない場合は本文として追加できませんが、資料としての登録は可能です。manifest が破損している場合は未登録一覧も表示しません。
 
 **作品登録を解除**、**Book / 本文 / 資料の登録解除** は、いずれも registry から外す操作です。Markdown 本文は削除されません。Book や本文 / 資料の登録解除後、project 内にファイルが残っていれば未登録ファイル一覧から再登録できます。ファイルが見つからない registry 行の登録解除は、見つからない登録だけを外します。作品登録解除は `.nyoze/project.json` と `.nyoze/books.json` だけを外し、`notes.json` も Markdown 本文も削除しません。未削除の付箋がある場合は作品登録解除できません。
 
@@ -414,7 +416,7 @@ Books の本文章ファイルは右ペイン内編集の対象外です。**中
 
 **File > ページビューア** または上部ツールバーの Page Viewer ボタンから、現在の文書を独立した読み取り専用ウィンドウで開けます。同時に開ける Page Viewer は 1 つだけです。すでに開いている場合は、そのウィンドウを前面に出して新しい対象へ切り替えます。
 
-現在開いているファイルが `.nyoze/books.json` v3 に登録された Book の本文（body）章である場合、ツールバーの Page Viewer ボタンは split button になります。左側の Presentation アイコンは従来どおり現在の文書を開き、右側の▼から対象を選べます（現在の文書 / Book 全体）。Materials、未登録ファイル、作品外の単独ファイルでは、従来どおり単独の Page Viewer ボタンのままです。
+現在開いているファイルが `.nyoze/books.json` に登録された Book の本文（body）章である場合、ツールバーの Page Viewer ボタンは split button になります。左側の Presentation アイコンは従来どおり現在の文書を開き、右側の▼から対象を選べます（現在の文書 / Book 全体）。Materials、未登録ファイル、作品外の単独ファイルでは、従来どおり単独の Page Viewer ボタンのままです。
 
 - 現在の文書を開く場合は、起動時点の編集内容を snapshot として表示します。未保存の変更も表示されますが、Viewer 側から保存・編集はできません。
 - 本文は CSS Columns でページ単位に組み、キーボード、下部 scrubber、目次、Outline パネルからページ移動できます。`:::page-break` は次の本文を新しいページから始め、`:::blank-page-N` は指定枚数の空白ページとして表示します。
@@ -427,13 +429,13 @@ Books の本文章ファイルは右ペイン内編集の対象外です。**中
 
 #### Book 全体 Page Viewer
 
-現在開いているファイルが `.nyoze/books.json` v3 に登録された Book の本文（body）章であれば、**File > Book 全体をページビューアで開く...**、またはツールバー Page Viewer の▼メニューから **Book 全体をページビューアで開く** で、その Book 全体を独立した読み取り専用 Page Viewer ウィンドウで開けます。
+現在開いているファイルが `.nyoze/books.json` に登録された Book の本文（body）章であれば、**File > Book 全体をページビューアで開く...**、またはツールバー Page Viewer の▼メニューから **Book 全体をページビューアで開く** で、その Book 全体を独立した読み取り専用 Page Viewer ウィンドウで開けます。
 
 - 対象は現在ファイルが属する Book の本文章すべてです。Materials、未登録ファイル、作品外の単独ファイルでは実行できません。
-- 表示 metadata は `.nyoze/books.json` v3 の Book 名 / 著者と、各章の title / authors / translators を使います。章ファイルの frontmatter `title` / `author` / `translator` へは fallback しません。
+- 表示 metadata は `.nyoze/books.json` の Book 名 / 著者と、各章の title / authors / translators を使います。章ファイルの frontmatter `title` / `author` / `translator` へは fallback しません。
 - 章ファイルはディスク上の保存済み内容を read-only に読みます。未保存の編集がある場合は反映されない旨の通知を出しますが、自動保存や書き換えは行いません。
 - Book 冒頭情報、目次、各章冒頭情報を Page Viewer 内に表示します。章境界は既定で改ページされ、本文中の `:::page-break` / `:::blank-page-N` も Page Viewer の RenderModel と同じ意味で反映されます。各章冒頭情報（chapterInfo）は Display Settings の **作品内ファイルのタイトル・著者も表示**（`frontmatterShowInProjectFiles`、既定 OFF）が ON のときだけ出ます。タイトル / 著者の個別表示も同セクションの設定に従います。Book 冒頭情報と単独文書の冒頭情報には影響しません。
-- 起動時点の Display Settings にある色、フォント、文字サイズ、行間、見出しのフォント・配置・後余白・区切り線、ルビの文字サイズ、縦書き時の自動 TCY、文書冒頭情報 / 著者・訳者行 / 役割ラベルの表示可否、および作品内ファイル向けの章冒頭情報表示可否は、現在の文書の Page Viewer と同じ appearance / metadata visibility snapshot を Book 全体へ引き回します（`.nyoze/books.json` v3 の `writingMode` は書字方向だけを上書きします）。章の表示 metadata の値は books.json v3 が正本です。
+- 起動時点の Display Settings にある色、フォント、文字サイズ、行間、見出しのフォント・配置・後余白・区切り線、ルビの文字サイズ、縦書き時の自動 TCY、文書冒頭情報 / 著者・訳者行 / 役割ラベルの表示可否、および作品内ファイル向けの章冒頭情報表示可否は、現在の文書の Page Viewer と同じ appearance / metadata visibility snapshot を Book 全体へ引き回します（`.nyoze/books.json` の `writingMode` は書字方向だけを上書きします）。章の表示 metadata の値は books.json が正本です。
 - Book を開く場合も、現在の Page Viewer ウィンドウを再利用します。Book の各章は保存済みディスク内容を読むため、現在編集中の章に未保存変更がある場合は保存してから開いてください。
 - `.nyoze/books.json` が未初期化または不正、対象 Book が見つからない、本文章が 0 件、章ファイルが missing / read-error の場合は、部分的な viewer は開かず通知します。
 
@@ -441,7 +443,7 @@ Books の本文章ファイルは右ペイン内編集の対象外です。**中
 
 key の詳細・YAML 制限・legacy 互換の一覧は [`docs/frontmatter-reference.md`](docs/frontmatter-reference.md) を参照してください。
 
-作品内の Book 所属、章順、資料 role、作品タブ・文書冒頭・左ペインで使う **表示 metadata** の正本は `.nyoze/books.json` **v3** です。`.nyoze/project.json` は作品タイトルなどの Project metadata を保持しますが、章順や Book 所属の source of truth ではありません。
+作品内の Book 所属、章順、資料 role、作品タブ・文書冒頭・左ペインで使う **表示 metadata** の正本は `.nyoze/books.json` です。`.nyoze/project.json` は作品タイトルなどの Project metadata を保持しますが、章順や Book 所属の source of truth ではありません。
 
 右ペイン **Document Metadata** で編集する `title` / `author` / `translator` は **frontmatter** の正本です。作品内の登録済みファイルでは、Document Metadata の frontmatter 編集と 作品タブの books.json 編集は **自動同期しません**（詳細は [文書メタデータ（限定編集UI）](#文書メタデータ限定編集ui)）。
 
@@ -926,7 +928,7 @@ Typewriter Mode は、通常編集（WYSIWYG）でキャレット位置を追従
 | タイトルを表示       | 作品内ファイル固有の title を表示する         | `ON`   |
 | 著者を表示           | 作品内ファイル固有の authors を表示する       | `ON`   |
 
-単独文書では Markdown frontmatter の title / author / translator を表示します。作品内の本文ファイルでは `.nyoze/books.json` v3 の Book 名・著者と、各ファイルの title / authors / translators を表示し、frontmatter へは fallback しません。
+単独文書では Markdown frontmatter の title / author / translator を表示します。作品内の本文ファイルでは `.nyoze/books.json` の Book 名・著者と、各ファイルの title / authors / translators を表示し、frontmatter へは fallback しません。
 
 作品内の Book 先頭本文では Book 名・著者を表示できます。**作品内ファイルのタイトル・著者も表示**を ON にすると、先頭本文を含む各本文ファイル固有の title / credits も表示します。**タイトルを表示**と**著者を表示**で個別に切り替えられます。資料・未登録ファイルには作品内の冒頭情報を表示しません。
 
@@ -1269,30 +1271,30 @@ co_authors:
 
 - フロントマターが存在しない場合、または上記フィールドがすべて空の場合は何も表示されません。
 - フロントマターはエディタの SoT（ProseMirror ドキュメント）とは独立して保存され、保存 / 読み込み時も改変されません。
-- beta ではフロントマターの一般編集 UI はありません。ただし右ペイン **Document Metadata** から `Document Type` / `title` / `author` / `translator` と、記事・文書（Article / Document）用の `nyozePreserveEmptyParagraphs` の限定編集だけができます。作品内の表示 metadata は **作品** タブ（books.json v3）が正本で、Document Metadata の frontmatter 編集とは同期しません。
-- 作品内の Book 所属、章順、資料分類と表示 metadata は `.nyoze/books.json` **v3** が正本です。`book` / `order` / `role` frontmatter は正式な Project / Book 管理では使いません。
+- beta ではフロントマターの一般編集 UI はありません。ただし右ペイン **Document Metadata** から `Document Type` / `title` / `author` / `translator` と、記事・文書（Article / Document）用の `nyozePreserveEmptyParagraphs` の限定編集だけができます。作品内の表示 metadata は **作品** タブ（books.json）が正本で、Document Metadata の frontmatter 編集とは同期しません。
+- 作品内の Book 所属、章順、資料分類と表示 metadata は `.nyoze/books.json` が正本です。`book` / `order` / `role` frontmatter は正式な Project / Book 管理では使いません。
 
-作品内の章ファイルや資料ファイルでは、作品タブ上の表示名は `.nyoze/books.json` v3 の `title` から決まります。本文中に見せるタイトルが必要な場合は Markdown 見出しを書くのが基本です。作品内ファイルの frontmatter 表示は既定で抑制され、単独文書向けの title / author 表示とは分けられています。
+作品内の章ファイルや資料ファイルでは、作品タブ上の表示名は `.nyoze/books.json` の `title` から決まります。本文中に見せるタイトルが必要な場合は Markdown 見出しを書くのが基本です。作品内ファイルの frontmatter 表示は既定で抑制され、単独文書向けの title / author 表示とは分けられています。
 
-### 作品内本文の冒頭表示（books.json v3）
+### 作品内本文の冒頭表示
 
 **Source of truth**
 
-- **作品内**: Book 構造と表示 metadata（Book 名 / 著者、本文・資料の title / authors / translators）の正本は `.nyoze/books.json` **v3** です。frontmatter の `title` / `author` / `translator` へは fallback しません。
+- **作品内**: Book 構造と表示 metadata（Book 名 / 著者、本文・資料の title / authors / translators）の正本は `.nyoze/books.json` です。frontmatter の `title` / `author` / `translator` へは fallback しません。
 - **作品外の単独文書**: 冒頭表示の正本は従来どおり Markdown **frontmatter** です。
 
 作品内の **本文（body）ファイル**を開いているときは、次のブロックを文書冒頭に読み取り専用で表示します。
 
-1. **Book block**（Book 先頭本文のみ）: v3 の `books[].name` / `books[].authors`
-2. **file block**（表示設定で ON のとき）: v3 の当該 item の `title` / `authors` / `translators`
+1. **Book block**（Book 先頭本文のみ）: `books[].name` / `books[].authors`
+2. **file block**（表示設定で ON のとき）: 当該 item の `title` / `authors` / `translators`
 
 Book 先頭本文では両方を併記できます。2 件目以降の本文は file block のみです。資料・未登録ファイル・作品外単独文書ではこれらの作品用 block は出ません（単独文書は frontmatter 表示）。
 
 - 表示は **表示設定 > タイトル・著者表示** の master トグルが ON のときだけ出ます。
-- 作品内本文では、単独文書向けの frontmatter 冒頭表示の代わりに v3 metadata を使います（二重には出ません）。
+- 作品内本文では、単独文書向けの frontmatter 冒頭表示の代わりに作品の表示 metadata を使います（二重には出ません）。
 - **作品内ファイルのタイトル・著者も表示**（既定 OFF）を ON にすると file block が出ます。短編集・アンソロジーなど、章ごとに個別 title / credits がある場合に使います。
 - Book title は file title より大きく表示し、両 block の間に十分な余白を取ります。
-- 表示専用です。Markdown 本文 / frontmatter / `.nyoze/books.json` はこの表示だけでは書き換えません。v3 metadata の編集は右ペイン **作品** タブから行います。`Source Mode` / `Paragraph Plain` 中は非表示です（frontmatter 冒頭表示と同様）。
+- 表示専用です。Markdown 本文 / frontmatter / `.nyoze/books.json` はこの表示だけでは書き換えません。表示 metadata の編集は右ペイン **作品** タブから行います。`Source Mode` / `Paragraph Plain` 中は非表示です（frontmatter 冒頭表示と同様）。
 
 ### 文書メタデータ（限定編集UI）
 
@@ -1303,7 +1305,7 @@ Book 先頭本文では両方を併記できます。2 件目以降の本文は 
 **Source of truth の整理**
 
 - **作品外の単独文書**: 冒頭表示などで使う title / author / translator の正本は **frontmatter** です。Document Metadata の編集がそのまま表示 metadata になります。
-- **作品内の登録済み本文・資料**: 作品タブや文書冒頭で使う表示 title / authors / translators の正本は `.nyoze/books.json` **v3** です。Document Metadata で frontmatter の `title` / `author` / `translator` を編集しても、**作品表示 metadata や冒頭表示には反映されません**（自動同期しません）。
+- **作品内の登録済み本文・資料**: 作品タブや文書冒頭で使う表示 title / authors / translators の正本は `.nyoze/books.json` です。Document Metadata で frontmatter の `title` / `author` / `translator` を編集しても、**作品表示 metadata や冒頭表示には反映されません**（自動同期しません）。
 - 作品内でも frontmatter 自体の編集は可能です。外部ツール連携や独自 metadata 用途向けに残ります。
 
 作品内で Document Metadata を開くと、登録状態に応じて **作品タブへの導線** が表示されます。表示 metadata の編集は **作品** タブから行ってください。
@@ -1660,7 +1662,7 @@ Book 全体の書き出しと同じ options 確認 UI を、この active docume
 | **File > 書き出し > Book 全体の Web Bookを作成...** | 現在の文書が属する Book の body 章を 1 つの `{Book名}-web-book.html` として保存します。 |
 
 - 現在文書は通常表示（WYSIWYG）の現在内容を使います。`Source Mode`、`Paragraph Plain`、built-in の読み取り専用文書では実行できません。元の Markdown、frontmatter、Book manifest、付箋は変更しません。
-- Book 全体は、他の Book export と同じく `.nyoze/books.json` v3 とディスク上の保存済み chapter を read-only で使います。Book の body 章以外ではメニューが無効です。未保存の編集は混ざらず、chapter が欠ける場合は部分出力しません。
+- Book 全体は、他の Book export と同じく `.nyoze/books.json` とディスク上の保存済み chapter を read-only で使います。Book の body 章以外ではメニューが無効です。未保存の編集は混ざらず、chapter が欠ける場合は部分出力しません。
 - 保存前に HTML系の書き出しオプション確認 UI が開きます。改ページ、見出し前改ページ、文書/作品情報、章ファイル情報、目次、役割ラベル、書字方向を選べます。Web Book ではさらに「文書情報／作品情報の後ろで改ページ」（既定 OFF）と、「文書情報／作品情報を簡易表紙として表示」（既定 OFF）を選べます。簡易表紙を ON にすると、文書情報（Book では作品情報）が 1 ページ分の独立した表紙風ページになり（タイトルは本文見出しより大きな太字、著者・訳者はタイトルと別のまとまり）、直後の改ページが常に ON になります（OFF に戻すと直前の改ページ選択へ戻ります）。簡易表紙 ON のときだけ、レイアウト（「通常」= タイトル上付き・著者/訳者地付き、「中央」= ページ中央。縦書きの中央ではタイトルが上・著者/訳者が下になり左右中央に揃います。既定 通常）と、情報の書字方向（本文に合わせる / 縦書き / 横書き。簡易表紙の情報にだけ適用され、本文・目次は変わりません）を選べます。章ファイル情報は簡易表紙になりません。Book 全体の Web Book では、目次と右の Outline に各章タイトルが必ず出ます（本文に Markdown 見出しが無い章も含む）。章ファイル情報のタイトルは H1 相当の大きさで表示されます。これらの値は `document.webBook` / `book.webBook` にだけ保存されます。書き出し開始時点の Display Settings（見出し書体の意味論・配置・後余白・区切り線、および縦書き時の自動 TCY）と文書配色は HTML に埋め込まれます。カスタム書体名そのものは出さず、明朝系／ゴシック系／本文と同じ、のいずれかになります。自動 TCY は Editor / Page Viewer と同じ検出規則で表示用に分割され、縦書き表示（画面・印刷）のときだけ縦中横として見え、横書きでは通常文字のままです。Web Book の書き出し option や Reader の一時設定には出ません。Web Book 固有のテーマ・文字サイズ・書体・見出し書体・余白・header/footer・ページ遷移は、生成後に HTML 内だけで切り替える一時設定であり、書き出し option や Nyoze の設定には保存しません。
 - options の直近確定値は `document.webBook` / `book.webBook` slot として `settings.json` に保存・復元します。frontmatter や `.nyoze/books.json` には保存しません。
 - 出力開始時点の文書配色を安全な Author / Original palette snapshot として埋め込みます。配色情報が不正な場合は安全のため作成を中止します。
@@ -1668,7 +1670,7 @@ Book 全体の書き出しと同じ options 確認 UI を、この active docume
 
 ### Book 全体の書き出し
 
-通常の Markdown 保存とは別経路で、**現在開いているファイルが属する Book** の body 章（`.nyoze/books.json` **v3** の `books[].items[]` で `role: body` のファイル）を章順に結合し、1 つの外部ツール向けファイルへ書き出せます。
+通常の Markdown 保存とは別経路で、**現在開いているファイルが属する Book** の body 章（`.nyoze/books.json` の `books[].items[]` で `role: body` のファイル）を章順に結合し、1 つの外部ツール向けファイルへ書き出せます。
 
 | 操作 | 動作 |
 | ---- | ---- |
@@ -1725,7 +1727,7 @@ Book 全体の書き出しと同じ options 確認 UI を、この active docume
 | 自動 TCY を反映する | **LeME / でんでん向けのときだけ表示**。短い英数字は両形式とも `^...^`。`!!` / `!?` / `??` は LeME では `<span class="tcy">...</span>`、でんでんでは `^...^`。Display Settings とは独立 | OFF |
 | 数字だけを対象にする / 最小桁数 / 最大桁数 | **LeME / でんでん向けのときだけ表示**。「自動 TCY を反映する」がオフのときは無効 | OFF / 2 / 4 |
 | 章の境界に改ページを入れる | Book の章ファイルが切り替わる箇所に改ページを挿入（**Book 全体の書き出し専用**。active document 単体の書き出しでは表示されません） | ON |
-| 作品情報を表示 | **Book 全体の書き出しでは、LeME 互換 Markdown / でんでん向け Markdown / 青空文庫風テキスト / Web Book の 4 形式すべてで表示されます**（単独文書の書き出しには出ません。単独文書の書き出しには別途「文書情報を表示」という frontmatter 由来の項目があります）。`.nyoze/books.json` v3 の Book title / 著者（v3 の Book authors を「、」で連結）を本文冒頭に表示します（訳者は v3 に Book 単位の項目が無いため表示されません） | OFF |
+| 作品情報を表示 | **Book 全体の書き出しでは、LeME 互換 Markdown / でんでん向け Markdown / 青空文庫風テキスト / Web Book の 4 形式すべてで表示されます**（単独文書の書き出しには出ません。単独文書の書き出しには別途「文書情報を表示」という frontmatter 由来の項目があります）。`.nyoze/books.json` の Book title / 著者（Book authors を「、」で連結）を本文冒頭に表示します（Book 単位の訳者項目はないため表示されません） | OFF |
 | 章ファイル情報を表示 | **Book 全体の書き出しで、4 形式すべてに表示されます**（単独文書の書き出しには出ません）。各章ファイルの先頭に、その章の title / 著者 / 訳者（`.nyoze/books.json` の章メタデータ。章ファイルの frontmatter ではありません）を表示 | OFF |
 | 役割ラベルを表示 | Book 全体の書き出しでは「作品情報を表示」または「章ファイル情報を表示」のどちらかがオンのときだけ有効（4 形式共通）。単独文書の書き出しでは「文書情報を表示」がオンのときだけ有効。著者・訳者行に「著　」「訳　」ラベルを付けるか | ON |
 | 目次を表示 | **Web Book のときだけ表示**（単独文書・Book 全体の両方）。単独文書では本文中の見出し（H1〜H6）から目次を生成する。Book 全体では各章タイトルを章先頭項目として必ず出し、章内の Markdown 見出しをその下に続ける（見出しのない章も目次に出る） | OFF |
@@ -1851,7 +1853,7 @@ beta で完全保持しない代表例:
 - フォルダを書庫として使う場合は、File メニューの「書庫を管理」から登録します（ツールバーの「ファイルを開く」は単独ファイル open 専用です）。
 - 左ペイン上部の **書庫** / **作品** タブはアイコンのみで表示され、ホバーまたはキーボードフォーカスでラベルが表示されます。**作品** タブ内で作品を開いているときは、breadcrumb の **一覧** で作品一覧へ戻れます。
 - Explorer で開いているファイルは薄い背景で表示され、アクティブタブのファイルはより強い背景とアクセントで表示されます。
-- 左ペイン下部の文書情報を展開すると、タイトル、著者、訳者、文書種別、書字方向、書庫、作品、役割、作成 / 更新日時、改行種別、パスを確認できます。作品内の登録済みファイルでは、タイトル・著者・訳者は `.nyoze/books.json` v3 の表示 metadata から出ます（frontmatter へ fallback しません）。役割（本文 / 資料種別）も books.json の登録情報から表示され、frontmatter `book` / `order` / `role` は使いません。
+- 左ペイン下部の文書情報を展開すると、タイトル、著者、訳者、文書種別、書字方向、書庫、作品、役割、作成 / 更新日時、改行種別、パスを確認できます。作品内の登録済みファイルでは、タイトル・著者・訳者は `.nyoze/books.json` の表示 metadata から出ます（frontmatter へ fallback しません）。役割（本文 / 資料種別）も books.json の登録情報から表示され、frontmatter `book` / `order` / `role` は使いません。
 - 新規ファイル作成、名前変更、貼り付け、削除の直後は Explorer 表示が自動更新されます。
 - タブやツールバーから作成した未保存文書を `Save As` で保存した場合も、保存先が現在の Explorer root 配下であれば Explorer に反映されます。
 - Finder / Explorer など外部でファイルを削除・改名した場合も、アプリへフォーカスを戻したタイミングで Explorer 一覧を再読込します。
@@ -1879,7 +1881,7 @@ beta で完全保持しない代表例:
 
 - 正式なファイル読み込み導線はツールバーの「ファイルを開く」です。フォルダを書庫にする導線は File メニューの「書庫を管理」です。drag and drop、`Open With`、`.md` の OS 全体関連付けは未対応です。
 - Linux 向け公式パッケージは現時点の beta では提供していません。公開ソースからの `npm install` / `npm run dev` / `npm run build` は試せます。長文編集モード（実験的）も Linux で試験的に利用できますが、既定はOFFで、動作保証および公式サポートの対象外です。Linux native IME の実機確認と公式 Linux package は未実施・未承認です。
-- frontmatter の一般編集 UI はありません。GUI で編集できるのは Document Metadata の `Document Type` / `Paragraph Spacing > Preserve empty paragraphs`（Article のときだけ）/ `title` / `author` / `translator` だけです。作品内の表示 metadata は 作品タブ（books.json v3）が正本で、Document Metadata の frontmatter 編集とは同期しません。
+- frontmatter の一般編集 UI はありません。GUI で編集できるのは Document Metadata の `Document Type` / `Paragraph Spacing > Preserve empty paragraphs`（Article のときだけ）/ `title` / `author` / `translator` だけです。作品内の表示 metadata は 作品タブ（books.json）が正本で、Document Metadata の frontmatter 編集とは同期しません。
 - `Source Mode` は beta では raw save 専用導線ではありません。Apply / Save 時に Nyoze の Markdown 表現へ正規化される場合があります。
 - 開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。GFM table、reference-style link、footnote、definition list、複雑な list / blockquote / code fence 表記などは保存時に正規化される場合があります。詳しくは [Markdown 保存時の正規化](#markdown-保存時の正規化) を参照してください。
 - 日本語引用符つき強調のうち、`**A**や**B**` / `*A*や*B*` / `~~A~~や~~B~~` のような単一装飾の隣接は改善済みですが、`***A***や***B***` や `**~~A~~**や**~~B~~**` のような複合装飾が隣接する場合は、beta では reopen / 保存後に表記が崩れることがあります。
@@ -1890,6 +1892,8 @@ beta で完全保持しない代表例:
 - Windows の一部 AMD GPU + Chromium 系環境では、本文上や `Source Mode` で I-beam マウスポインターが白く見えにくくなることがあります。その場合は `View Settings > 文書テーマ > エディタで矢印ポインターを使う` を有効にすると、本文上だけ矢印ポインターへ切り替えて回避できます。
 - `Paragraph Plain` は通常表示とできるだけ近い見た目になるよう調整していますが、ウィンドウ幅やペイン幅の境界によっては、まれに overlay textarea 側だけ 1 文字ぶん多く、または少なく折り返されて見えることがあります。保存内容や block 構造には影響しません。
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります。
-- 数十万文字級でルビ等を多く含む文書では、Windowsを中心に、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。長文編集モードをOFFにすると同モード固有の負荷は避けられますが、通常エディタの全文DOM負荷は残ります。
+- 長文編集モードで局所編集面が「編集中」の間は、タイプライターモードなど一部の表示・編集補助機能を同時に利用できません。これらの機能を使う場合は、長文編集モードをOFFにしてください。
+- 長文編集モードを安全に維持できない場合、未確定の編集内容を保護したまま「回復（recovery）」状態になることがあります。この状態では、再試行、下書きのコピー、確認後の破棄を選択できます。macOS / Windows実機ではこの状態を自然に再現できなかったため、回復状態での実機確認は未了です。
+- 数十万文字級でルビ等を多く含む文書では、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。発生のしやすさは、端末の性能や文書の内容・構造によって異なります。
 - 重く感じたときは、まず長文編集モードまたはルビ表示をOFFにする、`Paragraph Plain`を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします。
 - beta で実用上対応している文字コードは UTF-8 のみです。UTF-8 として読み込めないファイルは通常編集対象として開きません。Shift-JIS / CP932 などの文書は、事前に UTF-8 へ変換してください。混在 EOL、BOM、複数 encoding の完全な保存往復は post-beta 対象です。

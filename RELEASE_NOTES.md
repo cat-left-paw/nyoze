@@ -1,19 +1,18 @@
 # Nyoze Beta Release Notes
 
 Nyoze は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 版です。
-この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行の GitHub Latest は `0.3.0-beta.2` です。次期版は `0.4.0-beta.1` に決定し、公開準備中です。
+この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行の GitHub Latest は `0.4.0-beta.1` です。
 
 `0.4.0-beta.1` の配布方針:
 
-- GitHub Releases ではPre-releaseフラグを付けず、公開後のLatestとします。公開までは`0.3.0-beta.2`がLatestです。
+- GitHub Releases ではPre-releaseフラグを付けず、Latestとして公開しています。
 - macOSはApple Silicon / Intel向けDMG、Windowsはx64 zipを配布します。
 - Microsoft Storeも同じアプリ表示version `0.4.0-beta.1`へ更新します。Store package versionは`1.2.2.0`です。
 - Linux向け公式package、macOSの署名・notarization、Windows zipのコード署名は今回の対象外です。
-- `latest.json`は新しい公開Release URLが成立するまで`0.3.0-beta.2`を維持します。
 - 公開後に重大な不具合が見つかった場合は、必要に応じて`0.4.0-beta.2`を早期に準備します。
 - LeME / でんでんコンバーター向け出力の名称・説明・利用方法は、変更する可能性があります。
 
-GitHub Releaseへ載せる予定のasset:
+GitHub Releaseのasset:
 
 - `Nyoze-Mac-0.4.0-beta.1-arm64-Installer.dmg`
 - `Nyoze-Mac-0.4.0-beta.1-x64-Installer.dmg`
@@ -24,9 +23,9 @@ Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Releas
 - 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
 
-## 0.4.0-beta.1（公開準備中）
+## 0.4.0-beta.1
 
-`0.4.0-beta.1`は、`0.3.0-beta.2`公開後の機能・修正をまとめた次期版です。公開日は、現行HEADから作るmacOS / Windows / Store packageの検証後に確定します。
+`0.4.0-beta.1`は、`0.3.0-beta.2`公開後の機能・修正をまとめたbeta更新版です。
 
 ### 主な追加・改善
 
@@ -48,11 +47,12 @@ Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Releas
 
 ### 現時点の既知制限
 
-- 長文編集モードは**実験的・既定OFF**です。未対応位置や安全に引き継げない操作では待機中になり、通常エディタへ戻ります。回復状態は自動故障注入ではなく、実際に表示された場合だけ案内に従ってください。
-- 長文編集モードのnative recovery状態はmacOS / Windows実機で自然に再現できず、実機確認未了です（`native recovery unavailable / non-blocking`）。故障を観測したという意味ではなく、今回の公開を止める条件にはしません。
+- 長文編集モードは**実験的・既定OFF**です。未対応位置や安全に引き継げない操作では待機中になり、通常エディタへ戻ります。
+- 長文編集モードで局所編集面が「編集中」の間は、タイプライターモードなど一部の表示・編集補助機能を同時に利用できません。これらの機能を使う場合は、長文編集モードをOFFにしてください。
+- 長文編集モードを安全に維持できない場合、未確定の編集内容を保護したまま「回復（recovery）」状態になることがあります。この状態では、再試行、下書きのコピー、確認後の破棄を選択できます。macOS / Windows実機ではこの状態を自然に再現できなかったため、回復状態での実機確認は未了です。
 - Linuxでも長文編集モードを試せますが、Linux native IMEの実機検証、動作保証、公式サポート、公式package配布の対象外です。
 - Windowsでは「ルビ＋直後の句読点」と後続のルビ / 縦中横が同じ段落にある稀な条件で、境界入力が詰まる現象を完全には根絶できていません。確認済み事例ではEscapeで復帰でき、その後の入力も継続できました。
-- 数十万文字級でルビ等を多く含む文書では、Windowsを中心に、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。長文編集モードをOFFにすると同モード固有の負荷は避けられますが、通常エディタの全文DOM負荷は残ります。操作が重い場合はルビ表示をOFFにする、`Paragraph Plain`を使う、章単位でファイルを分ける運用を推奨します。
+- 数十万文字級でルビ等を多く含む文書では、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。発生のしやすさは、端末の性能や文書の内容・構造によって異なります。操作が重い場合は長文編集モードまたはルビ表示をOFFにする、`Paragraph Plain`を使う、章単位でファイルを分ける運用を推奨します。
 
 ## 0.3.0-beta.2
 
@@ -91,7 +91,7 @@ Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Releas
 ### 主な更新
 
 - **Project / Book**: `.nyoze/books.json` を正本とする Books / Materials、作品 metadata、章順、Book 全体 Outline、前章 / 次章ナビゲーション、Book 全体 export を追加しました。
-- **付箋とファイル管理**: 作品内付箋、色・タグ・filter、missing / orphan cleanupを追加しました。同一作品内の単一ファイル rename / move では、books.json v3 と notes.json の path を安全側の検査と rollback 付きで追従します。
+- **付箋とファイル管理**: 作品内付箋、色・タグ・filter、missing / orphan cleanupを追加しました。同一作品内の単一ファイル rename / move では、books.json と notes.json の path を安全側の検査と rollback 付きで追従します。
 - **Page Viewer**: 現在の文書と Book 全体を、共通の PageModel / CSS Columns による読み取り専用ウィンドウで閲覧できます。Outline、scrubber、Reader theme、余白・用紙枠、header / footer、簡易表紙、見出し前改ページ、ページ遷移に対応します。
 - **Web Book**: 現在の文書 / Book 全体を、reader付きの単一HTMLまたはWeb公開用packageとして作成できます。ローカル画像、目次、metadata、簡易表紙、Reader Settings、画面用header / footer、印刷境界、容量警告とhard limitに対応します。
 - **モバイル閲覧**: Web Bookで左右tap / click / swipeによるページ移動と、中央tap / clickによるツールバー表示切替を追加しました。coarse pointerかつ画面短辺600px以下では、用紙枠を既定OFFにします。
@@ -139,16 +139,15 @@ Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Releas
 - 付箋 polish 4 を追加しました。長い付箋本文は **全文表示** 中も preview 領域に最大高さがあり、カード内で縦スクロールできます。各カードは折りたたんでタイトル・タグ・操作だけ残せます（折りたたみ状態は保存されません）。本文 marker の hover preview は付箋色を薄く反映しますが、短文 preview 用であり全文確認は右ペイン **Notes / 付箋** タブで行ってください。
 - 縦書きで青空ルビ直後の対象約物（`、` `。` `」` `』` `）`）が行頭 / 次列頭へ落ちる問題を、表示専用の nowrap wrapper で緩和しました。保存される Markdown、コピー結果、clipboard には wrapper 情報や不可視文字は混入しません。
 - ruby / strong / link / TCY などの inline 装飾を含む通常段落で、段落末の閉じ括弧が列末に来たときに直前 inline 境界まで巻き戻って分割される Chromium 問題を、縦書き WYSIWYG の `p::after` CSS 補正で回避しました。こちらも保存内容には影響しません。
-- 上記の表示補正に合わせて、ルビ境界 IME、copy / save 非混入、段落末 caret / IME、縦書き scroll restore の E2E 回帰確認を追加・更新しました。
 - WYSIWYG 通常編集向けに、表示専用の擬似キャレットを追加しました。Display Settings から ON/OFF、太さ、点滅 ON/OFF を調整できます。`Source Mode` と `Paragraph Plain` では従来どおり native caret を使います。
 - 作品内の本文位置へ紐づく付箋MVPを追加しました。付箋は本文中の `<!-- nyoze-note:ID -->` アンカーと作品フォルダの `.nyoze/notes.json` で管理し、右ペインの Notes タブから確認・編集・解決済み管理・整理ができます。
 - 付箋付きファイルの Nyoze 内 rename / move で `note.file` が追従するようにし、本文markerだけが残る場合、本文markerが見つからない場合、参照先ファイルがない場合の手動cleanup導線を追加しました。
-- 作品内の登録済み本文 / 資料ファイルを Nyoze の File Explorer から rename / move したとき、物理ファイルだけでなく `.nyoze/books.json` **v3** の登録 path と `.nyoze/notes.json` の `note.file` をまとめて整合更新するようにしました（同一作品内の単一ファイルのみ）。books.json が壊れている / path が衝突する / 別作品へ移動しようとする場合などは安全側で中止し、metadata の保存に失敗したときは物理ファイルを元の場所へ戻します。編集中（未保存）のファイルは保存するまで移動 / 改名できません。フォルダの一括移動やドラッグ＆ドロップは今回の対象外です。
+- 作品内の登録済み本文 / 資料ファイルを Nyoze の File Explorer から rename / move したとき、物理ファイルだけでなく `.nyoze/books.json` の登録 path と `.nyoze/notes.json` の `note.file` をまとめて整合更新するようにしました（同一作品内の単一ファイルのみ）。books.json が壊れている / path が衝突する / 別作品へ移動しようとする場合などは安全側で中止し、metadata の保存に失敗したときは物理ファイルを元の場所へ戻します。編集中（未保存）のファイルは保存するまで移動 / 改名できません。フォルダの一括移動やドラッグ＆ドロップは今回の対象外です。
 - File Explorer は作業対象の一覧表示と軽い単一ファイル操作用として位置づけます。Finder / Explorer を置き換える本格ファイルマネージャではないため、複雑なフォルダ整理、複数項目操作、Project 間の登録情報移管は OS 標準の Finder / Explorer 側で行う前提です。
 - 右ペイン **作品** タブを追加しました。`.nyoze/books.json` を正本にした Books / Materials 一覧（`title` / `authors` / `translators`）、複数 role filter、資料 Markdown preview、右ペイン内の資料簡易編集（textarea + 明示保存 / キャンセル / 外部変更検知）、作品作成 / 作品切り替えに対応します。
 - 作品作成時に作品名と最初の Book 名を確認し、`.nyoze/project.json` と `.nyoze/books.json` を初期作成するようにしました。書庫 root の作品一覧、作品タブの作品切り替え、File Explorer の **書庫に戻る** も追加しました。
 - 作品フォルダ配下の未登録 `.md` / `.markdown` / `.txt` を検出し、作品タブまたは File Explorer から Book / Materials へ登録できるようにしました。Book / Materials の名称変更、**title / authors / translators** 編集、並び替え、登録解除、missing path 表示、折りたたみ表示にも対応します。
-- 右ペイン **Document Metadata**（文書メタデータ）タブで frontmatter の `title` / `author` / `translator` 等を編集できます。作品内の表示 metadata は books.json v3 が正本で、Document Metadata の frontmatter 編集とは自動同期しません。パネル内の保存ボタンは通常の文書保存経路を使い、books.json は変更しません。
+- 右ペイン **Document Metadata**（文書メタデータ）タブで frontmatter の `title` / `author` / `translator` 等を編集できます。作品内の表示 metadata は books.json が正本で、Document Metadata の frontmatter 編集とは自動同期しません。パネル内の保存ボタンは通常の文書保存経路を使い、books.json は変更しません。
 - 作品登録解除コマンドを追加しました。Markdown 本文は削除せず、未削除の付箋がある作品は解除を拒否します。
 - 右ペイン **Outline** タブに `[現在の文書] [Book全体]` 切替を追加しました。Book全体では同一 Book の body 章を章順に並べ、章 / 見出しクリックによるナビゲーションと **前章** / **次章** ボタンに対応します。
 - エディタ上部のツールバー（保存ボタン右隣）にも **前章** / **次章** の常設ボタンを追加しました。縦書き / 横書きのスクロール方向に合わせたアイコンで表示します。
@@ -157,7 +156,7 @@ Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Releas
 - Book全体 Outline の章 root / 見出しに、本文冒頭プレビュー（吹き出しアイコンへの hover、または行の右クリック）を追加しました。章 root はその章ファイルの本文冒頭、見出しはその直後の本文冒頭を短く表示します。単文書 Outline のプレビューと同じ操作感で、表示専用・本文を変更しません。
 - 中央エディタで、章頭に **「前章の末尾へ」「章の末尾へ」**、章末に **「章の先頭へ」「次章へ」** を表示できるようにしました。端へ到達したときに一時表示して自動的に消え、端付近へポインターを動かすと再表示します。隣接章へのボタンは通常クリックで同じタブ、Shift+クリックで別タブに開きます。
 - Book 本文では、章頭 / 章末で **Option/Alt + wheel** を続けると、前章の末尾 / 次章の先頭へ同じタブで移動できます。通常スクロール、IME 変換中、`Source Mode` / `Paragraph Plain`、資料、作品外では発動せず、1回の操作で複数章へ飛ばないよう制限しています。
-- File Explorer の本文 / 資料 role icon は books.json v3 を正本にし、frontmatter `role` への依存を削除しました。
+- File Explorer の本文 / 資料 role icon は books.json を正本にし、frontmatter `role` への依存を削除しました。
 - 作品内の文書冒頭表示は、Book title を本文 H1 より大きく、file title を本文 H1 相当にして階層を明確にしました。
 - 未編集のタブを切り替えただけで未保存表示になる問題を修正しました。
 - 作品の資料 preview / 簡易編集を切り替えたときに右ペイン下部の高さが縮む問題を修正し、中央で開いている資料は右ペイン内編集できないようにしました。
@@ -179,7 +178,7 @@ Nyoze 0.2.1-beta.1 は、`0.2.0-beta.1` 公開後の追加安定化と執筆補�
 
 - Typewriter Mode を本実装し、Typewriter scroll、scroll past end、Visual Focus、current line highlight、toolbar quick toggle を追加しました。
 - current line overlay を縦書き中心に安定化し、空行補正、fallback anchoring、frontmatter 表示直後の再 anchor 漏れを改善しました。
-- `Paragraph Plain` の click 遅延を追加最適化し、pane 開閉時の overlay 再配置、空段落境界ナビゲーション、境界 E2E の flaky を修正しました。
+- `Paragraph Plain` の click 遅延を追加最適化し、pane 開閉時の overlay 再配置と空段落境界ナビゲーションを修正しました。
 - ルビ / 明示 TCY 直後の日本語 IME 入力を boundary sentinel bridge で改善し、論理行頭 ruby 前入力や後方 composition の崩れを抑制しました。
 - Help メニューに `MANUAL を開く` と `ショートカットキー一覧` を追加し、現在の UI 言語に応じた read-only internal shortcut doc を開けるようにしました。
 - Windows の一部 AMD GPU + Chromium 系環境で I-beam カーソルが白く見える問題に対し、`エディタで矢印ポインターを使う` 回避設定を追加しました。
@@ -200,7 +199,7 @@ Nyoze 0.2.0-beta.1 は、縦書き日本語執筆を主目的とした Markdown 
 
 ### 今回の更新
 
-- Electron を `41.3.0` へ更新し、縦書き、scroll restore、shortcut 周辺の既存 E2E / package 確認を合わせて行いました。
+- Electron を `41.3.0` へ更新しました。
 - Paragraph Plain で `# 見出し`、`- list`、`1. list`、`> quote`、fenced code、`---` などを単一 block として入力した場合、明示解除・境界矢印移動・Enter 分割時に通常表示側へ反映されるよう改善しました。
 - special inline boundary を `aozoraRuby` / `aozoraTcy` 共通へ整理し、WORD JOINER sentinel、delayed composition suppression、診断ログ改善で日本語 IME 境界入力を安定化しました。
 - Windows の native titlebar overlay controls と header toolbar / Document Type badge が重ならないよう調整しました。
@@ -230,7 +229,7 @@ Nyoze 0.1.1-beta.1 は、縦書き日本語執筆を主目的とした Markdown 
 - Theme / slider / chip / tooltip / header 周辺を見直し、`Display Settings` の `TCY` を独立セクション化しました。
 - shortcut を整理し、Ruby 挿入は `Cmd/Ctrl + Alt/Option + R`、左右 pane toggle は `Cmd/Ctrl + Alt/Option + ,` / `.`、outline previous / next は `Cmd/Ctrl + Shift + ,` / `.`、outline fold toggle は `Cmd/Ctrl + Shift + L` に統一しました。
 - 左ペイン文書情報に `Type` / `EOL` を追加し、Ruby 挿入時の scroll jump と、縦書き見出し先頭付近の `ArrowLeft` 不具合を修正しました。
-- 同一文書内の scroll restore を改善し、writing-mode 切替、tab restore、`Source Mode` 往復で先頭へ戻りにくくしました。`Source Mode → 通常` は近似復元ですが、「大きく先頭へ戻る」回帰は Playwright E2E で固定しています。
+- 同一文書内の scroll restore を改善し、writing-mode 切替、tab restore、`Source Mode` 往復で先頭へ戻りにくくしました。`Source Mode → 通常` は近似復元です。
 - 日本語引用符つき強調の reopen / round-trip を改善し、`**「文学的な気分」**や**「情緒」**` のような単一装飾の隣接ペアが崩れにくくなりました。
 - Windows 配布物は installer から zip へ切り替えました。`0.1.0-beta.1` / `0.1.0-beta.2` の installer 利用者も、`0.1.1-beta.1` は zip を展開して同梱の `Nyoze.exe` を起動してください。
 
@@ -319,7 +318,7 @@ beta で実用上対応している文字コードは UTF-8 のみです。非 U
 
 目安としては 10万文字前後から、環境によっては重さが出る場合があります。ルビを多用した文書では、それより少ない文量でも影響が出ることがあります。
 
-数十万文字級でルビ等を多く含む文書では、Windowsを中心に、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。長文編集モードをOFFにすると同モード固有の負荷は避けられますが、通常エディタの全文DOM負荷は残ります。
+数十万文字級でルビ等を多く含む文書では、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。発生のしやすさは、端末の性能や文書の内容・構造によって異なります。
 
 重く感じたときは、まず長文編集モードまたはルビ表示をOFFにする、`Paragraph Plain`を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします。
 
