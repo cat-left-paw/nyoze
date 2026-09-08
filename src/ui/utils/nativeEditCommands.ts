@@ -111,6 +111,23 @@ export function copySelection(): boolean {
   return runExecCommand('copy')
 }
 
+/**
+ * P2-G1b: native text target（検索欄・dialog 内 input 等）向けの限定 wrapper。
+ * activeElement を変えず、false / throw 時に呼び出し側が PM へ fallback しない前提。
+ * slot / CodeMirror / Paragraph Plain / ProseMirror を generic native として呼んではいけない。
+ */
+export function nativeUndo(): boolean {
+  return runExecCommand('undo')
+}
+
+export function nativeRedo(): boolean {
+  return runExecCommand('redo')
+}
+
+export function nativeSelectAll(): boolean {
+  return runExecCommand('selectAll')
+}
+
 export async function pasteFromClipboard(): Promise<void> {
   if (runExecCommand('paste')) return
   const payload = await readClipboardPayload()

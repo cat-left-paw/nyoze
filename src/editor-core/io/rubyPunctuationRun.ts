@@ -45,6 +45,12 @@ export type RubyPunctuationRun = {
   punctuationChar: string
 }
 
+export type RubyPunctuationTextblockRange = {
+  from: number
+  to: number
+  nodeType: string
+}
+
 function firstGrapheme(text: string): string {
   // 対象約物はすべて BMP の単一 code point。code point 単位で先頭 1 文字を取り出す。
   const iterator = text[Symbol.iterator]()
@@ -68,45 +74,111 @@ function countGraphemes(text: string): number {
  *
  * text node が複数文字でも、吸着対象は先頭 1 grapheme のみ。残りは通常 text のまま。
  */
+function rubyPunctuationRunAt(
+  doc: ProseMirrorNode,
+  node: ProseMirrorNode,
+  pos: number,
+): RubyPunctuationRun | null {
+  if (node.type.name !== 'aozoraRuby') return null
+
+  const baseGraphemeCount = countGraphemes(node.textContent)
+  if (baseGraphemeCount < 1 || baseGraphemeCount > MAX_RUBY_BASE_GRAPHEMES) {
+    return null
+  }
+
+  const rubyFrom = pos
+  const rubyTo = pos + node.nodeSize
+
+  const $after = doc.resolve(rubyTo)
+  const nodeAfter = $after.nodeAfter
+  if (!nodeAfter || !nodeAfter.isText) return null
+
+  // link / code mark 内の約物は、mark 境界が不自然になりやすいので吸着しない。
+  if (nodeAfter.marks.some((mark) => ABSORB_BLOCKING_MARKS.has(mark.type.name))) {
+    return null
+  }
+
+  const head = firstGrapheme(nodeAfter.text ?? '')
+  if (!RUBY_ADSORB_PUNCTUATION_CHARS.has(head)) return null
+
+  return {
+    rubyFrom,
+    rubyTo,
+    punctuationFrom: rubyTo,
+    punctuationTo: rubyTo + head.length,
+    baseGraphemeCount,
+    punctuationChar: head,
+  }
+}
+
+export function rubyPunctuationRunKey(run: RubyPunctuationRun): string {
+  return `${run.rubyFrom}:${run.rubyTo}:${run.punctuationTo}:${run.punctuationChar}`
+}
+
+export function sortAndDedupeRubyPunctuationRuns(
+  runs: readonly RubyPunctuationRun[],
+): RubyPunctuationRun[] {
+  const sorted = [...runs].sort(
+    (left, right) =>
+      left.rubyFrom - right.rubyFrom ||
+      left.punctuationTo - right.punctuationTo ||
+      left.punctuationChar.localeCompare(right.punctuationChar),
+  )
+  const result: RubyPunctuationRun[] = []
+  let previousKey: string | null = null
+  for (const run of sorted) {
+    const key = rubyPunctuationRunKey(run)
+    if (key === previousKey) continue
+    result.push(run)
+    previousKey = key
+  }
+  return result
+}
+
+/**
+ * `onTextblockVisited` は PERF2b-2b0 の診断専用 hook。
+ * **診断のためだけに doc を再走査しない**ため、既存の full scan traversal 中に
+ * textblock 訪問数を数えるだけの callback を受け取る。未指定時は追加の
+ * property 参照すら行わない（capture OFF の通常経路を変えない）。
+ */
 export function findRubyPunctuationRuns(
   doc: ProseMirrorNode,
+  onTextblockVisited?: () => void,
 ): RubyPunctuationRun[] {
   const runs: RubyPunctuationRun[] = []
 
   doc.descendants((node, pos) => {
+    if (onTextblockVisited && node.isTextblock) onTextblockVisited()
     if (node.type.name !== 'aozoraRuby') return true
-
-    const baseGraphemeCount = countGraphemes(node.textContent)
+    const run = rubyPunctuationRunAt(doc, node, pos)
+    if (run) runs.push(run)
     // ruby の子は走査しない（親文字内に検出対象はない）。
-    if (baseGraphemeCount < 1 || baseGraphemeCount > MAX_RUBY_BASE_GRAPHEMES) {
-      return false
-    }
-
-    const rubyFrom = pos
-    const rubyTo = pos + node.nodeSize
-
-    const $after = doc.resolve(rubyTo)
-    const nodeAfter = $after.nodeAfter
-    if (!nodeAfter || !nodeAfter.isText) return false
-
-    // link / code mark 内の約物は、mark 境界が不自然になりやすいので吸着しない。
-    if (nodeAfter.marks.some((mark) => ABSORB_BLOCKING_MARKS.has(mark.type.name))) {
-      return false
-    }
-
-    const head = firstGrapheme(nodeAfter.text ?? '')
-    if (!RUBY_ADSORB_PUNCTUATION_CHARS.has(head)) return false
-
-    runs.push({
-      rubyFrom,
-      rubyTo,
-      punctuationFrom: rubyTo,
-      punctuationTo: rubyTo + head.length,
-      baseGraphemeCount,
-      punctuationChar: head,
-    })
     return false
   })
 
   return runs
+}
+
+/**
+ * 指定textblockだけを再探索する。初期load以外の通常編集ではこちらを使い、
+ * 文書内の無関係なruby nodeを走査しない。
+ */
+export function findRubyPunctuationRunsInTextblocks(
+  doc: ProseMirrorNode,
+  ranges: readonly RubyPunctuationTextblockRange[],
+  onTextblockScanned?: (range: RubyPunctuationTextblockRange) => void,
+): RubyPunctuationRun[] {
+  const runs: RubyPunctuationRun[] = []
+  for (const range of ranges) {
+    const textblock = doc.nodeAt(range.from)
+    if (!textblock?.isTextblock || textblock.type.name !== range.nodeType) continue
+    onTextblockScanned?.(range)
+    textblock.descendants((node, relativePos) => {
+      if (node.type.name !== 'aozoraRuby') return true
+      const run = rubyPunctuationRunAt(doc, node, range.from + 1 + relativePos)
+      if (run) runs.push(run)
+      return false
+    })
+  }
+  return sortAndDedupeRubyPunctuationRuns(runs)
 }

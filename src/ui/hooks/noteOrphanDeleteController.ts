@@ -47,8 +47,9 @@ export function buildOrphanNoteSoftDeleteStore(
 ): NyozeNotesStore | null {
   const existing = store.notes[id]
   if (!existing || existing.status !== 'open') return null
+  // STICKY-NOTE-STORE-FIELD-PRESERVATION1: store 全体を保持して `notes` だけ更新する。
   return {
-    version: store.version,
+    ...store,
     notes: {
       ...store.notes,
       [id]: {

@@ -13,6 +13,8 @@ export interface AutoTcyDecorationOptions {
   isEnabled: () => boolean
   getDigitRange: () => AutoTcyDigitRange
   getNumbersOnly?: () => boolean
+  /** PERF1: active local-IME flush中だけspanを開始する。 */
+  beginPerfSpan?: () => (() => void) | null
 }
 
 const autoTcyDecorationPluginKey = new PluginKey('nyozeAutoTcyDecoration')
@@ -96,7 +98,21 @@ export function createAutoTcyDecorationPlugin(
           return cachedDecorations
         }
 
-        cachedDecorations = buildAutoTcyDecorations(state.doc, digitRange, numbersOnly)
+        let endPerfSpan: (() => void) | null = null
+        try {
+          endPerfSpan = options.beginPerfSpan?.() ?? null
+        } catch {
+          endPerfSpan = null
+        }
+        try {
+          cachedDecorations = buildAutoTcyDecorations(state.doc, digitRange, numbersOnly)
+        } finally {
+          try {
+            endPerfSpan?.()
+          } catch {
+            // diagnostic only
+          }
+        }
         cachedDoc = state.doc
         cachedEnabled = enabled
         cachedDigitRange = digitRange
@@ -115,6 +131,7 @@ export const AutoTcyDecoration = Extension.create<AutoTcyDecorationOptions>({
       isEnabled: () => false,
       getDigitRange: () => resolveAutoTcyDigitRange(),
       getNumbersOnly: () => false,
+      beginPerfSpan: () => null,
     }
   },
 

@@ -2,13 +2,14 @@ import type { Editor } from '@tiptap/core'
 import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { LineBreakPolicy } from '../types'
 import { selectionTouchesNoteAnchor } from './noteAnchorProtection'
-import { resolveSelectedTcyRanges } from './tcyFormatting'
+import { applyClearFormatMarksAndTcy } from './clearFormatCommand'
 import {
   applyObsidianParagraphBlockquoteTransform,
   applyObsidianParagraphCodeBlockTransform,
   unwrapObsidianParagraphBlockquoteTransform,
   unwrapObsidianParagraphCodeBlockTransform,
 } from './blockTransformCommands'
+import { runHostHistoryCommand } from './hostHistoryCommand'
 
 type Dispatch = (tr: Transaction) => void
 type LogPush = (event: string, detail: string) => void
@@ -63,14 +64,26 @@ export function createBasicCommandsController({
 
   function undo(): boolean {
     if (getIsComposing()) return false
-    const changed = editor.chain().focus().undo().run()
+    const changed = runHostHistoryCommand({
+      operation: 'undo',
+      getState: () => editor.state,
+      dispatch: (transaction) => editor.view.dispatch(transaction),
+      focus: () => editor.view.focus(),
+      view: editor.view,
+    })
     if (changed) pushLog('command', 'undo')
     return changed
   }
 
   function redo(): boolean {
     if (getIsComposing()) return false
-    const changed = editor.chain().focus().redo().run()
+    const changed = runHostHistoryCommand({
+      operation: 'redo',
+      getState: () => editor.state,
+      dispatch: (transaction) => editor.view.dispatch(transaction),
+      focus: () => editor.view.focus(),
+      view: editor.view,
+    })
     if (changed) pushLog('command', 'redo')
     return changed
   }
@@ -78,6 +91,9 @@ export function createBasicCommandsController({
   function execute(command: ToggleMarkCommand): void {
     if (getIsComposing()) return
     if (selectionTouchesNoteAnchor(editor.state)) return
+    // Bold/Italic/Strike は TipTap の toggle* を維持する（range で部分 mark があるとき
+    // 全体付与）。ProseMirror 標準 toggleMark へ置き換えないこと（P2-D2 レビュー）。
+    // slot の collapsed storedMarks 切替は `runEditorMarkToggleCommand` 側。
     if (command === 'bold') editor.chain().focus().toggleBold().run()
     if (command === 'italic') editor.chain().focus().toggleItalic().run()
     if (command === 'strike') editor.chain().focus().toggleStrike().run()
@@ -96,25 +112,19 @@ export function createBasicCommandsController({
   function clearFormat(): void {
     if (getIsComposing()) return
     if (selectionTouchesNoteAnchor(editor.state)) return
-    const initialState = editor.state
-    const initialSelection = initialState.selection
-    const clearedTcyRanges = resolveSelectedTcyRanges(initialState)
-    if (initialSelection.empty && clearedTcyRanges.length === 0) return
+    const applied = applyClearFormatMarksAndTcy(editor.state, dispatch)
+    if (!applied) return
 
-    let tr = initialState.tr
-    for (let index = clearedTcyRanges.length - 1; index >= 0; index--) {
-      const range = clearedTcyRanges[index]
-      if (!range) continue
-      tr = tr.replaceWith(range.from, range.to, initialState.schema.text(range.text))
-    }
-
-    const mappedFrom = tr.mapping.map(initialSelection.from, -1)
-    const mappedTo = tr.mapping.map(initialSelection.to, 1)
-    tr = tr.removeMark(mappedFrom, mappedTo)
-    dispatch(tr)
-
-    const uncheckedCount = clearCheckedChecklistItemsInRange(editor.state, mappedFrom, mappedTo, dispatch)
-    pushLog('command', `clearFormat unchecked=${uncheckedCount} clearedTcy=${clearedTcyRanges.length}`)
+    const uncheckedCount = clearCheckedChecklistItemsInRange(
+      editor.state,
+      applied.mappedFrom,
+      applied.mappedTo,
+      dispatch,
+    )
+    pushLog(
+      'command',
+      `clearFormat unchecked=${uncheckedCount} clearedTcy=${applied.clearedTcyCount}`,
+    )
   }
 
   function toggleChecklistChecked(): void {

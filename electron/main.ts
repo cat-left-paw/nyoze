@@ -76,6 +76,7 @@ import {
   resolveProjectBooksIpc,
   resolvePanelContextIpc,
   writeNotesIpc,
+  discardProvisionalNotesIpc,
   updateProjectTitleIpc,
   unregisterProjectIpc,
   updateBookManifestV3Ipc,
@@ -115,6 +116,50 @@ import {
   type LibraryUnregisterResult,
 } from "../src/settings/libraryRegistry";
 import { resolveUserDataPathSpec } from "./resolveUserDataPath";
+import {
+  WINDOW_STATE_FILE_NAME,
+  buildWindowStateForPersist,
+  parseWindowStateJson,
+  reduceWindowRuntimeState,
+  resolveStartupWindowBounds,
+  type DisplayWorkArea,
+  type WindowRect,
+  type WindowRuntimeState,
+} from "./appWindowBounds";
+import {
+  DIRTY_CLOSE_DIALOG_BUTTON_INDEX,
+  IDLE_APP_QUIT_INTENT,
+  buildDirtyCloseDialogCopy,
+  currentQuitAttemptId,
+  isExplicitQuitAttempt,
+  isQuitResumingAttempt,
+  reduceAppQuitIntent,
+  resolveDirtyCloseIntent,
+  type AppQuitIntentEvent,
+  type AppQuitIntentState,
+} from "./appQuitIntent";
+import {
+  E2E_WINDOW_MODE_ENV,
+  resolveWindowPresentationPolicy,
+} from "./e2eWindowPresentation";
+import {
+  E2E_BOOTSTRAP_DOCUMENT_THEME_ENV,
+  E2E_BOOTSTRAP_DOC_HEADING_COLOR_ENV,
+  E2E_BOOTSTRAP_DOC_PAGE_COLOR_ENV,
+  E2E_BOOTSTRAP_DOC_TEXT_COLOR_ENV,
+  E2E_BOOTSTRAP_ENV_NAMES,
+  resolveE2eThemeBootstrap,
+} from "./e2eBootstrapTheme";
+import {
+  LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY_CHANNEL,
+  LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV,
+  resolveLocalImeExperimentalPreviewCapability,
+} from "./localImeExperimentalPreviewGate";
+import {
+  LOCAL_IME_PILOT_AVAILABILITY_CHANNEL,
+  LOCAL_IME_PILOT_ENV,
+  resolveLocalImePilotAvailability,
+} from "./localImePilotGate";
 import {
   buildPageViewerWindowQueryString,
   validatePageViewerImageScope,
@@ -163,6 +208,96 @@ const APP_ICON_ICO_PATH = path.join(process.env.APP_ROOT, "build", "icons", "ico
 // 明示的に Nyoze 専用ディレクトリへ固定して "Electron" 共通 userData との衝突を防ぐ。
 const E2E_ENABLED = process.env.NYOZE_E2E === "1";
 const MAIN_E2E_ENABLED = E2E_ENABLED && !app.isPackaged;
+// packaged build では E2E 診断入口を一切作らせない。
+// preload は sandbox 実行のため `app.isPackaged` を自分で判定できず、`process.env`
+// のコピーだけを見る。ここで環境変数を落としておくことで、preload / renderer が
+// 参照する `NYOZE_E2E` は常に `MAIN_E2E_ENABLED` と一致する。renderer 側の
+// 二重確認は同期 IPC `e2e:isEnabled` (下記) が正本。
+if (!MAIN_E2E_ENABLED) {
+  delete process.env.NYOZE_E2E;
+  delete process.env.NYOZE_E2E_USER_DATA_DIR;
+  // E2E-UX1: window presentation の E2E 専用 env も同じ gate で落とす。
+  delete process.env[E2E_WINDOW_MODE_ENV];
+  // E2E-UX1b: theme / document color bootstrap の E2E 専用 env も同様。
+  for (const envName of E2E_BOOTSTRAP_ENV_NAMES) delete process.env[envName];
+}
+
+/**
+ * P3-A1a: 作者限定 internal pilot（局所 IME slot safety shell）の availability。
+ *
+ * **`NYOZE_E2E` とは独立した別 gate**で、E2E 診断入口を pilot の製品経路にしない。
+ * packaged build では要求値に関わらず false になり、env 自体もここで落とす
+ * （preload は sandbox 実行で `app.isPackaged` を判定できないため）。
+ * `available` は「HUD と手動 arm 導線を出してよい」だけで、初期 `enabled` は必ず false。
+ */
+const LOCAL_IME_PILOT_AVAILABLE = resolveLocalImePilotAvailability({
+  isPackaged: app.isPackaged,
+  flagValue: process.env[LOCAL_IME_PILOT_ENV],
+});
+if (!LOCAL_IME_PILOT_AVAILABLE) {
+  delete process.env[LOCAL_IME_PILOT_ENV];
+}
+
+/**
+ * PUBLIC-ENTRY1: Local Window Experimental product **capability**。
+ *
+ * `true` は「設定 UI を出してよい」だけで、有効化ではない。実効有効化は
+ * settings.json のstrategy-neutral preference（既定 false）が正本で、platformは
+ * main-process Local Window availability authorityだけが決める。通常devでも利用できる。
+ * Linux でも capable になり得るが、公式サポート対象ではない。
+ * 作者 pilot が available な起動では常に false（pure policy 上の排他）。
+ * E2E/test envは製品capabilityにもruntime stateにも使わない。
+ */
+const LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY =
+  resolveLocalImeExperimentalPreviewCapability({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    authorPilotAvailable: LOCAL_IME_PILOT_AVAILABLE,
+    e2eEnabled: MAIN_E2E_ENABLED,
+    testCapabilityFlagValue:
+      process.env[LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV],
+  });
+if (LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY.reason !== "test-launch-boundary") {
+  delete process.env[LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV];
+}
+
+/**
+ * E2E-UX1b: renderer の初回 paint 前に適用する theme bootstrap。
+ * `MAIN_E2E_ENABLED` が正本なので、packaged / 通常 development では常に `null`。
+ */
+const e2eThemeBootstrap = resolveE2eThemeBootstrap({
+  e2eEnabled: MAIN_E2E_ENABLED,
+  uiTheme: process.env[E2E_BOOTSTRAP_ENV_NAMES[0]],
+  documentTheme: process.env[E2E_BOOTSTRAP_DOCUMENT_THEME_ENV],
+  pageColor: process.env[E2E_BOOTSTRAP_DOC_PAGE_COLOR_ENV],
+  textColor: process.env[E2E_BOOTSTRAP_DOC_TEXT_COLOR_ENV],
+  headingColor: process.env[E2E_BOOTSTRAP_DOC_HEADING_COLOR_ENV],
+});
+
+/**
+ * E2E-UX1: main / Page Viewer 共通の window presentation policy。
+ *
+ * `MAIN_E2E_ENABLED` を正本にした pure resolver の結果をそのまま使う。
+ *
+ * - production / packaged / 通常 development: `show: true` + 明色 `#f4f1e7` +
+ *   Page Viewer reuse の show/focus あり。**外観・表示動作とも完全に不変**。
+ * - E2E visible (E2E-UX1b): `show: true`・focus 意味論・Page Viewer reuse は
+ *   production と同じで、**初期 `backgroundColor` だけ暗色 `#22252c`**
+ *   （dark UI theme の `baseBg`）。起動のたびの白い点滅を減らすためで、
+ *   製品の既定テーマは変更しない。
+ *
+ * **`background` policy（`show: false`）は診断 No-Go・park 中**であり、
+ * `NYOZE_E2E_WINDOW_MODE=background` を明示指定する manual diagnostic
+ * （`tests/e2e/e2e-background-window-mode-diagnostic.spec.ts`）からしか
+ * 到達しない。既定 suite・共用 diagnostic config・npm script のいずれからも
+ * 到達しない（専用 unsafe config + acknowledgement env が必要）。理由（macOS 15.7.7 /
+ * Electron 41.3.0 で `CrBrowserMain` の SIGSEGV が反復）は
+ * `docs/work-log.md` の E2E-UX1 節を参照。
+ */
+const windowPresentationPolicy = resolveWindowPresentationPolicy({
+  e2eEnabled: MAIN_E2E_ENABLED,
+  requestedMode: process.env[E2E_WINDOW_MODE_ENV],
+});
 const _userDataSpec = resolveUserDataPathSpec({
   isPackaged: app.isPackaged,
   e2eEnabled: MAIN_E2E_ENABLED,
@@ -192,6 +327,109 @@ const MAX_BACKUP_GENERATIONS = 20;
 const BACKUP_TIMESTAMP_PATTERN = /^(\d{8}-\d{6}-\d{3})(?:-.+)?$/;
 const backupsRootPath = path.join(userDataPath, "backups");
 const workspaceStatePath = path.join(userDataPath, "workspace-state.json");
+
+// --- APP-WINDOW-BOUNDS-RESTORE1: main window bounds / maximized persistence ---
+// main process が唯一の authority。renderer の localStorage / React state は使わない。
+// 決定 logic はすべて `electron/appWindowBounds.ts` の pure helper 側にある。
+const windowStatePath = path.join(userDataPath, WINDOW_STATE_FILE_NAME);
+
+/** 通常時 bounds と最大化フラグの in-memory 正本（disk write は close / quit 境界だけ）。 */
+let mainWindowRuntimeState: WindowRuntimeState = { normalBounds: null, maximized: false };
+let mainWindowStateDirty = false;
+
+/** 保存済み window state を読む（best-effort。破損・不正・欠落はすべて null）。 */
+function readPersistedWindowState() {
+  try {
+    return parseWindowStateJson(fs.readFileSync(windowStatePath, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `screen` から work area を写し取る。app ready 後にしか呼べないモジュールなので
+ * top-level では require せず、失敗しても起動を止めない。
+ */
+function readDisplayWorkAreas(): DisplayWorkArea[] {
+  try {
+    const { screen } = require("electron") as typeof import("electron");
+    const primaryId = screen.getPrimaryDisplay().id;
+    return screen.getAllDisplays().map((display) => ({
+      id: display.id,
+      workArea: { ...display.workArea },
+      isPrimary: display.id === primaryId,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * resize / move / maximize / unmaximize / close で in-memory state を更新する。
+ * 通常時 bounds は `getNormalBounds()` を正本とし、最小化・fullscreen 中は更新しない。
+ */
+function captureMainWindowRuntimeState(
+  targetWindow: InstanceType<typeof BrowserWindow>,
+): void {
+  if (targetWindow.isDestroyed()) return;
+  try {
+    const next = reduceWindowRuntimeState(mainWindowRuntimeState, {
+      normalBounds: targetWindow.getNormalBounds(),
+      maximized: targetWindow.isMaximized(),
+      minimized: targetWindow.isMinimized(),
+      fullScreen: targetWindow.isFullScreen(),
+    });
+    if (next === mainWindowRuntimeState) return;
+    mainWindowRuntimeState = next;
+    mainWindowStateDirty = true;
+  } catch {
+    // Best-effort — window preference tracking must never break window lifecycle.
+  }
+}
+
+/**
+ * Windows/Electron may add a few DIP to the first hidden-titlebar bounds at a
+ * fractional display scale. Correct from the observed outer bounds without a
+ * hard-coded frame size; all reads and writes remain in Electron DIP units.
+ */
+function applyWindowsStartupOuterBounds(
+  targetWindow: InstanceType<typeof BrowserWindow>,
+  desired: WindowRect,
+): void {
+  let requested = { ...desired };
+  // Four synchronous samples cover the observed Windows fractional-DPI
+  // convergence (for example 900 -> 905 -> 902 -> 901 -> 900) while keeping
+  // the correction finite and deterministic.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    targetWindow.setBounds(requested);
+    const observed = targetWindow.getBounds();
+    const widthDelta = desired.width - observed.width;
+    const heightDelta = desired.height - observed.height;
+    if (widthDelta === 0 && heightDelta === 0) return;
+    requested = {
+      ...desired,
+      width: Math.max(1, requested.width + widthDelta),
+      height: Math.max(1, requested.height + heightDelta),
+    };
+  }
+}
+
+/**
+ * 実 close / quit 境界でだけ disk へ書く。dirty close の「キャンセル」では
+ * ここへ到達しないので、キャンセルを終了成功として扱うことはない。
+ * 保存失敗は握りつぶす（原稿保存・close・quit を妨げない）。
+ */
+function persistMainWindowState(): void {
+  if (!mainWindowStateDirty) return;
+  const state = buildWindowStateForPersist(mainWindowRuntimeState);
+  if (!state) return;
+  try {
+    fs.writeFileSync(windowStatePath, JSON.stringify(state), "utf-8");
+    mainWindowStateDirty = false;
+  } catch {
+    // Best-effort — window preference persistence is never a quit blocker.
+  }
+}
 
 /**
  * Read the raw workspace-state.json contents (best-effort).
@@ -298,6 +536,17 @@ const dirtyStateByWebContentsId = new Map<number, boolean>();
 const forceCloseWindowIds = new Set<number>();
 const pendingSaveBeforeCloseRequests = new Map<number, (ok: boolean) => void>();
 let saveBeforeCloseRequestSeq = 1;
+
+// APP-MAC-DIRTY-QUIT-CONTINUATION1: 明示 app quit の intent は main process だけが持つ。
+// renderer 側に quit state machine は作らない。
+let appQuitIntent: AppQuitIntentState = IDLE_APP_QUIT_INTENT;
+let appQuitAttemptSeq = 1;
+// dirty dialog が開いている window。再入した close で 2 枚目を開かないための latch。
+const dirtyCloseDialogWindowIds = new Set<number>();
+
+function dispatchAppQuitIntent(event: AppQuitIntentEvent): void {
+  appQuitIntent = reduceAppQuitIntent(appQuitIntent, event);
+}
 
 // Light Page Viewer: snapshot payloads for independent viewer BrowserWindows,
 // keyed by a main-issued payloadId. Read-only viewer windows are never
@@ -491,11 +740,20 @@ function createWindow() {
       ? APP_ICON_ICO_PATH
       : APP_ICON_PNG_PATH;
 
+  // APP-WINDOW-BOUNDS-RESTORE1: 前回終了時の通常 bounds / 最大化状態を復元し、
+  // 起動先 display の work area 内へ収まる bounds を BrowserWindow 生成前に確定する。
+  const startupWindowBounds = resolveStartupWindowBounds({
+    saved: readPersistedWindowState(),
+    displays: readDisplayWorkAreas(),
+  });
+
   const currentWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1100,
-    minHeight: 720,
+    x: startupWindowBounds.bounds.x,
+    y: startupWindowBounds.bounds.y,
+    width: startupWindowBounds.bounds.width,
+    height: startupWindowBounds.bounds.height,
+    minWidth: startupWindowBounds.minimumSize.width,
+    minHeight: startupWindowBounds.minimumSize.height,
     ...(isMac
       ? {
           titleBarStyle: "hidden" as const,
@@ -517,7 +775,12 @@ function createWindow() {
     minimizable: true,
     closable: true,
     icon: windowIconPath,
-    backgroundColor: "#f4f1e7",
+    // production / 通常 development は `show: true` + `#f4f1e7`（従来と同一）。
+    // E2E-UX1b: E2E visible は `show: true` のまま初期背景だけ暗色 `#22252c`。
+    // parked な E2E background mode だけが native 表示しない
+    // （`paintWhenInitiallyHidden` は既定の true を維持）。
+    show: windowPresentationPolicy.show,
+    backgroundColor: windowPresentationPolicy.backgroundColor,
     title: APP_DISPLAY_NAME,
     webPreferences: {
       preload: path.join(__dirname, "preload.mjs"),
@@ -526,9 +789,41 @@ function createWindow() {
       sandbox: true,
     },
   });
+  // APP-WINDOW-BOUNDS-RESTORE1-WIN-FRAME1: On Windows at fractional display
+  // scaling, Electron can expand the initial hidden-titlebar outer height after
+  // construction (for example 900 -> 905 DIP). The resolved values are outer
+  // window bounds, not content bounds, so re-apply them synchronously before
+  // publishing the window or capturing runtime state.
+  if (process.platform === "win32") {
+    applyWindowsStartupOuterBounds(currentWindow, startupWindowBounds.bounds);
+    currentWindow.once("ready-to-show", () => {
+      if (!currentWindow.isDestroyed()) {
+        applyWindowsStartupOuterBounds(currentWindow, startupWindowBounds.bounds);
+      }
+    });
+  }
   win = currentWindow;
   const webContentsId = currentWindow.webContents.id;
   dirtyStateByWebContentsId.set(webContentsId, false);
+
+  // APP-WINDOW-BOUNDS-RESTORE1: 通常 bounds を先に in-memory 正本へ入れてから
+  // （必要なら）最大化する。最大化中も通常 bounds を失わない。
+  mainWindowRuntimeState = {
+    normalBounds: { ...startupWindowBounds.bounds },
+    maximized: false,
+  };
+  mainWindowStateDirty = true;
+  if (startupWindowBounds.maximized) {
+    // 生成直後・load 前に行うことで、通常サイズが一瞬見えてから最大化する
+    // ちらつきを避ける。show / focus / E2E presentation policy は変更しない。
+    currentWindow.maximize();
+  }
+  const captureWindowGeometry = () => captureMainWindowRuntimeState(currentWindow);
+  currentWindow.on("resize", captureWindowGeometry);
+  currentWindow.on("move", captureWindowGeometry);
+  currentWindow.on("maximize", captureWindowGeometry);
+  currentWindow.on("unmaximize", captureWindowGeometry);
+  currentWindow.on("restore", captureWindowGeometry);
 
   if (!isMac) {
     // Keep app menu hidden by default on Windows/Linux.
@@ -563,6 +858,10 @@ function createWindow() {
   });
 
   currentWindow.on("close", (event) => {
+    // APP-WINDOW-BOUNDS-RESTORE1: dialog へ入る前に最新の通常 bounds を確保する。
+    // disk write は実 close（`closed`）/ quit 境界まで行わないので、ここで
+    // 「キャンセル」を選ばれても終了成功として扱うことはない。
+    captureMainWindowRuntimeState(currentWindow);
     const windowId = currentWindow.id;
     if (forceCloseWindowIds.has(windowId)) {
       forceCloseWindowIds.delete(windowId);
@@ -570,38 +869,137 @@ function createWindow() {
     }
 
     const isDirty = dirtyStateByWebContentsId.get(webContentsId);
-    if (!isDirty) return;
+    if (!isDirty) {
+      // 明示 quit はここで中断しない（Electron が quit sequence を続行する）。
+      return;
+    }
 
+    // APP-MAC-DIRTY-QUIT-CONTINUATION1: dirty guard は必ず quit sequence を中止する。
+    // どの操作から来た close なのかを、ここで一度だけ確定させる。
     event.preventDefault();
+
+    if (dirtyCloseDialogWindowIds.has(windowId)) {
+      // 既に dirty dialog が開いている。2 枚目を開かず、この close で新たに
+      // 立った quit attempt も破棄して stale intent を残さない
+      // （進行中 dialog は自分が確定した intent のまま結論を出す）。
+      const reentrantAttemptId = currentQuitAttemptId(appQuitIntent);
+      if (reentrantAttemptId !== null && isExplicitQuitAttempt(appQuitIntent)) {
+        dispatchAppQuitIntent({
+          type: "attempt-abandoned",
+          attemptId: reentrantAttemptId,
+        });
+      }
+      return;
+    }
+
+    const explicitQuitRequested = isExplicitQuitAttempt(appQuitIntent);
+    const quitAttemptId = explicitQuitRequested
+      ? currentQuitAttemptId(appQuitIntent)
+      : null;
+    const closeIntent = resolveDirtyCloseIntent({
+      explicitQuitRequested,
+      platform: process.platform,
+      otherOpenWindowCount: BrowserWindow.getAllWindows().filter(
+        (other) => other !== currentWindow && !other.isDestroyed(),
+      ).length,
+    });
+    const copy = buildDirtyCloseDialogCopy(closeIntent);
+
+    /**
+     * cancel / 保存失敗 / Save As キャンセル / conflict キャンセル / dialog 失敗の
+     * 共通後始末。既に resume が受理されている attempt は取り消さない
+     * （`app.quit()` が進行中で、window close も latch 済みのため）。
+     */
+    const abandonQuitAttempt = () => {
+      if (quitAttemptId === null) return;
+      if (isQuitResumingAttempt(appQuitIntent, quitAttemptId)) return;
+      dispatchAppQuitIntent({ type: "attempt-abandoned", attemptId: quitAttemptId });
+    };
+
+    dirtyCloseDialogWindowIds.add(windowId);
     dialog
       .showMessageBox(currentWindow, {
         type: "warning",
-        buttons: ["キャンセル", "保存して終了", "破棄して終了"],
-        defaultId: 0,
-        cancelId: 0,
-        title: "未保存の変更があります",
-        message: "未保存の変更があります。終了しますか？",
-        detail: "保存していない内容は失われます。",
+        buttons: [...copy.buttons],
+        defaultId: copy.defaultId,
+        cancelId: copy.cancelId,
+        title: copy.title,
+        message: copy.message,
+        detail: copy.detail,
       })
       .then(async (result) => {
-        if (currentWindow.isDestroyed()) return;
-        if (result.response === 0) return;
-        if (result.response === 1) {
+        if (currentWindow.isDestroyed()) {
+          abandonQuitAttempt();
+          return;
+        }
+        if (result.response === DIRTY_CLOSE_DIALOG_BUTTON_INDEX.cancel) {
+          abandonQuitAttempt();
+          return;
+        }
+        if (result.response === DIRTY_CLOSE_DIALOG_BUTTON_INDEX.save) {
           const saved = await requestSaveBeforeClose(currentWindow);
-          if (currentWindow.isDestroyed()) return;
-          if (!saved) return;
+          if (currentWindow.isDestroyed()) {
+            abandonQuitAttempt();
+            return;
+          }
+          if (!saved) {
+            // 保存失敗 / Save As キャンセル / conflict キャンセル。quit は再開しない。
+            abandonQuitAttempt();
+            return;
+          }
+        } else {
+          // STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄。未保存 anchor に対応する
+          // provisional 付箋を取り除いてからでないと close / quit を完了させない。
+          const cleaned = await requestDiscardBeforeClose(currentWindow);
+          if (currentWindow.isDestroyed()) {
+            abandonQuitAttempt();
+            return;
+          }
+          if (!cleaned) {
+            abandonQuitAttempt();
+            return;
+          }
+        }
+        if (quitAttemptId !== null) {
+          // 明示 quit だけ、保存成功または明示破棄のあとに app quit を再開する。
+          // ただし dialog 待機中の再入 close などでこの attempt が既に失効して
+          // いることがある。reducer が resume を受理したことを確認できたときだけ
+          // force-close latch と `app.quit()` を実行し、失効 / 別 attempt では
+          // window を閉じず quit も再開しない（原稿と window はそのまま残す）。
+          dispatchAppQuitIntent({ type: "resume-quit", attemptId: quitAttemptId });
+          if (!isQuitResumingAttempt(appQuitIntent, quitAttemptId)) return;
+          // window close は `app.quit()` が行い、force latch が dirty guard を通す
+          // ので、同じ dialog / save request が二重に始まることはない。
+          forceCloseWindowIds.add(windowId);
+          app.quit();
+          return;
         }
         forceCloseWindowIds.add(windowId);
         currentWindow.close();
+      })
+      .catch((error: unknown) => {
+        // dialog / 保存要求が失敗した場合は fail-closed。window も dirty 内容も
+        // 保持し、quit intent を残さない（次の通常 close を明示 quit と誤認しない）。
+        abandonQuitAttempt();
+        console.warn(
+          "[Nyoze] dirty close dialog failed:",
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        dirtyCloseDialogWindowIds.delete(windowId);
       });
   });
 
   currentWindow.on("closed", () => {
     dirtyStateByWebContentsId.delete(webContentsId);
     forceCloseWindowIds.delete(currentWindow.id);
+    dirtyCloseDialogWindowIds.delete(currentWindow.id);
     if (win === currentWindow) {
       win = null;
     }
+    // 実 close 到達時にだけ永続化する（force-close 経路も同じここを通る）。
+    persistMainWindowState();
   });
 }
 
@@ -648,9 +1046,14 @@ function createPageViewerWindow(
       deletePageViewerSnapshot(previousPayloadId);
     }
     loadPageViewerWindowUrl(existingWindow, targetUrl);
-    if (existingWindow.isMinimized()) existingWindow.restore();
-    existingWindow.show();
-    existingWindow.focus();
+    // E2E-UX1: background mode では OS focus を要求しないため、reuse 時の
+    // restore / show / focus を行わない。production / 通常 development /
+    // E2E visible mode では従来どおり前面化する。
+    if (windowPresentationPolicy.allowReuseActivation) {
+      if (existingWindow.isMinimized()) existingWindow.restore();
+      existingWindow.show();
+      existingWindow.focus();
+    }
     return existingWindow;
   }
 
@@ -671,7 +1074,10 @@ function createPageViewerWindow(
     height: 760,
     minWidth: 480,
     minHeight: 480,
-    backgroundColor: "#f4f1e7",
+    // E2E-UX1 / UX1b: main window と同じ policy（show + 初期背景）を
+    // Page Viewer にも適用する。
+    show: windowPresentationPolicy.show,
+    backgroundColor: windowPresentationPolicy.backgroundColor,
     title: APP_DISPLAY_NAME,
     ...(isMac
       ? {
@@ -975,8 +1381,16 @@ async function openFileBackupFolder(
   }
 }
 
-function requestSaveBeforeClose(
+/**
+ * renderer へ close 前の処理を 1 回だけ依頼し、その結果を待つ共通実装。
+ *
+ * save-before-close と、STICKY-NOTE-DISCARD-CONSISTENCY1 の discard cleanup が
+ * 同じ pending map / seq / timeout を共有する（第二の handshake 機構を作らない）。
+ * 応答なし・送信失敗は false（fail-closed）で、close / quit を成功扱いにしない。
+ */
+function requestRendererBeforeClose(
   targetWindow: InstanceType<typeof BrowserWindow>,
+  channel: "app:requestSaveBeforeClose" | "app:requestDiscardBeforeClose",
 ): Promise<boolean> {
   if (targetWindow.isDestroyed() || targetWindow.webContents.isDestroyed()) {
     return Promise.resolve(false);
@@ -994,13 +1408,30 @@ function requestSaveBeforeClose(
       resolve(ok);
     });
     try {
-      targetWindow.webContents.send("app:requestSaveBeforeClose", { requestId });
+      targetWindow.webContents.send(channel, { requestId });
     } catch {
       pendingSaveBeforeCloseRequests.delete(requestId);
       clearTimeout(timeout);
       resolve(false);
     }
   });
+}
+
+function requestSaveBeforeClose(
+  targetWindow: InstanceType<typeof BrowserWindow>,
+): Promise<boolean> {
+  return requestRendererBeforeClose(targetWindow, "app:requestSaveBeforeClose");
+}
+
+/**
+ * STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄で close / quit する前に、
+ * 未保存 anchor に対応する provisional 付箋の cleanup を renderer へ依頼する。
+ * false（失敗 / 未応答）なら window も process も閉じない。
+ */
+function requestDiscardBeforeClose(
+  targetWindow: InstanceType<typeof BrowserWindow>,
+): Promise<boolean> {
+  return requestRendererBeforeClose(targetWindow, "app:requestDiscardBeforeClose");
 }
 
 // SEC-5: Renderer notifies main of the active file path before loading a document.
@@ -1625,6 +2056,13 @@ ipcMain.handle("project:resolveMissingFileNotes", (_event, filePath: unknown) =>
 ipcMain.handle("project:writeNotes", (_event, filePath: unknown, store: unknown) =>
   writeNotesIpc(projectIpcBoundary, filePath, store),
 );
+// STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄時の provisional note cleanup。
+// project root は renderer 申告値ではなく document path から main が再解決する。
+ipcMain.handle(
+  "project:discardProvisionalNotes",
+  (_event, filePath: unknown, request: unknown) =>
+    discardProvisionalNotesIpc(projectIpcBoundary, filePath, request),
+);
 ipcMain.handle("project:updateTitle", (_event, filePath: unknown, title: unknown) =>
   updateProjectTitleIpc(projectIpcBoundary, filePath, title),
 );
@@ -1730,6 +2168,56 @@ ipcMain.handle(
     return await readDocumentForEditor(checkedPath);
   },
 );
+
+/**
+ * E2E 有効判定の唯一の正本を renderer へ同期で渡す。
+ *
+ * preload は sandbox 実行のため `app.isPackaged` を自分では判定できない。
+ * この channel だけが `MAIN_E2E_ENABLED`（= `NYOZE_E2E` かつ非 packaged）を返し、
+ * preload は false のとき `nyozeBridge.e2e` を expose しない。結果として
+ * packaged build では `window.__NYOZE_E2E__` そのものが構築されず、
+ * IME latency probe を含むすべての診断入口が存在しなくなる。
+ *
+ * 同期 IPC なのは、preload の bridge 構築（= renderer script 実行前）に
+ * 判定を確定させる必要があるため。返す値は boolean 1 個だけ。
+ */
+ipcMain.on("e2e:isEnabled", (event) => {
+  event.returnValue = MAIN_E2E_ENABLED;
+});
+
+/**
+ * E2E-UX1b: 初回 paint 前の theme bootstrap を同期で返す。
+ * `MAIN_E2E_ENABLED` が false なら `resolveE2eThemeBootstrap()` が常に `null` を
+ * 返すため、packaged / 通常 development では値そのものが存在しない。
+ * 返すのは検証済み theme enum 2 つと、3 値そろった `#RRGGBB` の document color
+ * だけ。任意 settings も本文も path も載せない。
+ */
+ipcMain.on("e2e:bootstrapTheme", (event) => {
+  event.returnValue = MAIN_E2E_ENABLED ? e2eThemeBootstrap : null;
+});
+
+/**
+ * P3-A1a: 作者限定 pilot の availability を renderer へ同期で渡す唯一の正本。
+ *
+ * `e2e:isEnabled` と同じ理由で同期 IPC（preload の bridge 構築前に確定させる必要が
+ * ある）。返すのは boolean 1 個だけで、任意設定・本文・path は一切載せない。
+ * packaged build では `LOCAL_IME_PILOT_AVAILABLE` が必ず false になるため、
+ * preload は `nyozeBridge.localImePilot` を expose せず HUD も手動 arm 入口も存在しない。
+ */
+ipcMain.on(LOCAL_IME_PILOT_AVAILABILITY_CHANNEL, (event) => {
+  event.returnValue = LOCAL_IME_PILOT_AVAILABLE;
+});
+
+/**
+ * PUBLIC-ENTRY1: Local Window Experimentalのread-only capability。
+ *
+ * 返すのは fixed read-only boolean 1 個だけで、session 操作・本文・path・diagnostics・
+ * 任意 payload は載せない。preference は settings.json 側が正本なのでこの channel には現れず、
+ * capability だけで自動的に ON にはならない。
+ */
+ipcMain.on(LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY_CHANNEL, (event) => {
+  event.returnValue = LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY.capable;
+});
 
 ipcMain.handle(
   "e2e:readDocumentFixture",
@@ -2775,6 +3263,51 @@ function sendToRenderer(
   }
 }
 
+/**
+ * P2-G1b follow-up: Page Viewer は App を mount せず onMenuCommand も購読しない。
+ * focused が viewer のときは renderer channel ではなく webContents の native edit へ委譲する。
+ */
+function isPageViewerFocusedWindow(
+  focusedWindow: Electron.BaseWindow | undefined,
+): boolean {
+  return Boolean(
+    focusedWindow &&
+      pageViewerWindow &&
+      !pageViewerWindow.isDestroyed() &&
+      focusedWindow === pageViewerWindow,
+  );
+}
+
+function runPageViewerNativeEdit(
+  focusedWindow: Electron.BaseWindow | undefined,
+  op: "undo" | "redo" | "selectAll",
+): void {
+  const bw = focusedWindow as InstanceType<typeof BrowserWindow> | undefined;
+  const wc = bw?.webContents;
+  if (!wc || wc.isDestroyed()) return;
+  if (op === "undo") wc.undo();
+  else if (op === "redo") wc.redo();
+  else wc.selectAll();
+}
+
+function sendEditMenuCommandOrPageViewerNative(
+  focusedWindow: Electron.BaseWindow | undefined,
+  channel: "menu:edit-undo" | "menu:edit-redo" | "menu:edit-select-all",
+): void {
+  if (!focusedWindow) return;
+  if (isPageViewerFocusedWindow(focusedWindow)) {
+    const op =
+      channel === "menu:edit-undo"
+        ? "undo"
+        : channel === "menu:edit-redo"
+          ? "redo"
+          : "selectAll";
+    runPageViewerNativeEdit(focusedWindow, op);
+    return;
+  }
+  sendToRenderer(focusedWindow, channel);
+}
+
 function withEllipsis(label: string): string {
   return `${label}…`;
 }
@@ -2956,13 +3489,41 @@ function buildAppMenuTemplate(
     {
       label: t("menu.edit"),
       submenu: [
-        { label: t("common.undo"), role: "undo" },
-        { label: t("common.redo"), role: "redo" },
+        // P2-G1b: Undo / Redo / Select All だけ native role を外し、renderer routing へ送る。
+        // role と click を併記しない（Electron では role 指定時に click が無視される）。
+        // Copy / Cut / Paste は既存 role のまま（Source Mode / Paragraph Plain / native input
+        // の意味論を実測せず一括置換しない）。
+        {
+          id: "edit-undo",
+          label: t("common.undo"),
+          accelerator: "CmdOrCtrl+Z",
+          click: (_item, focusedWindow) => {
+            sendEditMenuCommandOrPageViewerNative(focusedWindow, "menu:edit-undo");
+          },
+        },
+        {
+          id: "edit-redo",
+          label: t("common.redo"),
+          accelerator: "CmdOrCtrl+Shift+Z",
+          click: (_item, focusedWindow) => {
+            sendEditMenuCommandOrPageViewerNative(focusedWindow, "menu:edit-redo");
+          },
+        },
         { type: "separator" },
         { label: t("common.cut"), role: "cut" },
         { label: t("common.copy"), role: "copy" },
         { label: t("common.paste"), role: "paste" },
-        { label: t("common.selectAll"), role: "selectAll" },
+        {
+          id: "edit-select-all",
+          label: t("common.selectAll"),
+          accelerator: "CmdOrCtrl+A",
+          click: (_item, focusedWindow) => {
+            sendEditMenuCommandOrPageViewerNative(
+              focusedWindow,
+              "menu:edit-select-all",
+            );
+          },
+        },
       ],
     },
     {
@@ -3111,6 +3672,18 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+// APP-MAC-DIRTY-QUIT-CONTINUATION1: 明示 app quit（Cmd+Q / メニュー「終了」/
+// `app.quit()`）だけがここを通る。macOS の赤い close button は通らない。
+// dirty guard が close を `preventDefault()` すると Electron は quit sequence を
+// 中止するので、その attempt の intent をここで覚えておき、保存成功 / 明示破棄の
+// あとにだけ `app.quit()` を再開する。
+app.on("before-quit", () => {
+  dispatchAppQuitIntent({
+    type: "quit-requested",
+    attemptId: appQuitAttemptSeq++,
+  });
+});
+
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
@@ -3231,6 +3804,11 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
+  // APP-WINDOW-BOUNDS-RESTORE1: window を閉じずに quit へ入る経路の保険。
+  // 失敗しても quit を止めない（helper 内で握りつぶす）。
+  persistMainWindowState();
   pendingSaveBeforeCloseRequests.clear();
+  // APP-MAC-DIRTY-QUIT-CONTINUATION1: quit が確定したので intent を残さない。
+  dispatchAppQuitIntent({ type: "quit-settled" });
   globalShortcut.unregisterAll();
 });

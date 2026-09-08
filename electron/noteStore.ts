@@ -37,6 +37,8 @@ import {
 } from "../src/project/noteStore";
 import type { NyozeNotesStore } from "../src/project/noteStore";
 import { buildRelocatedNotesStore } from "../src/project/noteFileRelocation";
+import { buildProvisionalNoteCleanupPlan } from "../src/project/provisionalNoteCleanup";
+import type { ProvisionalNoteCleanupEntry } from "../src/project/provisionalNoteCleanup";
 import { runExclusiveForNotes } from "./noteStoreLock";
 
 /** `projectRoot/.nyoze/notes.json` の絶対パス。 */
@@ -126,6 +128,50 @@ export async function writeNotesStore(
   return runExclusiveForNotes(projectRoot, () =>
     writeNotesStoreUnlocked(projectRoot, store),
   );
+}
+
+export type NotesDiscardProvisionalResult =
+  | { ok: true; removedIds: string[] }
+  | {
+      ok: false;
+      reason:
+        | "identity-mismatch"
+        | "fingerprint-mismatch"
+        | "invalid"
+        | "read-failed"
+        | "not-a-project"
+        | "existing-invalid"
+        | "write-failed";
+      noteId?: string;
+    };
+
+/**
+ * STICKY-NOTE-DISCARD-CONSISTENCY1: 未保存 anchor に対応する provisional note を
+ * project 単位 notes lock 内で **id 単位に**取り除く。
+ *
+ * lock 内で read → 再証明 → write を不可分に行うため、追跡開始以降に入った他の
+ * 付箋編集・追加を消さない。既に消えている id は skip（idempotent）で、file /
+ * fingerprint を再証明できない entry があれば **1 件も削除せず** fail-closed に
+ * する。削除対象が 0 件なら disk write を行わない。
+ */
+export async function discardProvisionalNotesInProject(
+  projectRoot: string,
+  entries: readonly ProvisionalNoteCleanupEntry[],
+): Promise<NotesDiscardProvisionalResult> {
+  return runExclusiveForNotes(projectRoot, async () => {
+    const read = readNotesStore(projectRoot);
+    if (!read.ok) {
+      return { ok: false, reason: read.reason } as NotesDiscardProvisionalResult;
+    }
+    const plan = buildProvisionalNoteCleanupPlan(read.store, entries);
+    if (!plan.ok) {
+      return { ok: false, reason: plan.reason, noteId: plan.noteId };
+    }
+    if (plan.removedIds.length === 0) return { ok: true, removedIds: [] };
+    const written = await writeNotesStoreUnlocked(projectRoot, plan.store);
+    if (!written.ok) return { ok: false, reason: written.reason };
+    return { ok: true, removedIds: plan.removedIds };
+  });
 }
 
 export type NotesRelocateResult =

@@ -33,6 +33,171 @@ export async function openAtomicTempFile(
 }
 
 /**
+ * Windows `rename(temp → existing target)` fails with `EPERM` / `EACCES` while
+ * another handle has the destination open. Observed on win32:
+ * dest `openSync('r')`, `openSync('r+')`, and concurrent `readFile` all throw
+ * `EPERM` (errno -4048); closing the competing handle makes the next rename
+ * succeed in 0ms. POSIX replace is a single rename. This retry is win32-only,
+ * bounded, and fail-closed: the original target is never unlinked first.
+ *
+ * Requested delays sum to 7ms (0+1+2+4). That is a yield budget for a handle
+ * that is already closing — it does **not** cover a reader that stays open
+ * (Playwright 100ms notes.json poll). Those tests wait for UI completion
+ * instead of racing the write. A lock that outlives the 5 attempts fails closed.
+ */
+export const WINDOWS_ATOMIC_REPLACE_RETRY_DELAYS_MS = [0, 1, 2, 4] as const;
+export const WINDOWS_ATOMIC_REPLACE_ATTEMPTS =
+  WINDOWS_ATOMIC_REPLACE_RETRY_DELAYS_MS.length + 1;
+export const WINDOWS_ATOMIC_REPLACE_RETRY_BUDGET_MS: number =
+  WINDOWS_ATOMIC_REPLACE_RETRY_DELAYS_MS.reduce<number>(
+    (sum, delay) => sum + delay,
+    0,
+  );
+
+export function isWindowsAtomicReplaceRetryable(
+  platform: NodeJS.Platform,
+  error: unknown,
+): boolean {
+  if (platform !== "win32") return false;
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "EPERM" || code === "EACCES";
+}
+
+export type AtomicReplaceAttemptRecord = {
+  readonly attempt: number;
+  readonly ok: boolean;
+  readonly code: string | null;
+  readonly injected: boolean;
+};
+
+type AtomicReplaceTestControl = {
+  enabled: boolean;
+  attemptLimit: number | null;
+  injectRemaining: number;
+  injectCode: "EPERM" | "EACCES";
+  attempts: AtomicReplaceAttemptRecord[];
+};
+
+let atomicReplaceTestControl: AtomicReplaceTestControl | null = null;
+
+function isAtomicReplaceTestControlEnabled(): boolean {
+  return atomicReplaceTestControl?.enabled === true;
+}
+
+/** Test-only. Production never calls this; no renderer / IPC port. */
+export function enableAtomicReplaceTestControlForTests(): void {
+  atomicReplaceTestControl = {
+    enabled: true,
+    attemptLimit: null,
+    injectRemaining: 0,
+    injectCode: "EPERM",
+    attempts: [],
+  };
+}
+
+/** Test-only. Production never calls this. */
+export function armAtomicReplaceFaultForTests(input?: {
+  failures?: number;
+  code?: "EPERM" | "EACCES";
+  attemptLimit?: number | null;
+}): void {
+  if (!isAtomicReplaceTestControlEnabled() || !atomicReplaceTestControl) {
+    throw new Error("atomic replace test control is not enabled");
+  }
+  atomicReplaceTestControl.injectRemaining = input?.failures ?? 0;
+  atomicReplaceTestControl.injectCode = input?.code ?? "EPERM";
+  atomicReplaceTestControl.attemptLimit = input?.attemptLimit ?? null;
+  atomicReplaceTestControl.attempts = [];
+}
+
+/** Test-only. Production never calls this. */
+export function snapshotAtomicReplaceAttemptsForTests(): {
+  readonly attempts: readonly AtomicReplaceAttemptRecord[];
+  readonly attemptLimit: number;
+} {
+  return {
+    attempts: atomicReplaceTestControl?.attempts.slice() ?? [],
+    attemptLimit:
+      atomicReplaceTestControl?.attemptLimit ?? WINDOWS_ATOMIC_REPLACE_ATTEMPTS,
+  };
+}
+
+/** Test-only. Production never calls this. */
+export function disableAtomicReplaceTestControlForTests(): void {
+  atomicReplaceTestControl = null;
+}
+
+function recordAtomicReplaceAttempt(record: AtomicReplaceAttemptRecord): void {
+  if (!isAtomicReplaceTestControlEnabled() || !atomicReplaceTestControl) return;
+  atomicReplaceTestControl.attempts.push(record);
+}
+
+function resolveAtomicReplaceAttemptLimit(): number {
+  if (
+    isAtomicReplaceTestControlEnabled() &&
+    atomicReplaceTestControl?.attemptLimit != null
+  ) {
+    return atomicReplaceTestControl.attemptLimit;
+  }
+  return WINDOWS_ATOMIC_REPLACE_ATTEMPTS;
+}
+
+async function renameTempOverTarget(
+  tempPath: string,
+  targetPath: string,
+): Promise<void> {
+  let lastError: unknown = null;
+  const attemptLimit = resolveAtomicReplaceAttemptLimit();
+  for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
+    let injected = false;
+    let error: unknown = null;
+    if (
+      isAtomicReplaceTestControlEnabled() &&
+      atomicReplaceTestControl &&
+      atomicReplaceTestControl.injectRemaining > 0
+    ) {
+      atomicReplaceTestControl.injectRemaining -= 1;
+      injected = true;
+      error = Object.assign(new Error("atomic-replace-test-fault"), {
+        code: atomicReplaceTestControl.injectCode,
+      });
+    } else {
+      try {
+        await fs.promises.rename(tempPath, targetPath);
+        recordAtomicReplaceAttempt({
+          attempt: attempt + 1,
+          ok: true,
+          code: null,
+          injected: false,
+        });
+        return;
+      } catch (renameError) {
+        error = renameError;
+      }
+    }
+    lastError = error;
+    const code = (error as NodeJS.ErrnoException | null)?.code ?? null;
+    recordAtomicReplaceAttempt({
+      attempt: attempt + 1,
+      ok: false,
+      code,
+      injected,
+    });
+    if (
+      !isWindowsAtomicReplaceRetryable(process.platform, error) ||
+      attempt === attemptLimit - 1
+    ) {
+      throw error;
+    }
+    const delayMs = WINDOWS_ATOMIC_REPLACE_RETRY_DELAYS_MS[attempt] ?? 0;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, delayMs);
+    });
+  }
+  throw lastError ?? new Error("failed to replace target with atomic temp file");
+}
+
+/**
  * Write `content` to `targetPath` atomically.
  *
  * 1. Create a temp file in the **same directory** (avoids cross-device rename).
@@ -61,7 +226,7 @@ export async function atomicWriteFile(
     fd = null;
 
     // Atomic rename: on POSIX this is guaranteed atomic for same-filesystem.
-    await fs.promises.rename(tempPath, targetPath);
+    await renameTempOverTarget(tempPath, targetPath);
   } catch (error) {
     // Ensure the file handle is closed before cleanup.
     if (fd) {

@@ -1,5 +1,6 @@
 import type { LineBreakPolicy } from '../editor-core/types'
 import { resolveAutoTcyDigitRange } from '../editor-core/features/autoTcy'
+import { migrateExperimentalLocalImeSettingForWrite } from './localImeExperimentalPreviewSettings'
 import {
   APP_TITLE_COLOR_STORAGE_KEY,
   APP_TITLE_CUSTOM_STORAGE_KEY,
@@ -79,7 +80,11 @@ import {
   isCuratedUiThemePresetId,
 } from './theme-packs'
 import { normalizeUiLanguageMode, resolveDefaultUiLanguageMode } from './uiLanguageMode'
-import { normalizeTheme, UI_THEME_VALUES } from './themeUtils'
+import {
+  DOCUMENT_THEME_VALUES,
+  normalizeTheme,
+  UI_THEME_VALUES,
+} from './themeUtils'
 import {
   type CaretColorMode,
   isValidCaretColorCustom,
@@ -693,14 +698,8 @@ export function saveAppTitleFont(value: AppTitleFont): void {
   }
 }
 
-const VALID_DOC_THEMES: DocumentTheme[] = [
-  'ui-linked',
-  'paper-light',
-  'paper-dark',
-  'bow',
-  'wob',
-  'soft-neutral',
-]
+/** 正本は `themeUtils.ts`（main / E2E bootstrap と共有）。 */
+const VALID_DOC_THEMES: readonly DocumentTheme[] = DOCUMENT_THEME_VALUES
 
 export function loadDocumentTheme(): DocumentTheme {
   try {
@@ -1057,7 +1056,12 @@ export async function patchSettingsJson(patch: Partial<SettingsJson>): Promise<v
         console.warn('patchSettingsJson skipped: current settings unavailable')
         return
       }
-      const merged = { ...current, ...patch }
+      // RETIRE1: mount時に別settingのwriteが先行してもlegacy opt-inを
+      // 落とさず移行し、成功したwriteには旧keyを残さない。
+      const merged = migrateExperimentalLocalImeSettingForWrite({
+        ...current,
+        ...patch,
+      })
       await saveSettingsJson(merged)
     })
     .catch((err) => {

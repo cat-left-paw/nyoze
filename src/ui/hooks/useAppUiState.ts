@@ -32,6 +32,7 @@ import {
   DEFAULT_FRONTMATTER_SHOW_ROLE_LABELS,
   DEFAULT_FRONTMATTER_SHOW_TRANSLATORS,
   DEFAULT_FRONTMATTER_VISIBLE,
+  DEFAULT_EXPERIMENTAL_LOCAL_IME_ENABLED,
   DEFAULT_LINE_BREAK_POLICY,
   DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
   DEFAULT_PSEUDO_CARET_BLINK_ENABLED,
@@ -85,6 +86,7 @@ import {
   normalizePseudoCaretThickness,
 } from "../../settings/pseudoCaretSettings";
 import { normalizeNoteAnchorNoticeConfirmed } from "../../settings/noteAnchorSettings";
+import { resolveExperimentalLocalImeEnabledSetting } from "../../settings/localImeExperimentalPreviewSettings";
 import { normalizeUiLanguageMode } from "../../settings/uiLanguageMode";
 import { normalizeTheme } from "../../settings/themeUtils";
 import {
@@ -884,6 +886,10 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   const [pseudoCaretBlinkEnabled, _setPseudoCaretBlinkEnabled] =
     useState<boolean>(() => DEFAULT_PSEUDO_CARET_BLINK_ENABLED);
 
+  /** PUBLIC-ENTRY1: strategy-neutral product opt-in. Load前も必ずOFF。 */
+  const [experimentalLocalImeEnabled, _setExperimentalLocalImeEnabled] =
+    useState<boolean>(() => DEFAULT_EXPERIMENTAL_LOCAL_IME_ENABLED);
+
   // 付箋 (Task 3A-3): 初回説明の確認済みフラグ。設定 UI なし。
   const [noteAnchorNoticeConfirmed, _setNoteAnchorNoticeConfirmed] =
     useState<boolean>(() => DEFAULT_NOTE_ANCHOR_NOTICE_CONFIRMED);
@@ -1141,6 +1147,16 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
           normalizePseudoCaretBlinkEnabled(settings.pseudoCaretBlinkEnabled),
         );
       }
+      const localImeSetting = resolveExperimentalLocalImeEnabledSetting({
+        currentPresent: Object.prototype.hasOwnProperty.call(
+          settings,
+          "experimentalLocalImeEnabled",
+        ),
+        currentValue: settings.experimentalLocalImeEnabled,
+        legacyParagraphOverlayValue:
+          settings.experimentalLocalImeParagraphOverlayEnabled,
+      });
+      _setExperimentalLocalImeEnabled(localImeSetting.enabled);
       if (settings.noteAnchorNoticeConfirmed !== undefined) {
         _setNoteAnchorNoticeConfirmed(
           normalizeNoteAnchorNoticeConfirmed(settings.noteAnchorNoticeConfirmed),
@@ -1559,6 +1575,12 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     });
   }, [settingsSyncReady, pseudoCaretEnabled, pseudoCaretThickness, pseudoCaretBlinkEnabled]);
 
+  // RETIRE1: strategy-neutral opt-in persistence. storage strips the legacy key.
+  useEffect(() => {
+    if (!settingsSyncReady) return;
+    void patchSettingsJson({ experimentalLocalImeEnabled });
+  }, [settingsSyncReady, experimentalLocalImeEnabled]);
+
   // 付箋 (Task 3A-3): 初回説明の確認済みフラグ persistence.
   useEffect(() => {
     if (!settingsSyncReady) return;
@@ -1594,6 +1616,11 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     ) {
       coreRef.current?.setParagraphPlainMode(false);
       setParagraphPlainModeActive(false);
+      // LOCAL-WINDOW-PACKAGED-REARM-POLISH1: `--editor-writing-mode` を実際に書いた
+      // この同期点が writing-mode 切替の完了 authority である（React state の変化でも、
+      // viewport 復元用の rAF×2 でもない）。保持している bounded token が無ければ
+      // 何も起きないので、initial load / 起動直後の既定方向反映は Start 0 のまま。
+      coreRef.current?.completeLocalImeLocalWindowTransition("writing-mode");
     }
     prevEffectiveWritingModeRef.current = effectiveWritingMode;
   }, [effectiveWritingMode, coreRef]);
@@ -2375,6 +2402,17 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     _setPseudoCaretEnabled(normalizePseudoCaretEnabled(value));
   }, []);
 
+  /**
+   * P3-EXP1: Experimental Preview の opt-in。**ON→OFF の barrier 調停は
+   * `useLocalImeExperimentalPreview` 側が行う**ので、ここは値の正規化と保存だけ。
+   */
+  const setExperimentalLocalImeEnabled = useCallback(
+    (value: boolean) => {
+      _setExperimentalLocalImeEnabled(value === true);
+    },
+    [],
+  );
+
   const setPseudoCaretThickness = useCallback((value: number) => {
     _setPseudoCaretThickness(normalizePseudoCaretThickness(value));
   }, []);
@@ -2937,6 +2975,8 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setPseudoCaretThickness,
     pseudoCaretBlinkEnabled,
     setPseudoCaretBlinkEnabled,
+    experimentalLocalImeEnabled,
+    setExperimentalLocalImeEnabled,
     noteAnchorNoticeConfirmed,
     setNoteAnchorNoticeConfirmed,
     registeredFonts,

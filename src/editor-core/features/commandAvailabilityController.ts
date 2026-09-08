@@ -17,6 +17,11 @@ type ActiveMarksSnapshot = {
 type CreateCommandAvailabilityControllerOptions = {
   getState: () => EditorState
   getIsComposing: () => boolean
+  /**
+   * Undo/Redo 専用。省略時は `getIsComposing` と同じ。
+   * 局所 IME slot の `armed` はここへ載せない。
+   */
+  getIsHistoryComposing?: () => boolean
   getEnableRuby: () => boolean
   canMoveListUp: (state: EditorState) => boolean
   canMoveListDown: (state: EditorState) => boolean
@@ -26,6 +31,7 @@ type CreateCommandAvailabilityControllerOptions = {
   buildCommandAvailability: (input: {
     state: EditorState
     composing: boolean
+    historyComposing?: boolean
     canMoveListUp: boolean
     canMoveListDown: boolean
     canUndo: boolean
@@ -38,6 +44,7 @@ type CreateCommandAvailabilityControllerOptions = {
 export function createCommandAvailabilityController({
   getState,
   getIsComposing,
+  getIsHistoryComposing,
   getEnableRuby,
   canMoveListUp,
   canMoveListDown,
@@ -51,6 +58,7 @@ export function createCommandAvailabilityController({
   function getCommandAvailability(): CommandAvailability {
     const state = getState()
     const composing = getIsComposing()
+    const historyComposing = getIsHistoryComposing ? getIsHistoryComposing() : composing
 
     let canMoveUp = false
     let canMoveDown = false
@@ -62,6 +70,7 @@ export function createCommandAvailabilityController({
     return buildCommandAvailability({
       state,
       composing,
+      historyComposing,
       canMoveListUp: canMoveUp,
       canMoveListDown: canMoveDown,
       canUndo: canUndo(),

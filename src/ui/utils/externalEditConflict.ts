@@ -59,3 +59,44 @@ export function buildConflictAwareWriteFileOptions(
   if (allowConflictOverwrite) options.allowConflictOverwrite = true
   return options
 }
+
+/**
+ * captured target tab の EOL で一意に構成した期待 disk 本文と、実 disk 本文が
+ * byte-equivalent なときだけ true。CRLF↔LF の正規化はしない。
+ */
+export function isExpectedDiskContent(
+  diskMarkdown: string,
+  expectedDiskMarkdown: string,
+): boolean {
+  return diskMarkdown === expectedDiskMarkdown
+}
+
+/**
+ * save first-wins continuation が、自プロセスの直前saveで更新されたmtimeを
+ * 古い React savedStat と見比べて false-conflict しないための採用規則。
+ * disk が captured tab EOL で構成した期待 disk 本文と byte-equivalent なときだけ
+ * live stat を baseline にする。改行コード変更を含む実外部変更は conflict のまま残す。
+ */
+export function resolveStaleSaveBaselineAfterConflict(input: {
+  readonly conflict: ConflictKind | null
+  readonly currentStat: SavedFileStat
+  readonly diskMarkdown: string | null
+  readonly expectedDiskMarkdown: string | null
+}):
+  | { readonly kind: 'none' }
+  | { readonly kind: 'conflict'; readonly conflict: ConflictKind }
+  | { readonly kind: 'stale-baseline'; readonly baseline: SavedFileStatValue } {
+  if (input.conflict === null) return { kind: 'none' }
+  if (input.conflict === 'deleted') {
+    return { kind: 'conflict', conflict: 'deleted' }
+  }
+  if (
+    input.currentStat &&
+    input.diskMarkdown !== null &&
+    input.expectedDiskMarkdown !== null &&
+    isExpectedDiskContent(input.diskMarkdown, input.expectedDiskMarkdown)
+  ) {
+    return { kind: 'stale-baseline', baseline: input.currentStat }
+  }
+  return { kind: 'conflict', conflict: input.conflict }
+}

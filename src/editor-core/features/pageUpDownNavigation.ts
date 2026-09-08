@@ -1,5 +1,6 @@
-import { Selection } from '@tiptap/pm/state'
+import { Selection, type Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 
 type LogPush = (event: string, detail: string) => void
 
@@ -29,9 +30,29 @@ type PageScrollPlan = {
   viewportSpan: number
 }
 
+export type PageUpDownNavigationScrollOffset = {
+  readonly scrollTop: number
+  readonly scrollLeft: number
+}
+
+export type PageUpDownNavigationCommandPlan = {
+  readonly expectedDoc: ProseMirrorNode
+  readonly expectedSelection: Selection
+  readonly expectedTransactionCount: 0 | 1
+  readonly expectedScrollOffset: PageUpDownNavigationScrollOffset
+  readonly moved: boolean
+  readonly boundaryNoop: boolean
+}
+
+export type PageUpDownNavigationCommandResult =
+  | ({ readonly handled: true } & PageUpDownNavigationCommandPlan)
+  | { readonly handled: false }
+
 type HandlePageUpDownKeyOptions = {
   getIsComposing: () => boolean
   pushLog: LogPush
+  /** test / typed handoff用。production既定は常に `view.dispatch()`。 */
+  dispatchTransaction?: (transaction: Transaction) => void
 }
 
 function isBarePageKey(event: KeyboardEvent): boolean {
@@ -54,8 +75,13 @@ function clampToRect(value: number, start: number, end: number): number {
   return clamp(value, min, max)
 }
 
+/** 通常PMと同じscroll host解決。rollback観測もこの単一定義だけを使う。 */
+export function resolvePageUpDownScrollHost(view: EditorView): HTMLElement | null {
+  return view.dom.closest('.editor-surface') as HTMLElement | null
+}
+
 function resolveScrollHost(view: EditorView): ScrollHost | null {
-  return view.dom.closest('.editor-surface') as ScrollHost | null
+  return resolvePageUpDownScrollHost(view) as ScrollHost | null
 }
 
 function resolveCaretAnchorPoint(view: EditorView, pos: number): TargetPoint | null {
@@ -182,31 +208,46 @@ export function clampDocPosition(maxPos: number, pos: number): number {
   return clamp(pos, 0, maxPos)
 }
 
-export function handlePageUpDownKey(
+export function runPageUpDownNavigationCommand(
   view: EditorView,
   event: KeyboardEvent,
-  { getIsComposing, pushLog }: HandlePageUpDownKeyOptions,
-): boolean {
+  options: HandlePageUpDownKeyOptions,
+): PageUpDownNavigationCommandResult {
+  const { getIsComposing, pushLog } = options
   const direction = resolvePageUpDownDirection(event.key)
-  if (!direction) return false
-  if (!isBarePageKey(event)) return false
-  if (getIsComposing() || event.isComposing) return false
-  if (!view.state.selection.empty) return false
+  if (!direction) return { handled: false }
+  if (!isBarePageKey(event)) return { handled: false }
+  if (getIsComposing() || event.isComposing) return { handled: false }
+  if (!view.state.selection.empty) return { handled: false }
 
   const scrollHost = resolveScrollHost(view)
-  if (!scrollHost) return false
+  if (!scrollHost) return { handled: false }
 
   const writingMode = resolvePageUpDownWritingMode(view)
   const plan = resolvePageScrollPlan(scrollHost, direction, writingMode)
-  if (plan.viewportSpan <= 0) return false
+  if (plan.viewportSpan <= 0) return { handled: false }
+  const expectedDoc = view.state.doc
+  const initialSelection = view.state.selection
+  const initialScrollOffset = {
+    scrollTop: scrollHost.scrollTop,
+    scrollLeft: scrollHost.scrollLeft,
+  }
   if (plan.delta === 0) {
     event.preventDefault()
     pushLog('pageNav', `${direction} boundary offset=${plan.currentOffset}`)
-    return true
+    return {
+      handled: true,
+      expectedDoc,
+      expectedSelection: initialSelection,
+      expectedTransactionCount: 0,
+      expectedScrollOffset: initialScrollOffset,
+      moved: false,
+      boundaryNoop: true,
+    }
   }
 
   const caretPoint = resolveCaretAnchorPoint(view, view.state.selection.from)
-  if (!caretPoint) return false
+  if (!caretPoint) return { handled: false }
 
   const surfaceRect = scrollHost.getBoundingClientRect()
   const targetPoints = resolvePageTargetPoints(surfaceRect, caretPoint, plan.axis)
@@ -217,20 +258,48 @@ export function handlePageUpDownKey(
     const nextSelection = resolveSelectionForPoint(view, targetPoints, direction)
     if (!nextSelection) {
       writeScrollOffset(scrollHost, plan.axis, originalOffset)
-      return false
+      return { handled: false }
     }
 
+    const moved = !nextSelection.eq(initialSelection)
     event.preventDefault()
     const from = view.state.selection.from
-    view.dispatch(view.state.tr.setSelection(nextSelection))
+    const transaction = view.state.tr.setSelection(nextSelection)
+    const dispatchTransaction = options.dispatchTransaction ?? ((tr: Transaction) => view.dispatch(tr))
+    dispatchTransaction(transaction)
     writeScrollOffset(scrollHost, plan.axis, plan.targetOffset)
+    // 実 scroll offset は device pixel へ snap されるので、`devicePixelRatio` が非整数の
+    // 環境（Windows 125% 表示など）では読み戻し値が `targetOffset` と一致しない。
+    // scroll 軸の期待値は host command 自身が最後に確立した実 offset を正本にする。
+    // 書いていない交差軸は開始値のまま固定し、command 後の scroll 干渉検出は緩めない。
+    const achievedOffset = readScrollOffset(scrollHost, plan.axis)
+    const expectedScrollOffset = {
+      scrollTop: plan.axis === 'vertical' ? achievedOffset : initialScrollOffset.scrollTop,
+      scrollLeft: plan.axis === 'horizontal' ? achievedOffset : initialScrollOffset.scrollLeft,
+    }
     pushLog(
       'pageNav',
       `${direction} ${plan.axis} offset=${originalOffset}->${plan.targetOffset} pos=${from}->${nextSelection.from}`,
     )
-    return true
+    return {
+      handled: true,
+      expectedDoc,
+      expectedSelection: nextSelection,
+      expectedTransactionCount: 1,
+      expectedScrollOffset,
+      moved,
+      boundaryNoop: false,
+    }
   } catch {
     writeScrollOffset(scrollHost, plan.axis, originalOffset)
-    return false
+    return { handled: false }
   }
+}
+
+export function handlePageUpDownKey(
+  view: EditorView,
+  event: KeyboardEvent,
+  options: HandlePageUpDownKeyOptions,
+): boolean {
+  return runPageUpDownNavigationCommand(view, event, options).handled
 }

@@ -8,6 +8,8 @@ import { handleRubyBoundaryArrowKey } from './rubyBoundaryArrowNavigation'
 import { handleNoteAnchorDeleteKey } from './noteAnchorDeleteKey'
 import { handleRubyBaseBackspaceKey } from './rubyBoundarySelection'
 import { handleListTabKey } from './listTabNavigation'
+import { runRegularBodyShiftEnter } from './lineBreakCommands'
+import { runVerticalRlArrowNavigationCommand } from './verticalRlArrowNavigationAdapter'
 
 type Dispatch = (tr: Transaction) => void
 type LogPush = (event: string, detail: string) => void
@@ -15,8 +17,8 @@ type LogPush = (event: string, detail: string) => void
 type CreateEditorPropsKeyDownHandlerOptions = {
   getIsComposing: (viewComposing: boolean) => boolean
   /**
-   * bare Arrow が上記の特殊 handler に掴まれず既定処理へ流れる直前に 1 回だけ呼ぶ。
-   * macOS Arrow scroll clamp など、preventDefault しない観測用途。
+   * bare Arrow が上記の特殊 handler に掴まれず、共有navigationのresolve成功後に呼ぶ。
+   * macOS Arrow scroll clamp など、dispatch直前の既存表示副作用用。
    */
   onBareArrowNavigationKeydown?: (view: EditorView, event: KeyboardEvent) => void
   noteTypewriterKeyboardNavigationIntent?: (
@@ -58,8 +60,6 @@ export function createEditorPropsKeyDownHandler({
   noteTypewriterJumpNavigationSuppress,
   getLineBreakPolicy,
   deleteHorizontalRuleWithKey,
-  shouldBlockShiftEnterInRegularBody,
-  shouldInsertHardBreakOnShiftEnterInRegularBody,
   pushLog,
 }: CreateEditorPropsKeyDownHandlerOptions): (view: EditorView, event: KeyboardEvent) => boolean {
   return (view: EditorView, event: KeyboardEvent): boolean => {
@@ -155,22 +155,17 @@ export function createEditorPropsKeyDownHandler({
       !event.ctrlKey &&
       !event.altKey
     ) {
-      const lineBreakPolicy = getLineBreakPolicy()
-      if (
-        shouldInsertHardBreakOnShiftEnterInRegularBody(
-          view.state,
-          lineBreakPolicy,
-        )
-      ) {
-        const hardBreakType = view.state.schema.nodes.hardBreak
-        if (!hardBreakType) return false
+      const result = runRegularBodyShiftEnter({
+        state: view.state,
+        lineBreakPolicy: getLineBreakPolicy(),
+        dispatch: (tr) => view.dispatch(tr),
+      })
+      if (result === 'inserted-hard-break') {
         event.preventDefault()
-        const tr = view.state.tr.replaceSelectionWith(hardBreakType.create())
-        view.dispatch(tr.scrollIntoView())
         pushLog('lineBreakGuard', 'inserted hardBreak in strict paragraph/heading')
         return true
       }
-      if (shouldBlockShiftEnterInRegularBody(view.state, lineBreakPolicy)) {
+      if (result === 'blocked') {
         event.preventDefault()
         pushLog('lineBreakGuard', 'blocked Shift+Enter in regular paragraph/heading')
         return true
@@ -187,6 +182,21 @@ export function createEditorPropsKeyDownHandler({
       !event.altKey &&
       !event.shiftKey
     ) {
+      if (!getIsComposing(view.composing)) {
+        const writingMode =
+          view.dom.ownerDocument.defaultView?.getComputedStyle?.(view.dom).writingMode ?? ''
+        const navigation = runVerticalRlArrowNavigationCommand({
+          view,
+          event,
+          writingMode,
+          dispatch: (transaction) => view.dispatch(transaction),
+          beforeDispatch: () => onBareArrowNavigationKeydown?.(view, event),
+        })
+        if (navigation.handled) {
+          event.preventDefault()
+          return true
+        }
+      }
       onBareArrowNavigationKeydown?.(view, event)
     }
 

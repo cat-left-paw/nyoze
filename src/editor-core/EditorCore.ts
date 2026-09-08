@@ -36,7 +36,9 @@ import type {
 import { buildExtensions, DEFAULT_EDITOR_CONTENT } from './extensions/buildExtensions'
 import { createCustomBlockDirectiveController } from './commands/customBlockDirectiveCommands'
 import {
-  resolveAutoTcyDigitRange,
+  allocateSearchCloseFocusRestoreCoreInstanceId,
+  classifySearchCloseFocusOwner,
+  createAutoTcyRuntimeController,
   createBasicCommandsController,
   bindEditorDomEvents,
   buildCommandAvailability,
@@ -52,6 +54,7 @@ import {
   createCompositionEventHandlers,
   createFoldTooltipController,
   createNoteAnchorPreviewController,
+  createNoteAnchorHoverPreviewController,
   createNoteAnchorJumpController,
   findNoteAnchorPosition,
   buildRemoveNoteAnchorTransaction,
@@ -64,55 +67,58 @@ import {
   createListenerSubscriptions,
   createMarkdownIoController,
   createOutlineNavigationController,
+  createLocalImeIntegration,
+  createLocalImeHostTransactionNotifier,
+  buildLocalImeRubyPunctuationWiring,
+  createEditorWidgetClickWiring,
   createParagraphPlainModeController,
   createPseudoCaretController,
   createSearchController,
   createTypewriterModeController,
   createVisualFocusCurrentLineController,
   deleteHorizontalRuleWithKey,
-  resolveChecklistClickPos,
-  resolveClickTargetElement,
-  resolveFoldToggleHeadingPos,
+  emitSearchCloseFocusTraceForTest,
   inspectPmCollapsedAfterSpecialInline,
   moveListItemDown,
   moveListItemUp,
   MAX_DIFF_LOG_LENGTH,
   MAX_DIFF_LOG_OPS,
   measureCanonicalDiff,
+  nextSearchCloseFocusRestoreEpoch,
   captureViewportAnchor,
   restoreViewportAnchor,
   scrollEditorSurfaceToTextOffset,
   scrollEditorSurfaceToRatio,
-  selectHorizontalRuleAtEventTarget,
   parseSingleParagraphNode,
   recordSpecialInlinePointerSample,
   resolveParagraphElement,
   resolveParagraphNodeContext,
   resolveRubyEditContext,
+  resolveSearchCloseFocusRestore,
   serializeParagraphNode,
   shortenForLog,
   shouldBlockShiftEnterInRegularBody,
   shouldInsertHardBreakOnShiftEnterInRegularBody,
   toggleChecklistInSelection,
-  toggleChecklistItemAtDocPos,
   toggleChecklistItemAtSelection,
   toClientRectSnapshot,
   resetHomeEndState,
   notifySelectionChanged,
-  maybeScheduleMacosArrowScrollClamp,
-  readSinceLastInteractionMs,
+  createBareArrowNavigationDisplayHandoff,
+  createLocalImeNavigationHandoffCallbacks,
+  createLocalImePseudoCaretSlotAttachCallbacks,
+  createLocalImeHostInputDomWiring,
+  scheduleMacosArrowScrollClampForView,
   registerMacosArrowScrollClampHostInteractions,
-  isMacOsRenderer,
+  type SearchCloseFocusRestoreToken,
 } from './features'
-import {
-  FOLD_TOGGLE_CLASS,
-  FOLD_ELLIPSIS_CLASS,
-} from './extensions/headingFold'
+import { FOLD_ELLIPSIS_CLASS } from './extensions/headingFold'
 import { searchHighlightPluginKey } from './extensions/searchHighlight'
 import { replaceMatchInDoc, replaceAllMatchesInDoc } from './features'
 import { serializeClipboardSliceToPlainText } from './io/clipboardSlicePlainText'
+import { AOZORA_TCY_BODY_PATTERN } from './schema/aozoraTcy'
 
-const TCY_VALID_PATTERN = /^[A-Za-z0-9!?]{1,4}$/
+const TCY_VALID_PATTERN = AOZORA_TCY_BODY_PATTERN
 
 export interface CreateEditorCoreOptions {
   /** Required: the DOM element to mount the editor into */
@@ -159,12 +165,14 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     searchStateListeners,
   })
   let isComposing = false
+  // Local Windowのhost integration。legacy strategyは生成しない。
+  const localImeIntegration = createLocalImeIntegration()
+  const searchCloseFocusRestoreCoreInstanceId = allocateSearchCloseFocusRestoreCoreInstanceId()
+  let searchCloseFocusRestoreEpoch = 0
   let visualFocusCurrentLineController: ReturnType<typeof createVisualFocusCurrentLineController> | null = null
   let pseudoCaretController: ReturnType<typeof createPseudoCaretController> | null = null
   let enableRubyFlag = true
-  let autoTcyEnabled = false
-  let autoTcyNumbersOnly = false
-  let autoTcyDigitRange = resolveAutoTcyDigitRange()
+  const autoTcyRuntimeController = createAutoTcyRuntimeController()
   let documentLineBreakPolicy: LineBreakPolicy = options.lineBreakPolicy ?? 'obsidian-paragraph'
   let documentMarkdownOptions: MarkdownDocumentOptions = {
     preserveEmptyParagraphs: false,
@@ -211,22 +219,16 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   const editorHolder: { current: Editor | null } = { current: null }
 
   const onEditorPropsKeyDown = createEditorPropsKeyDownHandler({
-    getIsComposing: (viewComposing) => isComposing || viewComposing,
+    getIsComposing: (viewComposing) => isComposing || viewComposing || localImeIntegration.isActive(),
     onBareArrowNavigationKeydown: (view, event) => {
-      const host = view.dom.closest('.editor-surface') as HTMLElement | null
-      if (!host) return
-      const { sinceLastWheelMs, sinceLastPointerDragMs } = readSinceLastInteractionMs(host)
-      maybeScheduleMacosArrowScrollClamp(host, event, {
+      scheduleMacosArrowScrollClampForView(view, event, {
         clampSettingEnabled: options.getMacosArrowScrollClampEnabled?.() ?? true,
-        isMacOS: isMacOsRenderer(),
         typewriterEnabled: options.getTypewriterModeEnabled?.() ?? false,
         wysiwygSuppressForSourceMode: options.getIsSourceModeActive?.() ?? false,
         paragraphPlainActive: paragraphPlainControllerRef.current?.isActive() ?? false,
-        composing: isComposing || view.composing,
+        composing: isComposing || view.composing || localImeIntegration.isActive(),
         selectionCollapsed: view.state.selection.empty,
         defaultPrevented: event.defaultPrevented,
-        sinceLastWheelMs,
-        sinceLastPointerDragMs,
       })
     },
     noteTypewriterKeyboardNavigationIntent: (event) => {
@@ -242,7 +244,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     pushLog,
   })
   const onEditorPropsPaste = createEditorPropsPasteHandler({
-    getIsComposing: (viewComposing) => isComposing || viewComposing,
+    getIsComposing: (viewComposing) => isComposing || viewComposing || localImeIntegration.isActive(),
     getLineBreakPolicy: readLineBreakPolicy,
     getDocumentMarkdownOptions: () => documentMarkdownOptions,
     pushLog,
@@ -252,15 +254,30 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     updateListeners,
     pushLog,
   })
-  const onSelectionUpdate = (payload: Parameters<typeof baseOnSelectionUpdate>[0]) => {
-    notifySelectionChanged()
+  /**
+   * P3-A1b2: Undo / Redo 由来の selection 更新を局所 IME auto-arm の候補から外すため、
+   * TipTap が渡す transaction も読む。再 arm すると直後の Redo が local overlay の
+   * 空 history へ吸われて無言 no-op になる。
+   */
+  type SelectionUpdateWithTransaction = Parameters<typeof baseOnSelectionUpdate>[0] & {
+    transaction?: Transaction
+  }
+  const localImeHostTransactionNotice = createLocalImeHostTransactionNotifier(localImeIntegration)
+  const onSelectionUpdate = (payload: SelectionUpdateWithTransaction) => {
+    notifySelectionChanged(payload.editor.state.selection.from)
     baseOnSelectionUpdate(payload)
+    localImeHostTransactionNotice.noteSelectionUpdate(payload.transaction)
     typewriterModeController?.handleSelectionUpdate()
     visualFocusCurrentLineController?.scheduleUpdate()
     pseudoCaretController?.scheduleUpdate()
   }
   let typewriterModeController: ReturnType<typeof createTypewriterModeController> | null = null
   let noteAnchorPreviewController: ReturnType<typeof createNoteAnchorPreviewController> | null = null
+  // STICKY-NOTE-ENDMARKER-LAYOUT1: hover preview は marker 内 CSS ::after ではなく
+  // body 直下の単一 floating layer が正本（editor-panel の overflow に切られないため）。
+  let noteAnchorHoverPreviewController:
+    | ReturnType<typeof createNoteAnchorHoverPreviewController>
+    | null = null
   let noteAnchorJumpController: ReturnType<typeof createNoteAnchorJumpController> | null = null
   let onNoteAnchorReveal: ((id: string) => void) | null = null
   const onUpdate = ({ transaction }: { transaction: Transaction }) => {
@@ -286,18 +303,16 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
   const editor = new Editor({
     extensions: buildExtensions({
-      autoTcy: {
-        isEnabled: () => autoTcyEnabled,
-        getDigitRange: () => autoTcyDigitRange,
-        getNumbersOnly: () => autoTcyNumbersOnly,
-      },
+      autoTcy: autoTcyRuntimeController.getExtensionOptions(() => localImeIntegration.beginFlushPerfSpan('auto-tcy')),
+      rubyPunctuation: buildLocalImeRubyPunctuationWiring(localImeIntegration),
       visualFocus: {
         getBlockHighlightEnabled: () => options.getVisualFocusBlockHighlightEnabled?.() ?? false,
         getDimNonFocusedBlocksEnabled: () =>
           options.getVisualFocusDimNonFocusedBlocksEnabled?.() ?? false,
         getSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
         getParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
-        getComposing: () => isComposing || editorHolder.current?.view.composing === true,
+        getComposing: () =>
+          isComposing || editorHolder.current?.view.composing === true || localImeIntegration.isActive(),
       },
     }),
     content: DEFAULT_EDITOR_CONTENT,
@@ -311,9 +326,14 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     },
     onSelectionUpdate,
     onUpdate,
+    onTransaction: (payload) => localImeHostTransactionNotice.noteTransaction(payload),
   })
 
   editorHolder.current = editor
+
+  /** 共通 composition predicate（設計書 §4.6）。全 getIsComposing がこれを参照する。 */
+  const isCompositionActive = (): boolean =>
+    isComposing || editor.view.composing || localImeIntegration.isActive()
 
   paragraphPlainControllerRef.current = createParagraphPlainModeController({
     editor,
@@ -323,11 +343,12 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   typewriterModeController = createTypewriterModeController({
     view: editor.view,
     getIsEnabled: options.getTypewriterModeEnabled ?? (() => false),
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     getIsParagraphPlainActive: () => paragraphPlainControllerRef.current!.isActive(),
     getIsSourceModeActive: options.getIsSourceModeActive ?? (() => false),
     getOffsetRatio: options.getTypewriterOffsetRatio ?? (() => 0),
     getFollowBandRatio: options.getTypewriterFollowBandRatio ?? (() => 0.16),
+    joinPostFlushFrame: (consumer) => localImeIntegration.joinPostFlushFrame(consumer),
   })
   const unsubscribeTypewriterParagraphPlainMode = paragraphPlainControllerRef.current.onModeChange(() => {
     typewriterModeController?.syncRuntimeState()
@@ -386,7 +407,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
   const inlineAnnotationController = createInlineAnnotationController({
     editor,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     getLineBreakPolicy: readLineBreakPolicy,
     pushLog,
     tcyValidPattern: TCY_VALID_PATTERN,
@@ -400,16 +421,16 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
   // --- DOM event handlers (boundary guard & logging) ---
   const {
-    onCompositionStart,
+    onCompositionStart: handleCompositionStart,
     onCompositionUpdate,
-    onCompositionEnd,
-    onBeforeInput,
-    onInput,
+    onCompositionEnd: handleCompositionEnd,
+    onBeforeInput: handleBeforeInput,
+    onInput: handleInput,
     onKeyDown,
   } = createCompositionEventHandlers({
     getState: () => editor.state,
     getView: () => editor.view,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     setIsComposing: (next) => {
       isComposing = next
       visualFocusCurrentLineController?.scheduleUpdate()
@@ -425,19 +446,19 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     clearStoredMarks: () => clearStoredMarksAtBoundary(editor),
     pushLog,
   })
+  const onCompositionStart = (event: CompositionEvent) => {
+    // PRIMARYOWN1: pending acquisitionをhost IME cycle開始時に失効し、cycle全体を
+    // host ownerのまま保つ。文字列やinputTypeは分類しない。
+    localImeHostTransactionNotice.noteCompositionStart()
+    handleCompositionStart(event)
+  }
+  const { onBeforeInput, onInput, onCompositionEnd } = createLocalImeHostInputDomWiring({
+    notifier: localImeHostTransactionNotice, getHostCompositionActive: () => isComposing || editor.view.composing,
+    handleBeforeInput, handleInput, handleCompositionEnd,
+  })
 
-  const onClick = createEditorClickHandler({
-    getIsComposing: () => isComposing || editor.view.composing,
-    foldToggleClass: FOLD_TOGGLE_CLASS,
-    getState: () => editor.state,
-    posAtDOM: (node, offset) => editor.view.posAtDOM(node, offset),
-    dispatch: (tr) => editor.view.dispatch(tr),
-    resolveClickTargetElement,
-    resolveFoldToggleHeadingPos,
-    selectHorizontalRuleAtEventTarget,
-    resolveChecklistClickPos,
-    toggleChecklistItemAtDocPos,
-    toggleHeadingFold: (headingPos) => editor.commands.toggleHeadingFold(headingPos),
+  const widgetClick = createEditorWidgetClickWiring({
+    editor,
     emitFoldChange,
     openExternalUrl: options.openExternalUrl,
     onHeadingFoldToggled: () => {
@@ -449,12 +470,23 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     },
     pushLog,
   })
+  const onClick = createEditorClickHandler({
+    getIsComposing: () => isCompositionActive(),
+    getState: () => editor.state,
+    posAtDOM: (node, offset) => editor.view.posAtDOM(node, offset),
+    dispatch: (tr) => editor.view.dispatch(tr),
+    ...widgetClick.clickHandlerWidget,
+    getIsHostImeComposing: () => isComposing || editor.view.composing,
+  })
 
   // --- Fold ellipsis tooltip ---
   const foldTooltipController = createFoldTooltipController('heading-fold-preview-tooltip')
   noteAnchorPreviewController = createNoteAnchorPreviewController(editor.view)
   noteAnchorJumpController = createNoteAnchorJumpController(editor.view)
   const editorSurface = editor.view.dom.closest('.editor-surface') as HTMLElement | null
+  noteAnchorHoverPreviewController = createNoteAnchorHoverPreviewController({
+    getVisibleAreaElement: () => editorSurface,
+  })
   const wheelScrollController = editorSurface
     ? createEditorSurfaceWheelController(editor.view.dom, editorSurface)
     : null
@@ -469,7 +501,9 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getEnabled: () => options.getVisualFocusCurrentLineHighlightEnabled?.() ?? false,
     getIsSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
     getIsParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
+    // 局所 IME slot active 中は current line 帯を隠す（設計書 §4.7）。
+    getIsLocalImeEditingActive: () => localImeIntegration.isActive(),
   })
   visualFocusCurrentLineController.scheduleUpdate()
 
@@ -481,21 +515,60 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getBlinkEnabled: () => options.getPseudoCaretBlinkEnabled?.() ?? true,
     getIsSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
     getIsParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
+    getExternalGeometrySource: () => localImeIntegration.getPseudoCaretExternalGeometrySource(),
+    joinPostFlushFrame: (consumer) => localImeIntegration.joinPostFlushFrame(consumer),
   })
   pseudoCaretController.scheduleUpdate()
 
+  // Local Windowのhost Arrow表示通知。session lifecycleは持たない。
+  const onBareArrowNavigationDisplayHandoff = createBareArrowNavigationDisplayHandoff({
+    view: editor.view,
+    noteTypewriterClassifiedArrowIntent: () =>
+      typewriterModeController?.noteClassifiedBareArrowNavigationIntent(),
+    notePseudoCaretIntent: (event) => pseudoCaretController?.noteKeyboardNavigationIntent(event),
+    clampSettingEnabled: () => options.getMacosArrowScrollClampEnabled?.() ?? true,
+    typewriterEnabled: () => options.getTypewriterModeEnabled?.() ?? false,
+    wysiwygSuppressForSourceMode: () => options.getIsSourceModeActive?.() ?? false,
+    paragraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+  })
+
+  localImeIntegration.attach({
+    view: editor.view,
+    editorSurface,
+    getIsSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
+    getIsParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+    getHostCompositionActive: () => isComposing || editor.view.composing,
+    getLineBreakPolicy: readLineBreakPolicy,
+    getDocumentMarkdownOptions: () => documentMarkdownOptions,
+    ...createLocalImePseudoCaretSlotAttachCallbacks({
+      pseudoCaretController,
+      visualFocusController: visualFocusCurrentLineController,
+    }),
+    onBareArrowNavigationDisplayHandoff,
+    ...createLocalImeNavigationHandoffCallbacks({
+      view: editor.view,
+      noteTypewriterJumpSuppressHomeEnd: () => typewriterModeController?.noteJumpNavigationSuppress('home-end-page'),
+      noteTypewriterJumpSuppressPageUpDown: () => typewriterModeController?.noteJumpNavigationSuppress('page-up-down'),
+      notePseudoCaretIntent: (event) => {
+        pseudoCaretController?.noteKeyboardNavigationIntent(event)
+        pseudoCaretController?.scheduleUpdate()
+      },
+    }),
+  })
   function onMouseOver(event: MouseEvent) {
     foldTooltipController.onMouseOver(event, FOLD_ELLIPSIS_CLASS)
+    noteAnchorHoverPreviewController?.onMouseOver(event)
   }
 
   function onMouseOut(event: MouseEvent) {
     foldTooltipController.onMouseOut(event, FOLD_ELLIPSIS_CLASS)
+    noteAnchorHoverPreviewController?.onMouseOut(event)
   }
 
   const outlineNavigationController = createOutlineNavigationController({
     editor,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     pushLog,
     emitFoldChange,
     noteTypewriterProgrammaticJump: () => {
@@ -506,7 +579,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     },
   })
   const searchController = createSearchController({
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     getLineBreakPolicy: readLineBreakPolicy,
     setSearchQueryCommand: (query, caseSensitive) => {
       editor.commands.setSearchQuery(query, caseSensitive)
@@ -534,7 +607,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
   const basicCommandsController = createBasicCommandsController({
     editor,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     getLineBreakPolicy: readLineBreakPolicy,
     pushLog,
     clearCheckedChecklistItemsInRange,
@@ -545,12 +618,13 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
   const customBlockDirectiveController = createCustomBlockDirectiveController({
     editor,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
     pushLog,
   })
   const commandAvailabilityController = createCommandAvailabilityController({
     getState: () => editor.state,
-    getIsComposing: () => isComposing || editor.view.composing,
+    getIsComposing: () => isCompositionActive(),
+    getIsHistoryComposing: () => isComposing || editor.view.composing || localImeIntegration.isHistoryBlocking(),
     getEnableRuby: () => enableRubyFlag,
     canMoveListUp: (state) => moveListItemUp(state, undefined),
     canMoveListDown: (state) => moveListItemDown(state, undefined),
@@ -675,12 +749,13 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   // --- Public API ---
 
   const handle: EditorCoreHandle = {
-    undo(): boolean {
-      return basicCommandsController.undo()
-    },
+    undo(): boolean { return localImeIntegration.tryCommitShortcutEdit('undo') || basicCommandsController.undo() },
+    redo(): boolean { return localImeIntegration.tryCommitShortcutEdit('redo') || basicCommandsController.redo() },
 
-    redo(): boolean {
-      return basicCommandsController.redo()
+    // P2-G1a: Edit menu routing 用の限定 port。局所 IME 側の判定だけを返し、
+    // 通常 PM / Source Mode / Paragraph Plain への fallback は P2-G1b が行う。
+    routeLocalImeEditMenuCommand(operation) {
+      return localImeIntegration.routeEditMenuCommand(operation)
     },
 
     execute(command: 'bold' | 'italic' | 'strike' | 'highlight' | 'underline') {
@@ -877,16 +952,22 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getNoteAnchorIdsInDoc(): string[] {
       return collectNoteAnchorIdsInDoc(editor.state.doc)
     },
-
     setOnNoteAnchorReveal(listener: ((id: string) => void) | null) {
       onNoteAnchorReveal = listener
     },
+    beginLocalImeLocalWindowTransition: (kind) => localImeIntegration.beginLocalWindowTransition(kind),
+    cancelLocalImeLocalWindowTransition: (kind) => localImeIntegration.cancelLocalWindowTransition(kind),
+    completeLocalImeLocalWindowTransition: (kind, writingMode) => localImeIntegration.completeLocalWindowTransition(kind, writingMode),
 
     loadMarkdown(md: string) {
+      if (!localImeIntegration.notifyDocumentChange('document-load')) return false
+      // STICKY-NOTE-ENDMARKER-LAYOUT1: document / tab 切替で hover preview を畳む。
+      noteAnchorHoverPreviewController?.hide()
       resetHomeEndState()
       markdownIoController.loadMarkdown(md)
       documentLineBreakPolicy = readLineBreakPolicy()
       searchController.refreshImmediately()
+      return true
     },
 
     setReadOnly(readOnly: boolean) {
@@ -905,11 +986,17 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       return markdownIoController.peekMarkdown()
     },
 
+    runWithLocalImePerfSpan(span, run) {
+      return localImeIntegration.runWithFlushPerfSpan(span, run)
+    },
+
     reset() {
+      if (!localImeIntegration.notifyDocumentChange('document-reset')) return false
       resetHomeEndState()
       markdownIoController.reset()
       documentLineBreakPolicy = readLineBreakPolicy()
       searchController.refreshImmediately()
+      return true
     },
 
     clearHistory() {
@@ -1022,6 +1109,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       return listenerSubscriptions.onFoldChange(listener)
     },
 
+    getEditorState() {
+      return editor.state
+    },
+
     toggleHeadingFold(pos: number) {
       outlineNavigationController.toggleHeadingFold(pos)
     },
@@ -1114,35 +1205,108 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     isRubyEnabled(): boolean {
       return enableRubyFlag
     },
-    isComposing(): boolean { return isComposing || editor.view.composing },
-
+    isComposing(): boolean { return isCompositionActive() },
+    isHostImeComposing(): boolean { return isComposing || editor.view.composing },
     setAutoTcyOptions(options) {
-      const nextDigitRange = resolveAutoTcyDigitRange(options)
-      const nextNumbersOnly = options.numbersOnly === true
-      const changed =
-        autoTcyEnabled !== options.enabled ||
-        autoTcyNumbersOnly !== nextNumbersOnly ||
-        autoTcyDigitRange.minDigits !== nextDigitRange.minDigits ||
-        autoTcyDigitRange.maxDigits !== nextDigitRange.maxDigits
-
-      autoTcyEnabled = options.enabled
-      autoTcyNumbersOnly = nextNumbersOnly
-      autoTcyDigitRange = nextDigitRange
-
-      if (!changed) return
-
-      const tr = editor.state.tr
-        .setMeta('nyozeAutoTcyRefresh', {
-          enabled: autoTcyEnabled,
-          numbersOnly: autoTcyNumbersOnly,
-          minDigits: autoTcyDigitRange.minDigits,
-          maxDigits: autoTcyDigitRange.maxDigits,
-        })
-        .setMeta('addToHistory', false)
-      editor.view.dispatch(tr)
+      const refreshRequest = autoTcyRuntimeController.setOptions(options)
+      if (!refreshRequest) return
+      editor.view.dispatch(editor.state.tr
+        .setMeta('nyozeAutoTcyRefresh', refreshRequest.payload)
+        .setMeta('addToHistory', refreshRequest.addToHistory))
     },
 
     focusEditor() {
+      editor.commands.focus()
+    },
+
+    captureSearchCloseFocusRestore() {
+      searchCloseFocusRestoreEpoch = nextSearchCloseFocusRestoreEpoch(searchCloseFocusRestoreEpoch)
+      const live = localImeIntegration.readSearchCloseFocusLive()
+      const token = {
+        epoch: searchCloseFocusRestoreEpoch,
+        coreInstanceId: searchCloseFocusRestoreCoreInstanceId,
+        documentIdentity: live?.documentIdentity ?? null,
+        controllerGeneration: live?.generation ?? null,
+      }
+      emitSearchCloseFocusTraceForTest('capture-search-close-focus-restore', {
+        epoch: token.epoch,
+        coreInstanceId: token.coreInstanceId,
+        mode: live?.mode ?? null,
+        generation: live?.generation ?? null,
+        localRootPresent: live?.localRootConnected === true,
+        identity: token.documentIdentity,
+      })
+      return token
+    },
+
+    cancelSearchCloseFocusRestore() {
+      searchCloseFocusRestoreEpoch = nextSearchCloseFocusRestoreEpoch(searchCloseFocusRestoreEpoch)
+      emitSearchCloseFocusTraceForTest('cancel-search-close-focus-restore', {
+        epoch: searchCloseFocusRestoreEpoch,
+        coreInstanceId: searchCloseFocusRestoreCoreInstanceId,
+      })
+    },
+
+    applySearchCloseFocusRestore(token: SearchCloseFocusRestoreToken) {
+      const live = localImeIntegration.readSearchCloseFocusLive()
+      const ownerDocument = editor.view.dom.ownerDocument
+      const active = ownerDocument.activeElement
+      const searchRoot = ownerDocument.querySelector('.search-bar')
+      const localRoot = ownerDocument.querySelector('[data-nyoze-local-window-editor="true"]')
+      const hostRoot = editor.view.dom
+      const focusOwner = classifySearchCloseFocusOwner({
+        activeElement: active,
+        searchContainsActive: Boolean(searchRoot && active && searchRoot.contains(active)),
+        localContainsActive: Boolean(localRoot && active && localRoot.contains(active)),
+        hostContainsActive: Boolean(active && hostRoot.contains(active)),
+      })
+      const decision = resolveSearchCloseFocusRestore({
+        token,
+        currentEpoch: searchCloseFocusRestoreEpoch,
+        currentCoreInstanceId: searchCloseFocusRestoreCoreInstanceId,
+        focusOwner,
+        live: live
+          ? {
+              mode: live.mode,
+              documentIdentity: live.documentIdentity || null,
+              controllerGeneration: live.generation,
+              localRootConnected: live.localRootConnected,
+              compositionActive: live.compositionActive,
+            }
+          : null,
+      })
+      emitSearchCloseFocusTraceForTest('apply-search-close-focus-restore', {
+        epoch: token.epoch,
+        currentEpoch: searchCloseFocusRestoreEpoch,
+        coreInstanceId: searchCloseFocusRestoreCoreInstanceId,
+        tokenCoreInstanceId: token.coreInstanceId,
+        decision: decision.action,
+        reason: 'reason' in decision ? decision.reason : null,
+        focusOwner,
+        mode: live?.mode ?? null,
+        generation: live?.generation ?? null,
+        localRootPresent: live?.localRootConnected === true,
+        identity: live?.documentIdentity ?? null,
+      })
+      if (decision.action === 'skip') return
+      if (
+        decision.action === 'focus-local-window' &&
+        token.documentIdentity &&
+        token.controllerGeneration != null &&
+        localImeIntegration.tryFocusLocalWindowRoot({
+          documentIdentity: token.documentIdentity,
+          controllerGeneration: token.controllerGeneration,
+        })
+      ) {
+        emitSearchCloseFocusTraceForTest('focus-restore-local-window', {
+          generation: token.controllerGeneration,
+          identity: token.documentIdentity,
+        })
+        return
+      }
+      emitSearchCloseFocusTraceForTest('focus-restore-host-editor', {
+        decision: decision.action,
+      })
       editor.commands.focus()
     },
 
@@ -1158,12 +1322,19 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     scheduleVisualFocusCurrentLineUpdate() {
       visualFocusCurrentLineController?.scheduleUpdate()
     },
-
     schedulePseudoCaretUpdate() {
       pseudoCaretController?.scheduleUpdate()
     },
-
+    getLocalImeLocalWindowSnapshotForE2e: () => localImeIntegration.getLocalWindowSnapshotForE2e(),
+    getLocalImeNavigationPerformanceSnapshotForE2e: () => localImeIntegration.getNavigationPerformanceSnapshotForE2e(),
+    setLocalImeLocalWindowFailureForE2e: (failure) => localImeIntegration.setLocalWindowFailureForE2e(failure),
+    injectLocalImeLocalWindowRestartStartFailureForE2e: (kind) => localImeIntegration.injectLocalWindowRestartStartFailureForE2e(kind),
+    dispatchLocalImeLocalWindowHostContentChangeForE2e: (kind) => localImeIntegration.dispatchLocalWindowHostContentChangeForE2e(kind),
+    setLocalImeLocalWindowSelectionForE2e: (anchor, head) => localImeIntegration.setLocalWindowSelectionForE2e(anchor, head),
+    dispatchLocalImeLocalWindowGrowthForE2e: (additionalBlocks, text) => localImeIntegration.dispatchLocalWindowGrowthForE2e(additionalBlocks, text),
     destroy() {
+      searchCloseFocusRestoreEpoch = nextSearchCloseFocusRestoreEpoch(searchCloseFocusRestoreEpoch)
+      if (!localImeIntegration.destroy()) return false
       unsubscribeTypewriterParagraphPlainMode()
       visualFocusCurrentLineController?.destroy()
       visualFocusCurrentLineController = null
@@ -1175,19 +1346,19 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       unregisterMacosArrowScrollClampHost?.()
       unregisterMacosArrowScrollClampHost = null
       unbindDomEvents()
-      if (editorSurface && wheelScrollController) {
-        editorSurface.removeEventListener('wheel', wheelScrollController.onWheel)
-      }
+      if (editorSurface && wheelScrollController) editorSurface.removeEventListener('wheel', wheelScrollController.onWheel)
       wheelScrollController?.destroy()
       foldTooltipController.destroy()
       noteAnchorPreviewController?.destroy()
       noteAnchorPreviewController = null
+      noteAnchorHoverPreviewController?.destroy()
+      noteAnchorHoverPreviewController = null
       noteAnchorJumpController?.destroy()
       noteAnchorJumpController = null
       listenerSubscriptions.clearAll()
       editor.destroy()
+      return true
     },
   }
-
   return handle
 }

@@ -1,10 +1,15 @@
 import { useMemo, type RefObject } from "react";
 import type { EditorCoreHandle } from "../../editor-core/types";
+import { runLocalImeHostCommand } from "../utils/localImeHostCommandPreflight";
 
 /**
  * 独自ブロック装飾 (custom block directive) の toolbar 操作を editor core handle へ
  * 橋渡しする薄い hook。internal read-only doc では適用 / 解除を無効化する。
  * 実際の transaction / gating は editor core 側 (commands + controller) が担う。
+ *
+ * LOCAL-WINDOW-HOSTCOMMAND1: caret-based な apply / remove / pageBreak / blankPage は
+ * 既存 document-action barrier を通してから 1 回だけ実行する。deletePageBreak は
+ * node selection 必須のため barrier 対象外。
  */
 export function useBlockDirectiveCommands(
   coreRef: RefObject<EditorCoreHandle | null>,
@@ -20,15 +25,21 @@ export function useBlockDirectiveCommands(
     () => ({
       apply: (token: string) => {
         if (internalDocActive) return;
-        coreRef.current?.applyCustomBlockDirective(token);
+        runLocalImeHostCommand("host-command-block-directive", () => {
+          coreRef.current?.applyCustomBlockDirective(token);
+        });
       },
       remove: () => {
         if (internalDocActive) return;
-        coreRef.current?.removeCustomBlockDirective();
+        runLocalImeHostCommand("host-command-block-directive", () => {
+          coreRef.current?.removeCustomBlockDirective();
+        });
       },
       insertPageBreak: () => {
         if (internalDocActive) return;
-        coreRef.current?.insertPageBreak();
+        runLocalImeHostCommand("host-command-block-directive", () => {
+          coreRef.current?.insertPageBreak();
+        });
       },
       deletePageBreak: () => {
         if (internalDocActive) return;
@@ -36,7 +47,9 @@ export function useBlockDirectiveCommands(
       },
       insertBlankPage: (count?: number) => {
         if (internalDocActive) return;
-        coreRef.current?.insertBlankPage(count);
+        runLocalImeHostCommand("host-command-block-directive", () => {
+          coreRef.current?.insertBlankPage(count);
+        });
       },
     }),
     [coreRef, internalDocActive],

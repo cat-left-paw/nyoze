@@ -188,6 +188,44 @@ export function matchesRubyInsertShortcut({
   return key.toLowerCase() === 'r'
 }
 
+type ImeUnsafeShortcutKeyboardEventInput = {
+  isComposing?: boolean
+  keyCode?: number
+  key: string
+  cancelable?: boolean
+}
+
+/**
+ * P2-G2b: window global shortcut（Search / Search Replace / pane toggle /
+ * Paragraph Plain toggle / Link prompt / Ruby 挿入）が、IME 合成中の keydown を
+ * 新しい UI 遷移として消費しないための共有 pure guard。P2-G2c1 で Outline
+ * shortcut（previous/next heading, fold toggle）、P2-G2c2 で局所 IME slot
+ * target に限った list-move shortcut（`Cmd/Ctrl+ArrowUp/Down/Left/Right`）も
+ * 同じ guard を再利用している。
+ *
+ * `isComposing` / `keyCode === 229` / `key === 'Process'` /
+ * `key === 'Unidentified'` / `cancelable === false` のいずれかなら true
+ * （= この shortcut としては扱わず、そのまま bubble させる）。
+ *
+ * 局所 IME slot の shortcut classifier（`localImeShortcutInputState.ts` 等）と
+ * 同じ判定条件を、window keydown 側の対象 shortcut だけに絞って共有する。
+ * mark command / block structure 等、他の shortcut 判定へは広げない。
+ * list-move は局所 IME slot target のときだけこの guard を通し、通常 PM
+ * （`isProseMirrorFocused()`）経路の既存挙動は変更しない。
+ */
+export function isImeUnsafeShortcutKeyboardEvent({
+  isComposing,
+  keyCode,
+  key,
+  cancelable,
+}: ImeUnsafeShortcutKeyboardEventInput): boolean {
+  if (isComposing) return true
+  if (keyCode === 229) return true
+  if (key === 'Process' || key === 'Unidentified') return true
+  if (cancelable === false) return true
+  return false
+}
+
 type PaneToggleShortcutInput = {
   code: string
   key: string

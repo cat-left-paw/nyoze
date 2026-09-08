@@ -5,6 +5,12 @@ import type { AozoraTextExportResult, AozoraTextExportOptions } from './export/a
 import type { LeMEMarkdownExportResult, LeMEMarkdownExportOptions } from './export/lemeMarkdownExport'
 import type { DendenMarkdownExportResult, DendenMarkdownExportOptions } from './export/dendenMarkdownExport'
 import type { WebBookExportOptions, WebBookExportResult } from './export/webBookExport'
+import type {
+  LocalImeEditMenuCommandResult,
+  LocalImeEditMenuOperation,
+} from './features/localImeEditMenuCommandState'
+import type { LocalImePerfSpan } from './features/localImePerformanceSpan'
+import type { LocalImeLocalWindowTransitionKind } from './features/localImeLocalWindowAutoArm'
 
 export type { SpecialInlineAdjacentPmInspection }
 
@@ -170,6 +176,18 @@ export interface EditorCoreHandle {
 
   /** Redo the previously undone transaction */
   redo(): boolean
+
+  /**
+   * P2-G1a: 局所 IME slot の Edit menu command routing port（Undo / Redo / Select All）。
+   *
+   * 局所 IME の session / controller state **だけ**を判定・処理する。armed なら既存
+   * P2-D1 adapter へ handoff し、blocked / failed はその結果を返す。slot が関与しない
+   * ときだけ `not-active` を返し、通常 PM / Source Mode / Paragraph Plain /
+   * native input への実 fallback は P2-G1b の renderer router が担当する。
+   */
+  routeLocalImeEditMenuCommand(
+    operation: LocalImeEditMenuOperation,
+  ): LocalImeEditMenuCommandResult
 
   /** Execute a formatting command */
   execute(command: 'bold' | 'italic' | 'strike' | 'highlight' | 'underline'): void
@@ -385,7 +403,27 @@ export interface EditorCoreHandle {
   getLinkHref(): string | undefined
 
   /** Load Markdown into the editor, replacing current content */
-  loadMarkdown(md: string): void
+  loadMarkdown(md: string): boolean
+
+  /**
+   * LOCAL-WINDOW-PACKAGED-REARM-POLISH1: 長文編集モードの再取得 bounded token。
+   *
+   * 「設定 ON の継続中にユーザーが完了させた明示操作」だけを既存 AUTOARM scheduler へ
+   * typed に関連付ける入口で、initial load を自動取得可能にする汎用変更ではない。
+   * - `begin`: 操作開始前に token を最大 1 件だけ持つ（continuity 未成立なら false）
+   * - `cancel`: load 失敗 / 取消で破棄する
+   * - `complete`: 操作完了後の最新 PM / DOM / identity proof からだけ取得を試みる
+   *   （`document-switch` は新文書の実効書字方向 `expectedWritingMode` へ host の実
+   *   computed writing-mode が収束していることも必須にする）
+   */
+  beginLocalImeLocalWindowTransition(
+    kind: LocalImeLocalWindowTransitionKind,
+  ): boolean
+  cancelLocalImeLocalWindowTransition(kind: LocalImeLocalWindowTransitionKind): void
+  completeLocalImeLocalWindowTransition(
+    kind: LocalImeLocalWindowTransitionKind,
+    expectedWritingMode?: string | null,
+  ): boolean
 
   /** Disable editing (built-in read-only help tabs). Does not remove extensions. */
   setReadOnly(readOnly: boolean): void
@@ -399,8 +437,11 @@ export interface EditorCoreHandle {
   /** Read current editor content as Markdown without emitting save logs */
   peekMarkdown(): string
 
+  /** PERF1: active local-IME flush中の既知同期処理だけを計測する内部port。 */
+  runWithLocalImePerfSpan<T>(span: LocalImePerfSpan, run: () => T): T
+
   /** Reset editor to default content */
-  reset(): void
+  reset(): boolean
 
   /** Clear undo/redo history. Call at document-load boundaries only. */
   clearHistory(): void
@@ -432,6 +473,9 @@ export interface EditorCoreHandle {
 
   /** Subscribe to fold state changes (display-only, not doc edits); returns unsubscribe */
   onFoldChange(listener: UpdateListener): () => void
+
+  /** Current host PM state. Read-only SoT for document-action identity proof. */
+  getEditorState(): import('@tiptap/pm/state').EditorState
 
   /** Toggle fold state for the heading at the given document position */
   toggleHeadingFold(pos: number): void
@@ -523,6 +567,11 @@ export interface EditorCoreHandle {
    */
   isComposing(): boolean
 
+  /**
+   * host PM の実 IME composition。`isComposing()` と違い local session active を含まない。
+   */
+  isHostImeComposing(): boolean
+
   /** Update display-only auto TCY runtime options. */
   setAutoTcyOptions(options: {
     enabled: boolean
@@ -533,6 +582,15 @@ export interface EditorCoreHandle {
 
   /** Focus the editor (BETA-A11Y1) */
   focusEditor(): void
+  /**
+   * 検索 close 後の focus 復帰。同一 identity / generation の active Local Window
+   * があれば local root、なければ host editor。後着 epoch は古い request を skip する。
+   */
+  captureSearchCloseFocusRestore(): import('./features/localImeSearchCloseFocusRestore').SearchCloseFocusRestoreToken
+  cancelSearchCloseFocusRestore(): void
+  applySearchCloseFocusRestore(
+    token: import('./features/localImeSearchCloseFocusRestore').SearchCloseFocusRestoreToken,
+  ): void
 
   /**
    * Re-evaluate Typewriter scroll past end spacer vs settings / Source Mode.
@@ -549,6 +607,22 @@ export interface EditorCoreHandle {
   /** Recompute pseudo caret overlay (settings / mode / layout). */
   schedulePseudoCaretUpdate(): void
 
+  getLocalImeLocalWindowSnapshotForE2e(): import('./features/localImeLocalWindowController').LocalImeLocalWindowSnapshot | null
+  getLocalImeNavigationPerformanceSnapshotForE2e(): ReturnType<
+    import('./features/localImeIntegration').LocalImeIntegrationHandle['getNavigationPerformanceSnapshotForE2e']
+  >
+  /** RECOVERY-RESTART1 test only: restartのStart経路へone-shot failureを仕込む。 */
+  injectLocalImeLocalWindowRestartStartFailureForE2e(
+    kind: 'start-wiring' | 'start-wiring-and-settlement',
+  ): void
+  setLocalImeLocalWindowFailureForE2e(
+    failure: import('./features/localImeLocalWindowController').LocalImeLocalWindowFailureForTest,
+  ): void
+  dispatchLocalImeLocalWindowHostContentChangeForE2e(
+    kind: import('./features/localImeLocalWindowController').LocalImeLocalWindowHostContentChangeForTest,
+  ): boolean
+  setLocalImeLocalWindowSelectionForE2e(anchor: number, head?: number): boolean
+  dispatchLocalImeLocalWindowGrowthForE2e(additionalBlocks: number, text?: string): boolean
   /** Clean up resources */
-  destroy(): void
+  destroy(): boolean
 }

@@ -3,11 +3,34 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
-次の GitHub pre-release は `0.3.0-beta.2` です。Microsoft Store は今回は更新せず、公開中のアプリ表示 version `0.2.1-beta.1` / Store package version `1.2.1.0` を維持します。
+現行の GitHub Latest は `0.3.0-beta.2` です。次期版は `0.4.0-beta.1` に決定し、公開準備中です。Microsoft Store 公開版はアプリ表示 version `0.2.1-beta.1` / Store package version `1.2.1.0` で、次回更新ではアプリ表示 version `0.4.0-beta.1` / Store package version `1.2.2.0` に揃えます。
 
-## 未リリース
+## 0.4.0-beta.1（公開準備中）
 
-- 現時点ではありません
+### 不具合修正
+
+- 長文・ルビ多用文書で、ルビ直後約物の表示補正が通常入力のたびに全文を再走査していた処理を局所化
+- 長文編集モードの開始・pointer handoff時に、表示予約pluginの付け直しによってルビ表示用DOMを不要に再走査していた処理を撤去
+- macOSで未保存確認後に保存・破棄して終了しても、ウィンドウだけが閉じてprocessが残る問題を修正
+- 付箋を追加して本文を保存せず破棄したときに、Markdown markerだけが消えて付箋内容が残る不整合を修正
+- 付箋の削除・整理・file relocationで、タグ定義など`notes.json`のtop-level情報が失われ得る問題を修正
+- 段落末の付箋markerが余分な行・列を作る問題と、画面上端付近でhover previewが欠ける問題を修正
+- 同一段落内の「ルビ＋直後約物」と後続Ruby / TCYの共存時に、後続境界の日本語入力が詰まりやすい問題を限定的に緩和
+
+### 主な追加・改善
+
+- 既定OFFの**長文編集モード（実験的）**を追加。macOS / Windowsを確認対象とし、Linuxは非サポートの試験利用として有効化
+- 長文編集モードのtoolbar toggleとオフ / 待機中 / 編集中statusを追加し、明示ON、書字方向切替、同一tab内file切替、host入力確定、Windows PageUp / PageDown後の再取得を改善
+- Local Window以前のparagraph overlay / tiny-slot strategyを撤去し、Experimental product strategyを一本化
+- メインwindowのサイズ・位置・最大化状態の保存復元と、work areaに収まる初期・最小boundsを追加
+- 狭幅headerへoverflow indicator、wheel / thumb操作、window drag grip、toolbar専用pan gripを追加
+- 左右pane開閉のwidth animationを撤去して長文時の開閉を軽くし、開閉後の擬似caret再配置を追加
+- 長文編集モード中の章境界navigation stackingを修正し、editorの横書き本文にも行末justifyを適用
+
+### 開発・検証
+
+- rendererのidle高CPUとPage Viewer lifecycle回帰を検知するperformance smokeを追加
+- test suiteをsmoke / normal / diagnostic / release tierへ整理し、件数ではなく実行時間・証拠重複・再現性で管理
 
 ## 0.3.0-beta.2
 

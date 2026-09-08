@@ -8,42 +8,94 @@
  */
 
 import type { EditorView } from '@tiptap/pm/view'
-import { TextSelection } from '@tiptap/pm/state'
+import { TextSelection, type Selection, type Transaction } from '@tiptap/pm/state'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { resolveRubyAwareVisualLineEdge } from './rubyHomeEndVisualEdge'
 
 // ---- 2段階状態 --------------------------------------------------------
 
-type Phase = 'visual' | 'logical'
-type Direction = 'home' | 'end'
+export type HomeEndNavigationPhase = 'visual' | 'logical'
+export type HomeEndNavigationDirection = 'home' | 'end'
+export type HomeEndNavigationDomAffinity = 'line-end' | null
 
 interface StepState {
-  direction: Direction
+  direction: HomeEndNavigationDirection
   /** カーソルが属するブロック(論理行)の doc 内 pos */
   blockStart: number
-  phase: Phase
+  phase: HomeEndNavigationPhase
 }
+
+export type HomeEndNavigationCommandPlan = {
+  readonly expectedDoc: ProseMirrorNode
+  readonly expectedSelection: Selection
+  readonly expectedTransactionCount: 0 | 1
+  readonly moved: boolean
+  readonly boundaryNoop: boolean
+  readonly homeEndPhaseResult: HomeEndNavigationPhase
+  readonly endAffinity: HomeEndNavigationDomAffinity
+}
+
+export type HomeEndNavigationCommandResult =
+  | ({ readonly handled: true } & HomeEndNavigationCommandPlan)
+  | { readonly handled: false }
 
 let lastStep: StepState | null = null
 
 /**
- * handleHomeEndKey 内の dispatch 中 true。
- * onSelectionUpdate で自己起因の変更を無視するために使う。
+ * 自己起因の selection 変更中の深さ。
+ * handleHomeEndKey の dispatch に加え、局所 IME slot の teardown / re-arm 由来の
+ * onSelectionUpdate でも 2 段階状態を消さないために使う（depth counter）。
  */
-let selfDispatching = false
+let selfMutationDepth = 0
+
+/**
+ * 直近の Home/End が置いた selection.from。
+ * slot teardown / re-arm が同じ位置で onSelectionUpdate を再発火しても
+ * 2 段階 state を消さない。位置が変わったときだけ reset する。
+ */
+let lastHomeEndSelectionFrom: number | null = null
 
 /** 外部から呼ぶリセット（タブ切替・文書ロード・plain mode 切替など） */
 export function resetHomeEndState(): void {
   lastStep = null
+  lastHomeEndSelectionFrom = null
+}
+
+/** slot Home/End handoff 全体を囲み、teardown / focus 復帰でも lastStep を保つ。 */
+export function beginHomeEndSelectionMutation(): void {
+  selfMutationDepth += 1
+}
+
+export function endHomeEndSelectionMutation(): void {
+  selfMutationDepth = Math.max(0, selfMutationDepth - 1)
+}
+
+export function runWithHomeEndSelectionMutation<T>(fn: () => T): T {
+  beginHomeEndSelectionMutation()
+  try {
+    return fn()
+  } finally {
+    endHomeEndSelectionMutation()
+  }
 }
 
 /**
  * onSelectionUpdate から呼ばれる。
- * 自己起因（Home/End dispatch）の場合はスキップし、
- * 外部起因（マウスクリック等）の場合は2段階状態をリセットする。
+ * 自己起因（Home/End dispatch / slot handoff 保護区間）の場合はスキップし、
+ * 外部起因で selection 位置が変わった場合だけ 2 段階状態をリセットする。
+ * `selectionFrom` が直近 Home/End と同じなら、slot re-arm の echo として残す。
  */
-export function notifySelectionChanged(): void {
-  if (selfDispatching) return
+export function notifySelectionChanged(selectionFrom?: number): void {
+  if (selfMutationDepth > 0) return
+  if (
+    selectionFrom !== undefined &&
+    lastHomeEndSelectionFrom !== null &&
+    selectionFrom === lastHomeEndSelectionFrom
+  ) {
+    return
+  }
   lastStep = null
+  lastHomeEndSelectionFrom = null
 }
 
 // ---- ブロック位置ヘルパー -----------------------------------------------
@@ -71,7 +123,7 @@ function resolveBlockRange(view: EditorView, pos: number): { start: number; end:
  */
 function resolveVisualLineEdge(
   view: EditorView,
-  direction: Direction,
+  direction: HomeEndNavigationDirection,
 ): number | null {
   const domSel = view.dom.ownerDocument.defaultView?.getSelection()
   if (!domSel || domSel.rangeCount === 0) return null
@@ -118,25 +170,35 @@ function resolveVisualLineEdge(
 
 // ---- dispatch ヘルパー --------------------------------------------------
 
-/** selfDispatching フラグを管理しつつ dispatch する */
-function dispatchWithFlag(view: EditorView, pos: number): void {
+/** selfMutationDepth を管理しつつ dispatch する */
+function dispatchWithFlag(
+  view: EditorView,
+  pos: number,
+  dispatchTransaction: (transaction: Transaction) => void,
+): void {
   const tr = view.state.tr.setSelection(
     TextSelection.create(view.state.doc, pos),
   )
-  selfDispatching = true
+  lastHomeEndSelectionFrom = pos
+  beginHomeEndSelectionMutation()
   try {
-    view.dispatch(tr.scrollIntoView())
+    dispatchTransaction(tr.scrollIntoView())
   } finally {
-    selfDispatching = false
+    endHomeEndSelectionMutation()
   }
 }
 
 /**
- * PM dispatch 後、折り返し境界で caret が「次行先頭」に表示される問題を補正する。
- * 1文字戻って lineboundary で再前進することで、ブラウザに「行末」アフィニティを強制する。
+ * PM dispatch 後、同じpositionを共有する折返し両側のうちEndだけを表示行末へ
+ * DOM caret affinity補正する。直前文字へ一度寄せてlineboundaryへ戻す既存authority primitive。
+ * Homeは従来のhost DOM selection挙動を維持し、このprimitiveを起動しない。
  * PM の内部 selection pos は変わらない（DOM caret の視覚位置のみ調整）。
  */
-function nudgeCaretToLineEnd(view: EditorView): void {
+export function applyHomeEndNavigationDomAffinity(
+  view: EditorView,
+  affinity: HomeEndNavigationDomAffinity,
+): void {
+  if (affinity === null) return
   const domSel = view.dom.ownerDocument.defaultView?.getSelection()
   if (!domSel || domSel.rangeCount === 0) return
   try {
@@ -154,29 +216,33 @@ type LogPush = (event: string, detail: string) => void
 export interface HandleHomeEndOptions {
   getIsComposing: () => boolean
   pushLog: LogPush
+  /** test / typed handoff用。production既定は常に `view.dispatch()`。 */
+  dispatchTransaction?: (transaction: Transaction) => void
+  /** Local Windowはpost-proof/session confirm後の最終同期点までDOM affinityを遅延する。 */
+  deferDomAffinity?: boolean
 }
 
 /**
  * Home / End キーハンドラ。handled なら true を返す。
  * 通常エディタ用の editorProps.handleKeyDown から呼ばれる。
  */
-export function handleHomeEndKey(
+export function runHomeEndNavigationCommand(
   view: EditorView,
   event: KeyboardEvent,
   options: HandleHomeEndOptions,
-): boolean {
-  if (event.key !== 'Home' && event.key !== 'End') return false
+): HomeEndNavigationCommandResult {
+  if (event.key !== 'Home' && event.key !== 'End') return { handled: false }
 
   // 修飾キー付き（Shift / Ctrl / Alt / Meta）は標準挙動に委ねる
   if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
     resetHomeEndState()
-    return false
+    return { handled: false }
   }
 
   // IME 中は抑止
   if (options.getIsComposing() || event.isComposing) {
     resetHomeEndState()
-    return false
+    return { handled: false }
   }
 
   const { state } = view
@@ -185,16 +251,46 @@ export function handleHomeEndKey(
   // collapsed でなければ標準に委ねる
   if (!selection.empty) {
     resetHomeEndState()
-    return false
+    return { handled: false }
   }
 
-  const direction: Direction = event.key === 'Home' ? 'home' : 'end'
+  const direction: HomeEndNavigationDirection = event.key === 'Home' ? 'home' : 'end'
   const cursorPos = selection.from
+  const expectedDoc = state.doc
+  const dispatchTransaction = options.dispatchTransaction ?? ((transaction) => view.dispatch(transaction))
+
+  const complete = (
+    targetPos: number,
+    phase: HomeEndNavigationPhase,
+    logDetail: string,
+    endAffinity: HomeEndNavigationDomAffinity = null,
+  ): HomeEndNavigationCommandResult => {
+    const moved = targetPos !== cursorPos
+    const expectedSelection = moved
+      ? TextSelection.create(expectedDoc, targetPos)
+      : selection
+    if (moved) dispatchWithFlag(view, targetPos, dispatchTransaction)
+    else lastHomeEndSelectionFrom = cursorPos
+    lastStep = { direction, blockStart: block!.start, phase }
+    event.preventDefault()
+    options.pushLog('homeEnd', logDetail)
+    if (!options.deferDomAffinity) applyHomeEndNavigationDomAffinity(view, endAffinity)
+    return {
+      handled: true,
+      expectedDoc,
+      expectedSelection,
+      expectedTransactionCount: moved ? 1 : 0,
+      moved,
+      boundaryNoop: !moved && phase === 'logical',
+      homeEndPhaseResult: phase,
+      endAffinity,
+    }
+  }
 
   const block = resolveBlockRange(view, cursorPos)
   if (!block) {
     resetHomeEndState()
-    return false
+    return { handled: false }
   }
 
   // 同じブロック・同じ方向で連続押下なら phase を進める
@@ -207,13 +303,7 @@ export function handleHomeEndKey(
   if (isContinuation) {
     // 2回目: 論理行頭/末
     const targetPos = direction === 'home' ? block.start : block.end
-    if (targetPos !== cursorPos) {
-      dispatchWithFlag(view, targetPos)
-    }
-    lastStep = { direction, blockStart: block.start, phase: 'logical' }
-    event.preventDefault()
-    options.pushLog('homeEnd', `${direction} logical pos=${targetPos}`)
-    return true
+    return complete(targetPos, 'logical', `${direction} logical pos=${targetPos}`)
   }
 
   // 1回目: 表示行頭/末
@@ -229,36 +319,43 @@ export function handleHomeEndKey(
     if (clamped === cursorPos) {
       const logicalPos = direction === 'home' ? block.start : block.end
       if (logicalPos !== cursorPos) {
-        dispatchWithFlag(view, logicalPos)
-        lastStep = { direction, blockStart: block.start, phase: 'logical' }
-        event.preventDefault()
-        options.pushLog('homeEnd', `${direction} skip-to-logical pos=${logicalPos}`)
-        return true
+        return complete(
+          logicalPos,
+          'logical',
+          `${direction} skip-to-logical pos=${logicalPos}`,
+        )
       }
       // 既に論理行端にもいる — 何もしない
-      lastStep = { direction, blockStart: block.start, phase: 'logical' }
-      event.preventDefault()
-      options.pushLog('homeEnd', `${direction} already at logical edge`)
-      return true
+      return complete(
+        cursorPos,
+        'logical',
+        `${direction} already at logical edge`,
+      )
     }
 
-    dispatchWithFlag(view, clamped)
-    if (direction === 'end') nudgeCaretToLineEnd(view)
-    lastStep = { direction, blockStart: block.start, phase: 'visual' }
-    event.preventDefault()
-    options.pushLog('homeEnd', `${direction} visual pos=${clamped}`)
-    return true
+    return complete(
+      clamped,
+      'visual',
+      `${direction} visual pos=${clamped}`,
+      direction === 'end' ? 'line-end' : null,
+    )
   }
 
   // DOM ベース取得に失敗 — 論理行端へフォールバック
   const fallbackPos = direction === 'home' ? block.start : block.end
-  if (fallbackPos !== cursorPos) {
-    dispatchWithFlag(view, fallbackPos)
-  }
-  lastStep = { direction, blockStart: block.start, phase: 'logical' }
-  event.preventDefault()
-  options.pushLog('homeEnd', `${direction} fallback-logical pos=${fallbackPos}`)
-  return true
+  return complete(
+    fallbackPos,
+    'logical',
+    `${direction} fallback-logical pos=${fallbackPos}`,
+  )
+}
+
+export function handleHomeEndKey(
+  view: EditorView,
+  event: KeyboardEvent,
+  options: HandleHomeEndOptions,
+): boolean {
+  return runHomeEndNavigationCommand(view, event, options).handled
 }
 
 // ---- テスト / 内部検査用エクスポート ------------------------------------

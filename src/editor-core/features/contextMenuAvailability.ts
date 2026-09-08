@@ -25,6 +25,12 @@ type ActiveMarksSnapshot = {
 type BuildCommandAvailabilityInput = {
   state: EditorState
   composing: boolean
+  /**
+   * Undo/Redo 専用の composition gate。
+   * 省略時は `composing` と同じ。局所 IME slot の `armed` はここへ載せない
+   * （`composing` 側には残し、他 command は従来どおり無効化する）。
+   */
+  historyComposing?: boolean
   canMoveListUp: boolean
   canMoveListDown: boolean
   canUndo: boolean
@@ -77,6 +83,7 @@ function resolveParagraphPlainState(state: EditorState): boolean {
 export function buildCommandAvailability({
   state,
   composing,
+  historyComposing,
   canMoveListUp,
   canMoveListDown,
   canUndo,
@@ -93,6 +100,7 @@ export function buildCommandAvailability({
   const blockNoteAnchorEdits = touchesNoteAnchor && !composing
   const directiveDescriptor = resolveCurrentDirectiveDescriptor(state)
   const blockDirectiveToken = directiveDescriptor ? formatDirectiveToken(directiveDescriptor) : null
+  const historyBlocked = historyComposing ?? composing
 
   return {
     hasSelection,
@@ -105,8 +113,8 @@ export function buildCommandAvailability({
     canInlineCode: hasSelection && !composing && !blockNoteAnchorEdits,
     canClearFormat: (hasSelection || hasTcyClearTarget) && !composing && !blockNoteAnchorEdits,
     canBlockTransforms: !composing && !blockNoteAnchorEdits,
-    canUndo: !composing && canUndo,
-    canRedo: !composing && canRedo,
+    canUndo: !historyBlocked && canUndo,
+    canRedo: !historyBlocked && canRedo,
     canInsertRuby: hasSelection && !composing && enableRuby && !blockNoteAnchorEdits,
     canParagraphPlain: !composing && resolveParagraphPlainState(state),
     canToggleTcy: hasSelection && !composing && !blockNoteAnchorEdits,

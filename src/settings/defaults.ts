@@ -449,6 +449,15 @@ export const PSEUDO_CARET_THICKNESS_STEP = 0.5
 export const DEFAULT_PSEUDO_CARET_BLINK_ENABLED = true
 
 /**
+ * P3-EXP1: 実験的な局所IME入力（段落オーバーレイ）Experimental Preview。
+ *
+ * **既定は必ず OFF。** macOS packaged build の capability がある環境でだけ設定に現れ、
+ * ユーザーが明示的に ON にしたときだけ有効になる。capability も env も既定値を変えない。
+ */
+/** PUBLIC-ENTRY1: strategy-neutral Local IME Experimental product preference. */
+export const DEFAULT_EXPERIMENTAL_LOCAL_IME_ENABLED = false
+
+/**
  * 付箋 (Task 3A-3): 初回付箋作成時の「本文に非表示コメントが追加される」説明を
  * 確認済みかどうか。一度確認したら再表示しない。設定 UI なし。
  */

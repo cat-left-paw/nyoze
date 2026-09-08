@@ -1252,70 +1252,111 @@ body.is-resizing-pane {
   overflow: visible;
   writing-mode: horizontal-tb;
   text-orientation: mixed;
-  -webkit-app-region: no-drag;
+  /* APP-HEADER-OVERFLOW-DRAG1: wrapper 自体は no-drag にしない。
+     overflow 時に wrapper の box は fixed zone の上まで広がるため、ここで no-drag を
+     宣言すると app-name や固定 grip の上に巨大な no-drag 矩形ができてしまう。
+     実際の操作対象（button / menu wrap / scroll thumb）だけが no-drag を宣言する。 */
 }
 
-.unified-header-center button.toolbar-drag-handle {
+/* APP-HEADER-OVERFLOW-DRAG1: 固定 window drag grip の場所取り。
+   left fixed zone の末尾に通常フローで残し、flex shrink でも消えない。
+   ここには app-region を宣言しない（実際の drag 宣言は header 末尾の overlay 側）。 */
+.header-window-drag-grip-slot {
+  display: inline-block;
+  width: 14px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* APP-HEADER-OVERFLOW-DRAG1 native-fix: 可視 grip と native draggable region。
+   Electron は draggable region をリスト順に union / difference するため、overflow した
+   toolbar button の no-drag 矩形より「後」の DOM 順で宣言する必要がある。そのため
+   header 末尾へ絶対配置し、位置だけを場所取り要素へ合わせる。
+   button ではないので click action を持たず、toolbar offset も変更しない。
+   drag region が有効な間は OS 側が pointer を扱うのでカーソルは native と同じ既定にする
+   （grab カーソルが出る＝drag region が効いていない、という紛らわしい状態を作らない）。 */
+.header-window-drag-grip {
+  position: absolute;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: calc(var(--toolbar-btn-size) - 8px);
-  height: var(--toolbar-btn-size);
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent !important;
+  color: color-mix(in srgb, var(--text-muted) 78%, transparent);
+  opacity: 0.75;
+  cursor: default;
+  z-index: 2;
+  -webkit-app-region: drag;
+}
+
+/* 非操作領域（app-name）の drag 宣言も同じ理由で header 末尾へ置く。 */
+.header-window-drag-overlay {
+  position: absolute;
+  z-index: 1;
+  background: transparent;
+  -webkit-app-region: drag;
+}
+
+.header-window-drag-grip svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.6;
+  flex-shrink: 0;
+}
+
+/* APP-HEADER-TOOLBAR-PAN-GRIP2: 専用 toolbar pan grip。
+   他の toolbar button と同じ wrapper 左端に置き、--toolbar-btn-size /
+   --toolbar-icon-size を共有する。window drag とは別要素で native drag にはしない。 */
+.toolbar-btn-scope button.toolbar-btn-icon-only.header-toolbar-pan-grip {
   cursor: grab;
-  color: color-mix(
-    in srgb,
-    var(--toolbar-icon-color, var(--text-primary)) 78%,
-    var(--text-muted) 22%
-  );
-  opacity: 0.9;
-  box-shadow: none;
-  transition:
-    opacity 0.15s,
-    color 0.15s,
-    background 0.15s,
-    border-color 0.15s;
+  touch-action: none;
+  user-select: none;
   -webkit-app-region: no-drag;
-  flex-shrink: 0;
-  position: relative;
 }
 
-.unified-header-center button.toolbar-drag-handle svg {
-  width: calc(var(--toolbar-icon-size) - 3px);
-  height: calc(var(--toolbar-icon-size) - 3px);
-  stroke-width: var(--toolbar-icon-stroke);
-  flex-shrink: 0;
+.toolbar-btn-scope button.toolbar-btn-icon-only.header-toolbar-pan-grip:hover {
+  cursor: grab;
 }
 
-.unified-header-center button.toolbar-drag-handle:hover {
-  opacity: 1;
-  color: var(--text-primary);
-  background: color-mix(
-    in srgb,
-    var(--bg-button-hover) 84%,
-    var(--bg-topbar) 16%
-  ) !important;
-  border-color: color-mix(in srgb, var(--border-main) 88%, transparent);
-}
-
-body.is-dragging-toolbar {
+.toolbar-btn-scope button.toolbar-btn-icon-only.header-toolbar-pan-grip:active,
+.unified-header.is-toolbar-panning .header-toolbar-pan-grip {
   cursor: grabbing;
+}
+
+.unified-header.is-toolbar-panning {
   user-select: none;
 }
 
-body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
+/* APP-HEADER-OVERFLOW-DRAG1: toolbar overflow indicator。
+   header 内側の下端へ絶対配置するので 36px の header 高を変えず、
+   header / editor tab strip / 本文を押し下げない。left / right fixed zone の間だけを
+   track にするので native window controls や traffic lights と重ならない。 */
+.toolbar-scroll-indicator {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+  z-index: 3;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--border-divider) 60%, transparent);
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.toolbar-scroll-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 58%, var(--text-muted) 42%);
+  cursor: grab;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s;
+}
+
+.toolbar-scroll-thumb:hover,
+.toolbar-scroll-thumb:active {
+  background: var(--accent);
   cursor: grabbing;
-  opacity: 1;
-  color: var(--text-primary);
-  background: color-mix(
-    in srgb,
-    var(--accent) 16%,
-    var(--bg-button) 84%
-  ) !important;
-  border-color: color-mix(in srgb, var(--accent) 44%, var(--border-main) 56%);
 }
 
 /* Toolbar collapse toggle button */
@@ -1393,6 +1434,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 .app-name {
+  /* drag 宣言は header 末尾の .header-window-drag-overlay 側が持つ
+     （Electron の draggable region は後勝ちで、ここで宣言しても overflow した
+     toolbar button の no-drag に打ち消されるため）。 */
   font-size: calc(13px * var(--ui-font-scale));
   font-weight: 400;
   color: var(--app-title-color);
@@ -1538,6 +1582,18 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-color: var(--accent);
   color: var(--toolbar-icon-color, var(--text-primary));
   background: color-mix(in srgb, var(--accent) 10%, var(--bg-button-hover));
+}
+
+.toolbar-btn-scope button.toolbar-local-ime-toggle {
+  color: var(--text-muted);
+}
+
+.toolbar-btn-scope button.toolbar-local-ime-toggle.toggle-active {
+  color: var(--accent);
+}
+
+.toolbar-btn-scope button.toolbar-local-ime-toggle.needs-attention {
+  color: #d24d57;
 }
 
 .toolbar-btn-scope button:disabled {
@@ -1956,6 +2012,26 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   transform: translateY(0);
 }
 
+/* APP-HEADER-TOOLBAR-PAN-GRIP2: pan grip は toolbar viewport 左端に来る。
+   共通の left:50% + translateX(-50%) だと chip が .unified-header-center の
+   横 clip-path に切られる。右 zone と同じく、ボタン左端基準で右へ伸ばす。 */
+.unified-header .toolbar-btn-icon-only.header-toolbar-pan-grip[data-tooltip]::after {
+  left: 0;
+  right: auto;
+  transform: translateY(-4px);
+}
+
+.unified-header .toolbar-btn-icon-only.header-toolbar-pan-grip[data-tooltip]::before {
+  left: 12px;
+  right: auto;
+  transform: rotate(45deg);
+}
+
+.unified-header .toolbar-btn-icon-only.header-toolbar-pan-grip[data-tooltip]:hover::after,
+.unified-header .toolbar-btn-icon-only.header-toolbar-pan-grip[data-tooltip]:focus-visible::after {
+  transform: translateY(0);
+}
+
 /* Fixed tab-strip actions sit at the workspace top edge, so their tooltips
    must open into the pane below rather than being clipped above it. */
 .editor-tab-actions .toolbar-btn-icon-only[data-tooltip]::after,
@@ -2020,7 +2096,6 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease;
 }
 
 .pane-left.collapsed {
@@ -2172,7 +2247,6 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-left: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  transition: width 0.2s ease;
 }
 
 .is-resizing-pane .pane-left,
@@ -2185,7 +2259,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border-left: none;
 }
 
-/* Pane inner wrapper — prevents content reflow during animation */
+/* Pane inner wrapper — keeps pane content from reflowing when the outer
+   width jumps to 0 / open width. Open/close is instant (no width transition);
+   divider drag still disables any residual transition via `.is-resizing-pane`. */
 .pane-inner {
   display: flex;
   flex-direction: column;
@@ -2914,7 +2990,7 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   text-align: left;
 }
 
-.file-explorer-doc-info-summary:hover .file-explorer-doc-info-title,
+.file-explorer-doc-info-summary:hover .file-explorer-doc-info-characters,
 .file-explorer-doc-info-summary:hover .file-explorer-doc-info-summary-count {
   color: var(--text-primary);
 }
@@ -2928,20 +3004,42 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .file-explorer-doc-info-summary-main {
   min-width: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 
-.file-explorer-doc-info-title {
+.file-explorer-doc-info-characters {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-secondary);
-  font-size: calc(11px * var(--ui-font-scale));
-  letter-spacing: 0.02em;
+  line-height: 0;
 }
 
 .file-explorer-doc-info-summary-count {
   color: var(--text-primary);
   font-size: calc(12px * var(--ui-font-scale));
   font-weight: 500;
+}
+
+.file-explorer-local-ime-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  /* floating tooltip の hover hit-test 用。click handler / tabIndex は持たず、
+     クリックは親の文字数 summary へ bubble する。 */
+  pointer-events: auto;
+  line-height: 0;
+}
+
+.file-explorer-local-ime-status.is-off,
+.file-explorer-local-ime-status.is-ready {
+  color: var(--text-muted);
+}
+
+.file-explorer-local-ime-status.is-editing {
+  color: var(--text-primary);
 }
 
 .file-explorer-doc-info-chevron {
@@ -3964,10 +4062,20 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
    スクロールしない位置に固定する。配置は writing-mode に追従。
    ---------------------------------------------------------- */
 
+/* LOCAL-WINDOW-CHAPTER-NAV-HJUSTIFY-POLISH1 — editor-panel 同一 stacking
+   context（`.editor-surface` は z-index を持たず isolate しない）。
+   Stage A: Local Window overlay は z-index 12・不透明 background で、
+   章頭のボタン rect と交差してナビ（旧 z-index 7）を視覚的に覆った。
+   host / Local Window overlay (12) / pseudo caret (20)
+     < chapter boundary nav (21)
+     < Paragraph Plain overlay (30) / search bar (100)
+     < prompt / dialog / toast / menu (1000+)
+   overlay 全体の pointer-events は変更しない。ナビ全体は none、
+   表示中 group だけ auto の既存契約を維持する。 */
 .editor-chapter-boundary-nav {
   position: absolute;
   inset: 0;
-  z-index: 7;
+  z-index: 21;
   pointer-events: none;
 }
 
@@ -4149,10 +4257,95 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   font-family: "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* ---------------------------------------------------------------------------
+ * P3-A1a: 作者限定 internal pilot の development-only HUD。
+ * hidden gate（NYOZE_LOCAL_IME_PILOT=1 かつ非 packaged）が閉じているときは
+ * component 自体が DOM を出さないので、production では一切現れない。
+ * 通常レイアウトは変えず、右下へ固定表示するだけ。
+ * ------------------------------------------------------------------------ */
+.local-ime-pilot-hud {
+  position: fixed;
+  bottom: 16px;
+  right: 20px;
+  z-index: 2380;
+  width: min(300px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(10, 14, 20, 0.95);
+  color: #f5f7fa;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  user-select: none;
+}
+
+.local-ime-pilot-hud-title {
+  font-size: calc(11px * var(--ui-font-scale));
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+  opacity: 0.96;
+}
+
+.local-ime-pilot-hud-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.35;
+  margin-top: 3px;
+}
+
+.local-ime-pilot-hud-row strong {
+  font-weight: 700;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+}
+
+.local-ime-pilot-hud-note {
+  margin: 6px 0 0;
+  font-size: calc(10.5px * var(--ui-font-scale));
+  line-height: 1.45;
+  opacity: 0.92;
+}
+
+.local-ime-pilot-hud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.local-ime-pilot-hud-actions button {
+  font-size: calc(10.5px * var(--ui-font-scale));
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  cursor: pointer;
+}
+
+.local-ime-pilot-hud-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.local-ime-pilot-hud[data-pilot-status="armed"],
+.local-ime-pilot-hud[data-pilot-status="composing"] {
+  border-color: rgba(120, 200, 255, 0.6);
+}
+
+.local-ime-pilot-hud[data-pilot-status="suspended"],
+.local-ime-pilot-hud[data-pilot-status="recovery"],
+.local-ime-pilot-hud[data-pilot-status="disabled"] {
+  border-color: rgba(255, 150, 120, 0.7);
+}
+
 .editor-surface.is-hidden-for-plain {
   display: none;
 }
 
+/* host 固有の layout 責務だけを持つ。組版契約は下の共有 rule が単一定義元。 */
 .editor-core-host .ProseMirror {
   min-height: 100%;
   /* 上余白/下余白 は常に物理 top/bottom として効かせる（writing-mode 非依存） */
@@ -4160,18 +4353,35 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   padding-bottom: var(--editor-content-padding-bottom);
   padding-left: 30px;
   padding-right: 30px;
-  writing-mode: var(--editor-writing-mode, vertical-rl);
-  text-orientation: mixed;
-  line-height: var(--editor-line-height);
-  letter-spacing: 0.02em;
-  font-size: var(--editor-font-size);
   overflow: visible;
   outline: none;
-  color: var(--text-primary);
   /* BETA-DISP1: caret color — falls back to currentColor if variable unset */
   caret-color: var(--editor-caret-color, currentColor);
+}
+
+/* LOCAL-WINDOW-TYPOGRAPHY-PARITY1 — 本文組版契約（単一定義元）。
+   host PM と Local Window の local PM が同じ宣言を共有し、片側だけ書き換わる
+   drift を構造的に防ぐ。ここへ host 固有の padding / min-size / fold 余白 /
+   viewport size のような layout 責務を足さないこと（それらは各 host rule 側）。
+   契約 property の一覧は
+   `src/editor-core/features/localImeLocalWindowTypographyParity.ts` が正本で、
+   `tests/local-ime-local-window-typography-parity1.test.ts` が
+   「この selector list に両者が含まれ、契約 property が欠けていない」ことを固定する。 */
+.editor-core-host .ProseMirror,
+.editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror {
+  writing-mode: var(--editor-writing-mode, vertical-rl);
+  text-orientation: mixed;
   font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
   font-weight: 400;
+  line-height: var(--editor-line-height);
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  /* ProseMirror view 注入 CSS と同値。空白を畳ませない。 */
+  white-space: break-spaces;
   /* BETA-TY1: 行末処理 — 日本語禁則・はみ出し防止 */
   line-break: strict;
   word-break: normal;
@@ -4179,6 +4389,12 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   /* BETA-TY1: 組版改善 — 句読点ぶら下げ・行分割最適化 */
   hanging-punctuation: first allow-end;
   text-wrap: pretty;
+  /* LOCAL-WINDOW-CHAPTER-NAV-HJUSTIFY-POLISH1: editor 本文の折り返し行末揃え。
+     writing-mode を問わず host / Local Window が同じ宣言を共有する。
+     段落最終行は引き伸ばさない（text-align-last: auto）。 */
+  text-align: justify;
+  text-align-last: auto;
+  text-justify: inter-character;
 }
 
 /* Vertical writing: ProseMirror fills viewport height (inline direction);
@@ -4187,10 +4403,6 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 .editor-panel[data-writing-mode="vertical-lr"] .editor-core-host .ProseMirror {
   height: 100%;
   min-height: unset;
-  /* BETA-TY1: 縦書き均等揃え — 折り返し行末を揃える */
-  text-align: justify;
-  text-align-last: auto;
-  text-justify: inter-character;
 }
 
 /* Keep space for fold toggle above heading columns when vertical padding is set to 0.
@@ -4200,9 +4412,9 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   padding-top: max(var(--editor-content-padding-top), 22px);
 }
 
-/* BETA-TY1: 縦書き均等揃え — Paragraph Plain でも行末を揃える */
-.editor-panel[data-writing-mode="vertical-rl"] .tategaki-plain-overlay,
-.editor-panel[data-writing-mode="vertical-lr"] .tategaki-plain-overlay {
+/* LOCAL-WINDOW-CHAPTER-NAV-HJUSTIFY-POLISH1: Paragraph Plain も editor 本文と
+   同じ折り返し行末揃え（writing-mode 非依存）。最終行は引き伸ばさない。 */
+.tategaki-plain-overlay {
   text-align: justify;
   text-align-last: auto;
   text-justify: inter-character;
@@ -4219,18 +4431,37 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
      generated ZWSP を重ねると空の表示列になるため、その実 DOM 条件だけ抑止する。
    - rubyPunctuationNowrap（ルビ直後約物の行頭落ち）とは別件。
    無効化はこのルール 1 箇所を削除/コメントアウトすれば足りる。 */
-.editor-panel[data-writing-mode="vertical-rl"] .editor-surface .ProseMirror p::after,
-.editor-panel[data-writing-mode="vertical-lr"] .editor-surface .ProseMirror p::after {
+.editor-panel[data-writing-mode="vertical-rl"]
+  .editor-surface
+  .editor-core-host
+  > .ProseMirror
+  p::after,
+.editor-panel[data-writing-mode="vertical-lr"]
+  .editor-surface
+  .editor-core-host
+  > .ProseMirror
+  p::after,
+/* LOCAL-WINDOW-TYPOGRAPHY-PARITY1: Local Window の local PM も同じ表示結果にする。
+   local DOM は host sentinel を複製しないため selector は共有できないが、
+   generated content である点は同じで、PM Doc / Markdown / clipboard /
+   Undo history / DOM textContent には一切入らない。 */
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror
+  > p::after {
   content: "\200B" / "";
 }
 
 .editor-panel[data-writing-mode="vertical-rl"]
   .editor-surface
-  .ProseMirror
+  .editor-core-host
+  > .ProseMirror
   p:has(> br.ProseMirror-trailingBreak:only-child)::after,
 .editor-panel[data-writing-mode="vertical-rl"]
   .editor-surface
-  .ProseMirror
+  .editor-core-host
+  > .ProseMirror
   p:has(
     > [data-nyoze-special-inline-boundary="after"]:is(
         [data-nyoze-special-inline-node="aozoraRuby"],
@@ -4239,7 +4470,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   )::after,
 .editor-panel[data-writing-mode="vertical-lr"]
   .editor-surface
-  .ProseMirror
+  .editor-core-host
+  > .ProseMirror
   p:has(
     > [data-nyoze-special-inline-boundary="after"]:is(
         [data-nyoze-special-inline-node="aozoraRuby"],
@@ -4248,8 +4480,95 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   )::after,
 .editor-panel[data-writing-mode="vertical-lr"]
   .editor-surface
-  .ProseMirror
-  p:has(> br.ProseMirror-trailingBreak:only-child)::after {
+  .editor-core-host
+  > .ProseMirror
+  p:has(> br.ProseMirror-trailingBreak:only-child)::after,
+/* STICKY-NOTE-ENDMARKER-LAYOUT1: 付箋 marker (noteAnchor) 自体が段落末のとき。
+   Ruby / TCY と同じ DOM 条件で、`contenteditable="false"` の inline atom が段落末に
+   来ると ProseMirror が `img.ProseMirror-separator` + `br.ProseMirror-trailingBreak`
+   を足す。その直後へ BETA-TY-VLB1 の generated ZWSP が重なると空の表示列が 1 本増える
+   （実測: 段落 extent 38.38px → 76.38px、wrap 済み段落は 76.38px → 114.38px）。
+   Ruby / TCY 用の抑止に noteAnchor が含まれていなかっただけなので、同じ実 DOM 条件
+   だけを足す。separator が挟まらない DOM でも成立するよう 2 形を書く。marker が
+   段落末でない場合（文中 marker）は従来どおり ZWSP を出し、BETA-TY-VLB1 の
+   列末巻き戻り回避を維持する。PM Doc / Markdown / clipboard は一切変えない。 */
+.editor-panel[data-writing-mode="vertical-rl"]
+  .editor-surface
+  .editor-core-host
+  > .ProseMirror
+  p:has(
+    > span.note-anchor
+      + img.ProseMirror-separator
+      + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-rl"]
+  .editor-surface
+  .editor-core-host
+  > .ProseMirror
+  p:has(> span.note-anchor + br.ProseMirror-trailingBreak:last-child)::after,
+.editor-panel[data-writing-mode="vertical-lr"]
+  .editor-surface
+  .editor-core-host
+  > .ProseMirror
+  p:has(
+    > span.note-anchor
+      + img.ProseMirror-separator
+      + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-lr"]
+  .editor-surface
+  .editor-core-host
+  > .ProseMirror
+  p:has(> span.note-anchor + br.ProseMirror-trailingBreak:last-child)::after,
+/* STICKY-NOTE-ENDMARKER-LAYOUT1: Local Window 側も同じ表示結果に揃える。 */
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror
+  > p:has(
+    > span.note-anchor
+      + img.ProseMirror-separator
+      + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror
+  > p:has(> span.note-anchor + br.ProseMirror-trailingBreak:last-child)::after,
+/* LOCAL-WINDOW-TYPOGRAPHY-PARITY1: local 側の同値抑止。
+   1) Ruby / TCY 自体が paragraph 末（直後が trailing break）のとき。
+      host は sentinel widget を目印にするが local は sentinel を複製しないので、
+      証明済みの Ruby / TCY DOM 自身を同じ位置条件で使う。
+      host と同じく、mark で包まれて `p` の直接子でない場合は抑止しない。
+   2) TCY のように `contenteditable="false"` leaf が paragraph 末に来るときは
+      ProseMirror が `img.ProseMirror-separator` を1つ挟む。host では sentinel span が
+      その役をするため出ない。表示結果を揃えるので separator 経由も同じ抑止にする。
+   3) 空 paragraph（sole trailing break）で余分な表示列を作らない。
+      既存の `nested-blockquote-trailing-space` 回帰 oracle が
+      「rule 末尾は trailing-break only-child の抑止」であることを見るので、
+      この selector はこの rule の最後に置く。 */
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror
+  > p:has(
+    > :is([data-aozora-ruby], [data-tategaki-tcy])
+      + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror
+  > p:has(
+    > :is([data-aozora-ruby], [data-tategaki-tcy])
+      + img.ProseMirror-separator
+      + br.ProseMirror-trailingBreak:last-child
+  )::after,
+.editor-panel[data-writing-mode="vertical-rl"] .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror
+  > p:has(> br.ProseMirror-trailingBreak:only-child)::after {
   content: none;
 }
 
@@ -4490,6 +4809,8 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   overflow: auto;
   writing-mode: inherit;
   text-orientation: sideways;
+  /* 本文 root の justify を code へ継承させない（editor 表示限定）。 */
+  text-align: start;
 }
 
 .editor-surface .ProseMirror pre.tategaki-code-block code {
@@ -6389,6 +6710,79 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   background: var(--bg-button-hover);
 }
 
+/*
+ * P3-EXP1: Experimental Preview の製品向け notice。
+ * development HUD ではなく、通知が必要なときだけ 1 行出す（常駐しない）。
+ */
+.local-ime-experimental-preview-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(720px, calc(100vw - 48px));
+  padding: 10px 14px;
+  background: var(--bg-dialog);
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: calc(12px * var(--ui-font-scale));
+  z-index: 100;
+}
+
+.local-ime-experimental-preview-notice[data-notice-kind="attention"] {
+  border-color: #c98a2d;
+}
+
+.local-ime-experimental-preview-notice-message {
+  flex: 1;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.local-ime-experimental-preview-notice-confirm {
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.local-ime-experimental-preview-notice button {
+  background: var(--bg-button);
+  border: 1px solid var(--border-input);
+  border-radius: 3px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: calc(11px * var(--ui-font-scale));
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.local-ime-experimental-preview-notice button:hover {
+  background: var(--bg-button-hover);
+}
+
+.local-ime-experimental-preview-notice-dismiss {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+/* 実験的機能セクションの操作列（設定画面の既存 button 見た目を再利用する）。 */
+.settings-experimental-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.setting-item-desc-multiline {
+  white-space: pre-line;
+}
+
 .prompt-title {
   display: block;
   font-size: calc(14px * var(--ui-font-scale));
@@ -7563,23 +7957,23 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
-/* hover preview の足場: data-note-anchor-preview を CSS tooltip で出す。
-   将来 NodeView / plugin が同属性へ notes.json 由来の title/text を差し込める。
-   pseudo-element の content は DOM textContent ではないため copy には混入しない。 */
-.note-anchor[data-note-anchor-preview]:hover::after {
-  content: attr(data-note-anchor-preview);
+/* STICKY-NOTE-ENDMARKER-LAYOUT1: hover preview は marker 内 CSS `::after` ではなく、
+   `document.body` 直下の単一 floating layer（`createNoteAnchorHoverPreviewController`）
+   が正本。旧実装は常に marker の物理上側へ出しており、`.editor-panel { overflow: hidden }`
+   に切られて editor 上端付近で preview 上部が欠けていた。overlay は position: fixed で
+   editor の overflow context の外にあるため、`.editor-panel` の overflow を緩めずに
+   clip を回避できる。配置（上/下反転・左右 clamp）は controller が marker rect ∩
+   editor 可視領域 ∩ viewport から決める。
+   content は DOM `textContent` で入れるが、overlay は editor / PM Doc の外にあるため
+   Markdown / clipboard / selection には混入しない。 */
+.note-anchor-hover-preview {
+  position: fixed;
   font-family: var(--ui-font-family);
   font-weight: normal;
   font-style: normal;
   text-decoration: none;
-  position: absolute;
-  /* 物理座標で配置し、縦書き本文の logical 軸に引っ張られないようにする。 */
-  bottom: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
   display: block;
   box-sizing: border-box;
-  /* 親 marker (1.2em) の containing block 幅に縮まないよう明示する。 */
   width: max-content;
   min-width: 14.4em;
   max-width: min(336px, calc(100vw - 16px));
@@ -7598,37 +7992,38 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
   border: 1px solid var(--border-main);
   border-radius: 4px;
   box-shadow: var(--shadow-md);
+  /* marker の click / context menu / selection を奪わない。 */
   pointer-events: none;
-  z-index: 50;
+  z-index: 10000;
   opacity: 1;
 }
 
-.note-anchor[data-note-anchor-color='yellow']:hover::after {
+.note-anchor-hover-preview[data-note-anchor-color='yellow'] {
   border-left: 3px solid var(--nyoze-note-color-yellow-accent);
   background: color-mix(in srgb, var(--nyoze-note-color-yellow-accent) 14%, var(--bg-dialog));
 }
 
-.note-anchor[data-note-anchor-color='gray']:hover::after {
+.note-anchor-hover-preview[data-note-anchor-color='gray'] {
   border-left: 3px solid var(--nyoze-note-color-gray-accent);
   background: color-mix(in srgb, var(--nyoze-note-color-gray-accent) 14%, var(--bg-dialog));
 }
 
-.note-anchor[data-note-anchor-color='blue']:hover::after {
+.note-anchor-hover-preview[data-note-anchor-color='blue'] {
   border-left: 3px solid var(--nyoze-note-color-blue-accent);
   background: color-mix(in srgb, var(--nyoze-note-color-blue-accent) 14%, var(--bg-dialog));
 }
 
-.note-anchor[data-note-anchor-color='green']:hover::after {
+.note-anchor-hover-preview[data-note-anchor-color='green'] {
   border-left: 3px solid var(--nyoze-note-color-green-accent);
   background: color-mix(in srgb, var(--nyoze-note-color-green-accent) 14%, var(--bg-dialog));
 }
 
-.note-anchor[data-note-anchor-color='pink']:hover::after {
+.note-anchor-hover-preview[data-note-anchor-color='pink'] {
   border-left: 3px solid var(--nyoze-note-color-pink-accent);
   background: color-mix(in srgb, var(--nyoze-note-color-pink-accent) 14%, var(--bg-dialog));
 }
 
-.note-anchor[data-note-anchor-color='purple']:hover::after {
+.note-anchor-hover-preview[data-note-anchor-color='purple'] {
   border-left: 3px solid var(--nyoze-note-color-purple-accent);
   background: color-mix(in srgb, var(--nyoze-note-color-purple-accent) 14%, var(--bg-dialog));
 }
@@ -8044,12 +8439,12 @@ body.is-dragging-toolbar .unified-header-center button.toolbar-drag-handle {
 }
 
 /* Pseudo caret MVP (Task 2-2): display-only thin caret line, painted above the
-   current-line band but below the Paragraph Plain overlay / modals / menus.
+   current-line band **and local IME clone mask**, but below Paragraph Plain / modals / menus.
    Shares --editor-caret-color with native / Source Mode carets. */
 .editor-surface > .nyoze-pseudo-caret-overlay {
   position: absolute;
   pointer-events: none;
-  z-index: 5;
+  z-index: 20;
   border-radius: 1px;
   box-sizing: border-box;
   background: var(--editor-caret-color, var(--accent, #1e90ff));
@@ -10537,3 +10932,81 @@ body.is-resizing-project-preview {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* LOCAL-WINDOW-P0: sourceはlayout占有を残し、glyph/caretだけを隠す。最後の
+   paragraphがview単位唯一のgrowth delta owner。負値は書かない。 */
+.editor-surface .ProseMirror .nyoze-local-window-source[data-nyoze-local-window-source="true"] {
+  color: transparent !important;
+  caret-color: transparent !important;
+}
+
+.editor-surface .ProseMirror .nyoze-local-window-reservation-anchor[data-nyoze-local-window-reservation-anchor="true"] {
+  padding-block-end: var(--nyoze-local-window-growth-delta, 0px);
+}
+
+.editor-surface > .nyoze-local-window-overlay {
+  position: absolute;
+  z-index: 12;
+  box-sizing: border-box;
+  overflow: visible;
+  background: var(--bg-surface);
+}
+
+/* LOCAL-WINDOW-TYPOGRAPHY-PARITY1: ここは overlay 側の layout 責務だけ。
+   組版契約（writing-mode / font / 行分割 / justify / 段落末補正）は host と共有の
+   単一 rule 群が `> .ProseMirror` へ直接与える。ここへ再掲しないこと。
+   root 側の logical size は writing-mode 依存なので、`--editor-writing-mode` を
+   共有 rule と同じ既定で読む。 */
+.editor-surface > .nyoze-local-window-overlay > [data-nyoze-local-window-editor="true"],
+.editor-surface > .nyoze-local-window-overlay > [data-nyoze-local-window-editor="true"] > .ProseMirror {
+  inline-size: 100%;
+  min-inline-size: 100%;
+  block-size: auto;
+  min-block-size: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  overflow: visible;
+  outline: none;
+  user-select: text;
+}
+
+.editor-surface > .nyoze-local-window-overlay > [data-nyoze-local-window-editor="true"] {
+  writing-mode: var(--editor-writing-mode, vertical-rl);
+}
+
+/* LOCAL-WINDOW-PSEUDOCARET1: 通常は native caret を可視にする。
+   host の `.editor-panel[data-pseudo-caret="on"] .editor-core-host .ProseMirror`
+   よりこの fallback を優先し、設定 ON だけで Local Window を恒常透明化しない。 */
+.editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror,
+.editor-panel[data-pseudo-caret="on"]
+  .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror {
+  caret-color: var(--editor-caret-color, currentColor);
+}
+
+/* geometry source が valid で pseudo caret を実表示したときだけ native caret を隠す。
+   fallback 側に `.editor-panel[data-pseudo-caret="on"]` を付けたため、こちらも
+   同じ prefix を持たせないと specificity で負けて二重 caret になる。 */
+.editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror[data-nyoze-pseudo-caret-native-hidden="true"],
+.editor-panel[data-pseudo-caret="on"]
+  .editor-surface
+  > .nyoze-local-window-overlay
+  > [data-nyoze-local-window-editor="true"]
+  > .ProseMirror[data-nyoze-pseudo-caret-native-hidden="true"] {
+  caret-color: transparent;
+}
+
+/* LOCAL-WINDOW-TYPOGRAPHY-PARITY1: paragraph margin は本文と同じ
+   `.editor-surface .ProseMirror p` 契約（および commonmark-strict の `p + p`）へ
+   委ねる。ここで `margin: 0` を再宣言すると、line break policy が
+   commonmark-strict のとき host だけ段落間 margin を持ち Local Window だけ
+   持たない drift になる。 */

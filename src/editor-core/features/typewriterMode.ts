@@ -2,6 +2,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import {
   resolveTypewriterScrollPlan,
   type AxisRect,
+  type TypewriterScrollPlan,
   type TypewriterWritingMode,
 } from './typewriterScroll'
 import {
@@ -59,6 +60,21 @@ type TypewriterViewLike = Pick<EditorView, 'state' | 'coordsAtPos'> & {
   dom: TypewriterPointerTarget
 }
 
+/** PERF2b-2c1: read phase の成果物。scroll write だけを表す pure plan。 */
+export type TypewriterFollowPlan = TypewriterScrollPlan
+
+/**
+ * PERF2b-2c1: 局所 IME 正常確定後の共有 frame へ参加するための注入 port。
+ *
+ * 型は構造的に受ける（`typewriterMode.ts` が局所 IME feature module へ
+ * 依存しないため）。参加できないときは `null` が返り、従来の単独 rAF を使う。
+ */
+type TypewriterPostFlushFrameJoin = (consumer: {
+  participant: 'typewriter-follow'
+  prepare: () => (() => void) | null
+  settle: (outcome: 'ran' | 'cancelled') => void
+}) => (() => void) | null
+
 type CreateTypewriterModeControllerOptions = {
   view: TypewriterViewLike
   getIsEnabled?: () => boolean
@@ -74,6 +90,7 @@ type CreateTypewriterModeControllerOptions = {
   manualScrollSuppressMs?: number
   jumpNavigationSuppressMs?: number
   pointerClickSuppressMs?: number
+  joinPostFlushFrame?: TypewriterPostFlushFrameJoin
 }
 
 type TypewriterModeController = {
@@ -83,6 +100,11 @@ type TypewriterModeController = {
       'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'defaultPrevented'
     >,
   ) => void
+  /**
+   * 局所 IME slot など、既に bare Arrow として分類済みの経路向け。
+   * `getIsComposing()` を見ない（slot flushing 中 `isActive()` が true でも follow を落とさない）。
+   */
+  noteClassifiedBareArrowNavigationIntent: () => void
   /** Home/Page/outline/search 等のジャンプ直後に follow を短時間止める（Arrow/入力で解除） */
   noteJumpNavigationSuppress: (
     source?: TypewriterJumpNavigationSource,
@@ -94,6 +116,13 @@ type TypewriterModeController = {
   syncRuntimeState: () => void
   handleSelectionUpdate: () => boolean
   handleEditorUpdate: (params: { docChanged: boolean }) => boolean
+  /**
+   * PERF2b-2c1: geometry read と pure plan 生成だけ。scroll write を行わない。
+   * @internal 共有 frame と unit test 用。通常経路は `handleEditorUpdate` 等から入る。
+   */
+  prepareFollow: () => TypewriterFollowPlan | null
+  /** PERF2b-2c1: scroll write だけ。geometry read を行わない。 */
+  commitFollow: (plan: TypewriterFollowPlan) => void
   destroy: () => void
 }
 
@@ -105,8 +134,8 @@ function isScrollHostLike(value: unknown): value is TypewriterScrollHost {
   if (!value || typeof value !== 'object') return false
   const maybe = value as Partial<TypewriterScrollHost>
   return (
-    isFiniteNumber(maybe.scrollTop) &&
-    isFiniteNumber(maybe.scrollLeft) &&
+    'scrollTop' in maybe &&
+    'scrollLeft' in maybe &&
     typeof maybe.addEventListener === 'function' &&
     typeof maybe.removeEventListener === 'function' &&
     typeof maybe.getBoundingClientRect === 'function'
@@ -192,11 +221,14 @@ export function createTypewriterModeController({
   manualScrollSuppressMs = TYPEWRITER_MANUAL_SCROLL_SUPPRESS_MS,
   jumpNavigationSuppressMs = TYPEWRITER_JUMP_NAVIGATION_SUPPRESS_MS,
   pointerClickSuppressMs = TYPEWRITER_POINTER_CLICK_SUPPRESS_MS,
+  joinPostFlushFrame,
 }: CreateTypewriterModeControllerOptions): TypewriterModeController {
   const scrollPastEndAttr = 'data-typewriter-scroll-past-end'
   const scrollPastEndSpacerAttr = 'data-typewriter-scroll-past-end-spacer'
   const scrollPastEndDirectionAttr = 'data-typewriter-scroll-past-end-direction'
   let rafHandle: number | null = null
+  /** PERF2b-2c1: 共有 frame に参加中なら leave 関数を保持する（二重実行防止）。 */
+  let leaveSharedFrame: (() => void) | null = null
   let destroyRequested = false
   let pointerSelecting = false
   let manualScrollSuppressedUntil = 0
@@ -372,6 +404,20 @@ export function createTypewriterModeController({
     pendingFollowIntent = arrowIntent
   }
 
+  /**
+   * 既に bare Arrow として分類済みの handoff 用。
+   * Local Window close中は`getIsComposing()`がtrueになり得るため、
+   * 通常の `noteKeyboardNavigationIntent` 経由だと intent が破棄される。
+   */
+  function noteClassifiedBareArrowNavigationIntent(): void {
+    if (!view.state.selection.empty) {
+      pendingFollowIntent = null
+      return
+    }
+    clearJumpNavigationSuppress()
+    pendingFollowIntent = 'arrow-navigation'
+  }
+
   function scheduleFollow({
     docChanged,
     followIntent,
@@ -396,7 +442,27 @@ export function createTypewriterModeController({
       return false
     }
 
-    if (rafHandle !== null) return true
+    // 単独 rAF と共有 frame を二重に走らせない。
+    if (rafHandle !== null || leaveSharedFrame !== null) return true
+
+    // PERF2b-2c1: 局所 IME 正常確定の窓の中だけ、re-arm と同じ frame の
+    // read/write phase へ参加する。窓の外・token 不一致では `null` が返るので、
+    // 従来どおり単独 rAF で follow する（要求を落とさない）。
+    const leave = joinPostFlushFrame?.({
+      participant: 'typewriter-follow',
+      prepare: () => {
+        const plan = prepareFollow()
+        return plan ? () => commitFollow(plan) : null
+      },
+      settle: () => {
+        leaveSharedFrame = null
+      },
+    })
+    if (leave) {
+      leaveSharedFrame = leave
+      return true
+    }
+
     rafHandle = requestAnimationFrame(() => {
       runFollow()
     })
@@ -434,13 +500,19 @@ export function createTypewriterModeController({
     })
   }
 
-  function runFollow(): void {
-    rafHandle = null
-    if (destroyRequested) return
+  /**
+   * PERF2b-2c1 read phase。**geometry read と pure plan 生成だけ**を行う。
+   *
+   * `syncRuntimeState()` は scroll-past-end spacer の冪等な DOM 同期であり
+   * geometry read ではない。全 read より前に行う既存順序をそのまま維持する。
+   * Typewriter OFF / 各 suppression では host rect も caret geometry も読まない。
+   */
+  function prepareFollow(): TypewriterFollowPlan | null {
+    if (destroyRequested) return null
 
     syncRuntimeState()
     const host = scrollHost
-    if (!host) return
+    if (!host) return null
 
     const selection = view.state.selection
     if (
@@ -454,21 +526,21 @@ export function createTypewriterModeController({
         isJumpNavigationSuppressed: isJumpNavigationSuppressed(),
       })
     ) {
-      return
+      return null
     }
 
     const viewportRect = normalizeRect(host.getBoundingClientRect())
-    if (!viewportRect) return
+    if (!viewportRect) return null
 
     let caretCoords: RectLike
     try {
       caretCoords = view.coordsAtPos(selection.head)
     } catch {
-      return
+      return null
     }
 
     const caretRect = normalizeCaretRect(caretCoords)
-    if (!caretRect) return
+    if (!caretRect) return null
 
     const writingMode = resolveTypewriterWritingMode(
       view.dom as unknown as Element,
@@ -481,14 +553,28 @@ export function createTypewriterModeController({
       offsetRatio: getOffsetRatio(),
       followBandRatio: getFollowBandRatio(),
     })
-    if (!plan || plan.scrollDelta === 0) return
+    if (!plan || plan.scrollDelta === 0) return null
+    return plan
+  }
 
+  /** PERF2b-2c1 write phase。**scroll write だけ**で geometry read へ戻らない。 */
+  function commitFollow(plan: TypewriterFollowPlan): void {
+    if (destroyRequested) return
+    const host = scrollHost
+    if (!host) return
+    if (!isFiniteNumber(plan.scrollDelta) || plan.scrollDelta === 0) return
     programmaticScrollEventsToIgnore += 1
     if (plan.axis === 'y') {
       host.scrollTop += plan.scrollDelta
     } else {
       host.scrollLeft += plan.scrollDelta
     }
+  }
+
+  function runFollow(): void {
+    rafHandle = null
+    const plan = prepareFollow()
+    if (plan) commitFollow(plan)
   }
 
   function handleEditorUpdate({ docChanged }: { docChanged: boolean }): boolean {
@@ -509,13 +595,24 @@ export function createTypewriterModeController({
 
   return {
     noteKeyboardNavigationIntent,
+    noteClassifiedBareArrowNavigationIntent,
     noteJumpNavigationSuppress,
     noteBeforeInput,
     syncRuntimeState,
     handleSelectionUpdate,
     handleEditorUpdate,
+    prepareFollow,
+    commitFollow,
     destroy() {
       destroyRequested = true
+      if (leaveSharedFrame) {
+        try {
+          leaveSharedFrame()
+        } catch {
+          // 共有 frame の後始末失敗を destroy へ漏らさない。
+        }
+        leaveSharedFrame = null
+      }
       pendingFollowIntent = null
       jumpNavigationSuppressedUntil = 0
       pointerDownOnEditor = false

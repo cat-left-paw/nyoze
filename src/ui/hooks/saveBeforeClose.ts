@@ -15,6 +15,13 @@ import {
   buildConflictAwareWriteFileOptions,
 } from "../utils/externalEditConflict";
 import { applyEol, type EolKind } from "../../editor-core/io/eolHelper";
+import {
+  prepareLocalImeDocumentLeave,
+  resolveLocalImeDocumentLeaveDerivedDirty,
+  type LocalImeDocumentLeaveCapture,
+  type LocalImeDocumentLeaveDirtyNotice,
+  type LocalImeDocumentLeaveFailureReason,
+} from "./localImeDocumentLeaveSafety";
 
 // --- Types ---
 
@@ -122,6 +129,76 @@ export function collectDirtyTabs(
   tabs: readonly DirtyTabInfo[],
 ): DirtyTabInfo[] {
   return tabs.filter((t) => t.dirty);
+}
+
+/**
+ * LOCAL-WINDOW-SAVE-BEFORE-CLOSE1:
+ * barrier 前に同期 capture する Local IME draft dirty contribution。
+ * 本文 snapshot は持たず、tab owner と document identity だけを固定する。
+ */
+export type LocalImeSaveBeforeCloseDirtyCapture = LocalImeDocumentLeaveCapture;
+
+export type LocalImeSaveBeforeClosePreparation<T extends { id: string; dirty: boolean }> =
+  | {
+      readonly ok: true;
+      readonly tabs: T[];
+      readonly capture: LocalImeSaveBeforeCloseDirtyCapture;
+    }
+  | {
+      readonly ok: false;
+      readonly reason: LocalImeDocumentLeaveFailureReason;
+    };
+
+/**
+ * close request と同じ同期 stack で capture → barrier → post-proof → snapshot を行う。
+ * React state の再描画は待たず、captured contribution だけを canonical dirty へ OR する。
+ */
+export function prepareSaveBeforeCloseTabsSnapshot<
+  T extends { id: string; dirty: boolean },
+>(input: {
+  readonly activeTabId: string;
+  readonly localImeDraftDirtyOwnerTabId: string | null;
+  readonly readLocalImeDraftDirtyNotice: () => LocalImeDocumentLeaveDirtyNotice;
+  readonly prepareLocalImeDocumentAction: () => { status: string };
+  /** barrier 後にだけ読む。呼び出し側の最新 close snapshot source。 */
+  readonly readTabsAfterBarrier: () => readonly T[];
+  readonly readActiveTabIdAfterBarrier?: () => string;
+  readonly readLocalImeDraftDirtyOwnerTabIdAfterBarrier?: () => string | null;
+  readonly isLocalImeDocumentActionPending?: () => boolean;
+}): LocalImeSaveBeforeClosePreparation<T> {
+  const prepared = prepareLocalImeDocumentLeave({
+    operation: "save-before-close",
+    readBeforeBarrier: () => ({
+      activeTabId: input.activeTabId,
+      dirtyOwnerTabId: input.localImeDraftDirtyOwnerTabId,
+      dirtyNotice: input.readLocalImeDraftDirtyNotice(),
+    }),
+    prepareDocumentAction: () => input.prepareLocalImeDocumentAction(),
+    readAfterBarrier: () => ({
+      activeTabId:
+        input.readActiveTabIdAfterBarrier?.() ?? input.activeTabId,
+      dirtyOwnerTabId:
+        input.readLocalImeDraftDirtyOwnerTabIdAfterBarrier !== undefined
+          ? input.readLocalImeDraftDirtyOwnerTabIdAfterBarrier()
+          : input.localImeDraftDirtyOwnerTabId,
+      dirtyNotice: input.readLocalImeDraftDirtyNotice(),
+      tabs: input.readTabsAfterBarrier(),
+      documentActionPending:
+        input.isLocalImeDocumentActionPending?.() ?? false,
+    }),
+  });
+  if (!prepared.ok) return prepared;
+
+  const tabs = prepared.tabs.map((tab) => ({
+    ...tab,
+    dirty: resolveLocalImeDocumentLeaveDerivedDirty({
+      canonicalDirty: tab.dirty,
+      capture: prepared.capture,
+      tabId: tab.id,
+      internalDocument: false,
+    }),
+  }));
+  return { ok: true, tabs, capture: prepared.capture };
 }
 
 // --- Non-active tab save ---

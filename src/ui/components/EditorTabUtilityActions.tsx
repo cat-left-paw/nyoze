@@ -9,6 +9,8 @@ import {
   IconSettings,
   IconSwitchHorizontal,
   IconSwitchVertical,
+  IconToggleLeft,
+  IconToggleRight,
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
@@ -45,6 +47,11 @@ export type EditorTabUtilityActionsProps = {
   /** `CommandAvailability.canParagraphPlain` のうち、この button の disabled 判定にだけ使う値。 */
   canParagraphPlain: boolean
   onToggleFullPlainEdit: () => void
+  localImeExperimentalPreviewVisible: boolean
+  localImeExperimentalPreviewInteractive: boolean
+  localImeExperimentalPreviewToggleOn: boolean
+  localImeExperimentalPreviewNeedsAttention: boolean
+  onLocalImeExperimentalPreviewChange: (enabled: boolean) => void
   displaySettingsOpen: boolean
   onOpenDisplaySettings: () => void
   onOpenDisplaySettingsForTypewriter: () => void
@@ -78,6 +85,11 @@ export function EditorTabUtilityActions({
   onToggleParagraphPlainMode,
   canParagraphPlain,
   onToggleFullPlainEdit,
+  localImeExperimentalPreviewVisible,
+  localImeExperimentalPreviewInteractive,
+  localImeExperimentalPreviewToggleOn,
+  localImeExperimentalPreviewNeedsAttention,
+  onLocalImeExperimentalPreviewChange,
   displaySettingsOpen,
   onOpenDisplaySettings,
   onOpenDisplaySettingsForTypewriter,
@@ -210,6 +222,40 @@ export function EditorTabUtilityActions({
       >
         <IconFileCode size={ICON_SIZE} stroke={ICON_STROKE} />
       </button>
+      {localImeExperimentalPreviewVisible && (
+        <button
+          className={`toolbar-btn-icon-only toolbar-local-ime-toggle${localImeExperimentalPreviewToggleOn ? ' toggle-active' : ''}${localImeExperimentalPreviewNeedsAttention ? ' needs-attention' : ''}`}
+          onClick={() =>
+            onLocalImeExperimentalPreviewChange(!localImeExperimentalPreviewToggleOn)
+          }
+          onMouseDown={(event) => event.preventDefault()}
+          disabled={!localImeExperimentalPreviewInteractive}
+          type='button'
+          data-local-ime-control-surface='true'
+          data-toolbar-action='toggle-local-ime'
+          data-tooltip={t(
+            localImeExperimentalPreviewNeedsAttention
+              ? 'toolbar.experimentalLocalIme.attention'
+              : localImeExperimentalPreviewToggleOn
+                ? 'toolbar.experimentalLocalIme.disable'
+                : 'toolbar.experimentalLocalIme.enable',
+          )}
+          aria-label={t(
+            localImeExperimentalPreviewNeedsAttention
+              ? 'toolbar.experimentalLocalIme.attention'
+              : localImeExperimentalPreviewToggleOn
+                ? 'toolbar.experimentalLocalIme.disable'
+                : 'toolbar.experimentalLocalIme.enable',
+          )}
+          aria-pressed={localImeExperimentalPreviewToggleOn}
+        >
+          {localImeExperimentalPreviewToggleOn ? (
+            <IconToggleRight size={ICON_SIZE} stroke={ICON_STROKE} />
+          ) : (
+            <IconToggleLeft size={ICON_SIZE} stroke={ICON_STROKE} />
+          )}
+        </button>
+      )}
       <span className='toolbar-sep'>|</span>
       <TypewriterVisualFocusMenu
         uiLanguageMode={uiLanguageMode}
@@ -228,7 +274,12 @@ export function EditorTabUtilityActions({
       <button
         className={`toolbar-btn-icon-only${displaySettingsOpen ? ' toggle-active' : ''}`}
         onClick={onOpenDisplaySettings}
+        onMouseDown={(e) => e.preventDefault()}
         type='button'
+        // P3-EXP1: 表示設定は局所IME Preview の停止 / 復旧導線を含む。開く操作自体が
+        // active session を終了させないよう制御面として marking し、mousedown の
+        // 既定 focus 移動も止めて閉じたあと編集面へ focus が戻るようにする。
+        data-local-ime-control-surface='true'
         data-tooltip={t('editor.viewSettings')}
         aria-label={t('editor.viewSettings')}
         aria-pressed={displaySettingsOpen}

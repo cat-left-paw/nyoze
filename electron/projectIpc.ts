@@ -29,7 +29,13 @@ import {
   scanWorkspaceProjectRoots,
   updateProjectTitleAt,
 } from "./projectStore";
-import { readNotesStore, writeNotesStore } from "./noteStore";
+import {
+  discardProvisionalNotesInProject,
+  readNotesStore,
+  writeNotesStore,
+} from "./noteStore";
+import { isValidNoteAnchorId } from "../src/editor-core/io/noteAnchor";
+import type { ProvisionalNoteCleanupEntry } from "../src/project/provisionalNoteCleanup";
 import { readChapterOutline } from "./bookFullOutlineStore";
 import {
   BOOK_MANIFEST_FILENAME,
@@ -64,7 +70,10 @@ import {
 } from "./bookManifestV3QueryState";
 import { detectProjectTextFileExtension } from "../src/project/projectTextFileScan";
 import { resolveFileExplorerRoleFromManifestV3 } from "../src/project/fileExplorerRoles";
-import { normalizeNotesStore } from "../src/project/noteStore";
+import {
+  isProjectRelativeFilePath,
+  normalizeNotesStore,
+} from "../src/project/noteStore";
 import { MAX_PROJECT_TITLE_LENGTH, NYOZE_DIR_NAME } from "../src/project/projectMetadata";
 import { projectBooksPayloadFromManifestV3 } from "../src/project/bookManifestV3ProjectBooks";
 import {
@@ -84,6 +93,7 @@ import type {
   ProjectReadNotesResult,
   ProjectWriteNotesResult,
   ProjectMissingFileNotesResult,
+  ProjectDiscardProvisionalNotesResult,
   BookFullOutlineResult,
   ChapterNeighborsResult,
   BookExportTargetResult,
@@ -1356,6 +1366,76 @@ export async function resolveMissingFileNotesIpc(
     isProjectRelativeFilePresentOnDisk(resolved.projectRoot, relativeFile),
   );
   return { ok: true, notes: toMissingFileNoteViews(missing) };
+}
+
+/** provisional cleanup 要求の shape / 上限を main 側で検証する（SEC-2 と同じ方針）。 */
+const PROVISIONAL_NOTE_CLEANUP_MAX_ENTRIES = 512;
+
+function normalizeProvisionalNoteCleanupRequest(raw: unknown): {
+  projectRoot: string;
+  entries: ProvisionalNoteCleanupEntry[];
+} | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const request = raw as Record<string, unknown>;
+  const projectRoot = request.projectRoot;
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) return null;
+  const rawEntries = request.entries;
+  if (!Array.isArray(rawEntries)) return null;
+  if (rawEntries.length > PROVISIONAL_NOTE_CLEANUP_MAX_ENTRIES) return null;
+
+  const entries: ProvisionalNoteCleanupEntry[] = [];
+  const seen = new Set<string>();
+  for (const rawEntry of rawEntries) {
+    if (rawEntry === null || typeof rawEntry !== "object" || Array.isArray(rawEntry)) {
+      return null;
+    }
+    const entry = rawEntry as Record<string, unknown>;
+    const { id, file, fingerprint } = entry;
+    if (typeof id !== "string" || !isValidNoteAnchorId(id)) return null;
+    if (typeof file !== "string" || !isProjectRelativeFilePath(file)) return null;
+    if (typeof fingerprint !== "string" || fingerprint.length === 0) return null;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    entries.push({ id, file, fingerprint });
+  }
+  return { projectRoot, entries };
+}
+
+/**
+ * `project:discardProvisionalNotes`
+ *
+ * STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄時に、未保存 anchor に対応する
+ * provisional note を **id 単位で**取り除く。project root は renderer 申告値を
+ * 信用せず document path から再解決し、renderer が捕捉した project root と一致
+ * しなければ 1 件も削除しない。read → 再証明 → write は project 単位 notes lock
+ * 内で不可分に行う。
+ */
+export async function discardProvisionalNotesIpc(
+  boundary: ProjectIpcBoundary,
+  rawFilePath: unknown,
+  rawRequest: unknown,
+): Promise<ProjectDiscardProvisionalNotesResult> {
+  const realPath = resolveBoundedDocumentPath(boundary, rawFilePath);
+  if (!realPath) return { ok: false, reason: "invalid-path" };
+  const resolved = resolveProjectRootWithFs(realPath, boundary.getWorkspaceRoot());
+  if (!resolved) return { ok: false, reason: "not-in-project" };
+
+  const request = normalizeProvisionalNoteCleanupRequest(rawRequest);
+  if (request === null) return { ok: false, reason: "invalid-request" };
+  if (request.projectRoot !== resolved.projectRoot) {
+    return { ok: false, reason: "project-mismatch" };
+  }
+  if (request.entries.length === 0) return { ok: true, removedIds: [] };
+
+  const result = await discardProvisionalNotesInProject(
+    resolved.projectRoot,
+    request.entries,
+  );
+  if (result.ok) return { ok: true, removedIds: result.removedIds };
+  return {
+    ok: false,
+    reason: result.reason === "not-a-project" ? "not-in-project" : result.reason,
+  };
 }
 
 /**

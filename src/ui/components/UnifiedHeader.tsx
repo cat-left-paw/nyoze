@@ -18,6 +18,7 @@ import {
   IconDeviceFloppy,
   IconDiamond,
   IconEraser,
+  IconGripHorizontal,
   IconGripVertical,
   IconFile,
   IconFilePlus,
@@ -55,8 +56,13 @@ import {
   IconPageBreak,
   IconX,
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { MouseEventHandler, ReactNode, WheelEventHandler } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type {
+  MouseEventHandler,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  WheelEventHandler,
+} from 'react'
 import type { CommandAvailability } from '../../editor-core/types'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
 import { createUiTextGetter } from '../i18n/uiText'
@@ -66,6 +72,32 @@ import {
   resolvePlainModeKind,
 } from '../utils/plainModeCommandGate'
 import { useWindowControlsOverlayReservation } from '../hooks/useWindowControlsOverlayReservation'
+import {
+  clampOffsetToBounds,
+  computeToolbarScrollIndicator,
+  isToolbarOverflowing,
+  resolveThumbDragOffset,
+  resolveToolbarPanDragOffset,
+  type ToolbarViewportMetrics,
+} from './unifiedHeaderToolbarOverflow'
+
+const TOOLBAR_VIEWPORT_ID = 'unified-header-toolbar-viewport'
+
+/** header の左上を原点とした矩形（window drag overlay の配置に使う）。 */
+type HeaderRect = { left: number; top: number; width: number; height: number }
+
+function headerRectsEqual(a: HeaderRect | null, b: HeaderRect | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height
+}
+
+const headerRectStyle = (rect: HeaderRect) => ({
+  left: `${rect.left}px`,
+  top: `${rect.top}px`,
+  width: `${rect.width}px`,
+  height: `${rect.height}px`,
+})
 
 const ICON_SIZE = 18
 const ICON_STROKE = 1.1
@@ -280,9 +312,31 @@ export function UnifiedHeader({
   const centerRef = useRef<HTMLDivElement | null>(null)
   const rightZoneRef = useRef<HTMLDivElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
-  const dragRef = useRef<{ startX: number; startOffset: number } | null>(null)
   const offsetRef = useRef(toolbarOffset)
   offsetRef.current = toolbarOffset
+  // APP-HEADER-OVERFLOW-DRAG1: ResizeObserver の同一 snapshot から書かれる toolbar
+  // viewport geometry。thumb 位置は常にこれと既存 `toolbarOffset` から導出し、
+  // 第二の scroll position state は持たない。
+  const [toolbarViewportMetrics, setToolbarViewportMetrics] =
+    useState<ToolbarViewportMetrics | null>(null)
+  const thumbDragRef = useRef<{ pointerId: number; grabOffset: number } | null>(null)
+  // APP-HEADER-TOOLBAR-PAN-GRIP2: 専用 toolbar pan grip。window drag とは別要素で、
+  // 開始時の clientX / offset / computeOffsetBounds() snapshot だけを使う。
+  const toolbarPanRef = useRef<{
+    pointerId: number
+    startX: number
+    startOffset: number
+    bounds: { min: number; max: number }
+  } | null>(null)
+  const [toolbarPanning, setToolbarPanning] = useState(false)
+  // APP-HEADER-OVERFLOW-DRAG1 native-fix: window drag region を toolbar より
+  // 後ろの DOM 順で宣言するための overlay 位置（header 相対）。
+  const gripSlotRef = useRef<HTMLSpanElement | null>(null)
+  const appNameRef = useRef<HTMLSpanElement | null>(null)
+  const [windowDragRegions, setWindowDragRegions] = useState<{
+    grip: HeaderRect | null
+    appName: HeaderRect | null
+  }>({ grip: null, appName: null })
   const windowControlsReservedWidth = useWindowControlsOverlayReservation({
     headerRef,
     platform,
@@ -323,14 +377,20 @@ export function UnifiedHeader({
     }
   }, [])
 
-  // Compute min/max offset so wrapper stays between left zone right edge and right zone left edge
+  // Compute min/max offset so the wrapper stays inside the real toolbar viewport.
+  //
+  // APP-HEADER-OVERFLOW-DRAG1 review-fix: 実際に toolbar を clip しているのは
+  // `.unified-header-center` 自身（`clip-path: inset(-100vh 0 -100vh 0)`）である。
+  // header の `gap: 4px` があるため、left/right zone の端から作った範囲は実 clip 領域より
+  // 左右 4px ずつ、合計 8px 広い。その差で境界幅の overflow を取りこぼしていたので、
+  // pan bounds も indicator geometry も centerRef の実 rect へ統一する。
   const computeOffsetBounds = useCallback(() => {
-    const leftZone = leftZoneRef.current
-    const rightZone = rightZoneRef.current
+    const center = centerRef.current
     const wrapper = wrapperRef.current
-    if (!leftZone || !rightZone || !wrapper) return null
-    const leftBound = leftZone.getBoundingClientRect().right
-    const rightBound = rightZone.getBoundingClientRect().left
+    if (!center || !wrapper) return null
+    const centerRect = center.getBoundingClientRect()
+    const leftBound = centerRect.left
+    const rightBound = centerRect.right
     const wrapperRect = wrapper.getBoundingClientRect()
     const cur = offsetRef.current
     const wrapperLeftAt0 = wrapperRect.left - cur
@@ -345,13 +405,76 @@ export function UnifiedHeader({
     return { min: rawMaxOffset, max: rawMinOffset }
   }, [])
 
-  const clampToolbarOffset = useCallback(() => {
+  /**
+   * 既存の offset clamp。ResizeObserver の同一 snapshot で既に bounds を読んでいる
+   * 場合はそれを渡し、同じ geometry を二度読まないようにする。
+   */
+  const clampToolbarOffset = useCallback(
+    (snapshotBounds?: { min: number; max: number } | null) => {
+      const bounds = snapshotBounds ?? computeOffsetBounds()
+      if (!bounds) return
+      const cur = offsetRef.current
+      const clamped = clampOffsetToBounds(cur, bounds)
+      if (clamped !== cur) onToolbarOffsetChange(clamped)
+    },
+    [computeOffsetBounds, onToolbarOffsetChange],
+  )
+
+  /**
+   * 単一の geometry snapshot reader。ResizeObserver 同期と wheel 入口の両方がこれを使い、
+   * overflow 判定・clamp・indicator geometry が同じ実 viewport（centerRef）を根拠にする。
+   */
+  const readToolbarViewportMetrics = useCallback((): ToolbarViewportMetrics | null => {
+    const header = headerRef.current
+    const center = centerRef.current
+    const wrapper = wrapperRef.current
     const bounds = computeOffsetBounds()
-    if (!bounds) return
-    const cur = offsetRef.current
-    if (cur < bounds.min) onToolbarOffsetChange(bounds.min)
-    else if (cur > bounds.max) onToolbarOffsetChange(bounds.max)
-  }, [computeOffsetBounds, onToolbarOffsetChange])
+    if (!header || !center || !wrapper || !bounds) return null
+    const headerLeft = header.getBoundingClientRect().left
+    const centerRect = center.getBoundingClientRect()
+    return {
+      trackLeft: centerRect.left - headerLeft,
+      trackWidth: centerRect.width,
+      contentWidth: wrapper.getBoundingClientRect().width,
+      bounds,
+    }
+  }, [computeOffsetBounds])
+
+  const syncToolbarGeometry = useCallback(() => {
+    // 同じ snapshot で window drag overlay の位置も測る。toolbar の表示 / 非表示に
+    // 関わらず必要なので、toolbar metrics より先に確定させる。
+    const header = headerRef.current
+    const headerRect = header ? header.getBoundingClientRect() : null
+    const toHeaderRect = (element: Element | null): HeaderRect | null => {
+      if (!element || !headerRect) return null
+      const rect = element.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return null
+      return {
+        left: rect.left - headerRect.left,
+        top: rect.top - headerRect.top,
+        width: rect.width,
+        height: rect.height,
+      }
+    }
+    setWindowDragRegions((prev) => {
+      const next = {
+        grip: toHeaderRect(gripSlotRef.current),
+        appName: toHeaderRect(appNameRef.current),
+      }
+      return headerRectsEqual(prev.grip, next.grip) &&
+        headerRectsEqual(prev.appName, next.appName)
+        ? prev
+        : next
+    })
+
+    const metrics = readToolbarViewportMetrics()
+    if (!metrics) {
+      setToolbarViewportMetrics(null)
+      return
+    }
+    clampToolbarOffset(metrics.bounds)
+    setToolbarViewportMetrics(metrics)
+  }, [clampToolbarOffset, readToolbarViewportMetrics])
 
   // Re-clamp offset on window / header resize
   useEffect(() => {
@@ -362,7 +485,7 @@ export function UnifiedHeader({
     const wrapper = wrapperRef.current
     if (!header) return
     const observer = new ResizeObserver(() => {
-      clampToolbarOffset()
+      syncToolbarGeometry()
     })
     observer.observe(header)
     if (leftZone) observer.observe(leftZone)
@@ -372,14 +495,14 @@ export function UnifiedHeader({
 
     // The center region animates width during collapse/expand; re-check on the next
     // frames so persisted offsets are clamped after layout settles.
-    clampToolbarOffset()
+    syncToolbarGeometry()
     let raf1 = 0
     let raf2 = 0
     raf1 = window.requestAnimationFrame(() => {
-      clampToolbarOffset()
+      syncToolbarGeometry()
       raf1 = 0
       raf2 = window.requestAnimationFrame(() => {
-        clampToolbarOffset()
+        syncToolbarGeometry()
         raf2 = 0
       })
     })
@@ -388,24 +511,156 @@ export function UnifiedHeader({
       if (raf1) window.cancelAnimationFrame(raf1)
       if (raf2) window.cancelAnimationFrame(raf2)
     }
-  }, [clampToolbarOffset, toolbarVisible, windowControlsReservedWidth])
+  }, [syncToolbarGeometry, toolbarVisible, windowControlsReservedWidth])
 
   const handleToolbarCenterWheel: WheelEventHandler<HTMLDivElement> = useCallback(
     (event) => {
       if (!toolbarVisible || !wrapperRef.current) return
-      const bounds = computeOffsetBounds()
-      if (!bounds) return
+      // APP-HEADER-OVERFLOW-DRAG1 review-fix: bounds だけでは fit 状態でも左右へ寄せられて
+      // しまう。同一 snapshot の実 overflow を必須にし、overflow していないときは
+      // preventDefault も offset 変更も行わない。
+      const metrics = readToolbarViewportMetrics()
+      if (!isToolbarOverflowing(metrics)) return
+      const bounds = (metrics as ToolbarViewportMetrics).bounds
       const dominant =
         Math.abs(event.deltaX) >= Math.abs(event.deltaY) ? event.deltaX : event.deltaY
       const cur = offsetRef.current
-      const next = Math.max(bounds.min, Math.min(bounds.max, cur + dominant))
+      const next = clampOffsetToBounds(cur + dominant, bounds)
       if (next !== cur) {
         event.preventDefault()
         onToolbarOffsetChange(next)
       }
     },
-    [toolbarVisible, computeOffsetBounds, onToolbarOffsetChange],
+    [toolbarVisible, readToolbarViewportMetrics, onToolbarOffsetChange],
   )
+
+  // thumb geometry は常に最新 snapshot と既存 `toolbarOffset` から導出する。
+  // overflow していない / collapsed / snapshot 不正のときは null で描画しない。
+  const toolbarScrollIndicator = useMemo(
+    () =>
+      computeToolbarScrollIndicator({
+        metrics: toolbarViewportMetrics,
+        offset: toolbarOffset,
+      }),
+    [toolbarViewportMetrics, toolbarOffset],
+  )
+  const toolbarScrollIndicatorRef = useRef(toolbarScrollIndicator)
+  toolbarScrollIndicatorRef.current = toolbarScrollIndicator
+  const toolbarViewportMetricsRef = useRef(toolbarViewportMetrics)
+  toolbarViewportMetricsRef.current = toolbarViewportMetrics
+
+  /**
+   * thumb の pointer drag。`setPointerCapture()` による bounded な単一 gesture だけを
+   * 使い、document へ解除不能な listener を残さない。timer / polling / synthetic
+   * pointer replay も使わない。
+   */
+  const handleThumbPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    const indicator = toolbarScrollIndicatorRef.current
+    if (!indicator) return
+    const thumb = event.currentTarget
+    event.preventDefault()
+    event.stopPropagation()
+    thumbDragRef.current = {
+      pointerId: event.pointerId,
+      grabOffset: event.clientX - thumb.getBoundingClientRect().left,
+    }
+    thumb.setPointerCapture(event.pointerId)
+  }, [])
+
+  const handleThumbPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = thumbDragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      const indicator = toolbarScrollIndicatorRef.current
+      const metrics = toolbarViewportMetricsRef.current
+      if (!indicator || !metrics) return
+      const header = headerRef.current
+      if (!header) return
+      const next = resolveThumbDragOffset({
+        pointerX: event.clientX,
+        trackClientLeft: header.getBoundingClientRect().left + indicator.trackLeft,
+        trackWidth: indicator.trackWidth,
+        thumbWidth: indicator.thumbWidth,
+        grabOffset: drag.grabOffset,
+        bounds: metrics.bounds,
+      })
+      if (next !== offsetRef.current) onToolbarOffsetChange(next)
+    },
+    [onToolbarOffsetChange],
+  )
+
+  const handleThumbPointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = thumbDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    thumbDragRef.current = null
+    const thumb = event.currentTarget
+    if (thumb.hasPointerCapture(event.pointerId)) thumb.releasePointerCapture(event.pointerId)
+  }, [])
+
+  /**
+   * 専用 toolbar pan grip。primary pointer のみ。開始時の clientX / offset /
+   * `computeOffsetBounds()` snapshot を使い、pointer capture で終端する。
+   * timer / rAF を完了 authority にせず、window 座標も IPC も触らない。
+   */
+  const handleToolbarPanPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (event.button !== 0) return
+      if (event.detail === 2) {
+        event.preventDefault()
+        toolbarPanRef.current = null
+        setToolbarPanning(false)
+        onToolbarOffsetReset()
+        return
+      }
+      const bounds = computeOffsetBounds()
+      if (!bounds) return
+      event.preventDefault()
+      event.stopPropagation()
+      toolbarPanRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startOffset: offsetRef.current,
+        bounds,
+      }
+      setToolbarPanning(true)
+      event.currentTarget.setPointerCapture(event.pointerId)
+    },
+    [computeOffsetBounds, onToolbarOffsetReset],
+  )
+
+  const handleToolbarPanPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      const drag = toolbarPanRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      const next = resolveToolbarPanDragOffset({
+        pointerX: event.clientX,
+        startX: drag.startX,
+        startOffset: drag.startOffset,
+        bounds: drag.bounds,
+      })
+      if (next !== offsetRef.current) onToolbarOffsetChange(next)
+    },
+    [onToolbarOffsetChange],
+  )
+
+  const handleToolbarPanPointerEnd = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = toolbarPanRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    toolbarPanRef.current = null
+    setToolbarPanning(false)
+    const grip = event.currentTarget
+    if (grip.hasPointerCapture(event.pointerId)) grip.releasePointerCapture(event.pointerId)
+  }, [])
+
+  // unmount / toolbar 非表示で pending gesture を必ず捨てる（capture は要素破棄で解放）。
+  useEffect(() => {
+    if (!toolbarVisible) setToolbarPanning(false)
+    return () => {
+      thumbDragRef.current = null
+      toolbarPanRef.current = null
+    }
+  }, [toolbarVisible])
 
   useEffect(() => {
     if (!headingMenuOpen && !listMenuOpen && !blockDecorationMenuOpen) {
@@ -475,43 +730,11 @@ export function UnifiedHeader({
     [plainModeKind],
   )
 
-  const handleDragHandleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault()
-      dragRef.current = { startX: e.clientX, startOffset: toolbarOffset }
-
-      // Snapshot bounds at drag start (layout doesn't change during drag)
-      const bounds = computeOffsetBounds()
-      const minOffset = bounds ? bounds.min : -9999
-      const maxOffset = bounds ? bounds.max : 9999
-
-      const onMove = (ev: MouseEvent) => {
-        if (!dragRef.current) return
-        const delta = ev.clientX - dragRef.current.startX
-        const raw = dragRef.current.startOffset + delta
-        onToolbarOffsetChange(Math.max(minOffset, Math.min(maxOffset, raw)))
-      }
-
-      const onUp = () => {
-        dragRef.current = null
-        document.removeEventListener('mousemove', onMove, false)
-        document.removeEventListener('mouseup', onUp, false)
-        document.body.classList.remove('is-dragging-toolbar')
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-      }
-
-      document.body.classList.add('is-dragging-toolbar')
-      document.body.style.cursor = 'grabbing'
-      document.body.style.userSelect = 'none'
-      document.addEventListener('mousemove', onMove, false)
-      document.addEventListener('mouseup', onUp, false)
-    },
-    [toolbarOffset, computeOffsetBounds, onToolbarOffsetChange],
-  )
-
   return (
-    <header ref={headerRef} className='unified-header'>
+    <header
+      ref={headerRef}
+      className={`unified-header${toolbarPanning ? ' is-toolbar-panning' : ''}`}
+    >
       {/* ---- Left zone ---- */}
       <div ref={leftZoneRef} className='unified-header-left'>
         {/* Hamburger menu button: Win/Linux only */}
@@ -539,7 +762,11 @@ export function UnifiedHeader({
             <IconLayoutSidebarLeftExpand size={ICON_SIZE} stroke={ICON_STROKE} />
           )}
         </button>
-        {appTitleVisible && <span className='app-name'>{appTitleText}</span>}
+        {appTitleVisible && (
+          <span ref={appNameRef} className='app-name'>
+            {appTitleText}
+          </span>
+        )}
         <button
           className={`toolbar-collapse-toggle has-tooltip${toolbarVisible ? ' expanded' : ''}`}
           onClick={onToggleToolbarVisible}
@@ -556,11 +783,22 @@ export function UnifiedHeader({
           )}
         </button>
         <span className='unified-header-sep' aria-hidden='true' />
+        {/* APP-HEADER-OVERFLOW-DRAG1: 固定 window drag grip の「場所取り」だけを
+            通常フローで行う。実際の可視 grip と native draggable region は header 末尾の
+            overlay 側にある（Electron は draggable region をリスト順に合成し、後勝ちで
+            no-drag が drag を打ち消すため、overflow した toolbar button より後ろの
+            DOM 順で宣言する必要がある）。 */}
+        <span
+          ref={gripSlotRef}
+          className='header-window-drag-grip-slot'
+          aria-hidden='true'
+        />
       </div>
 
       {/* ---- Center: toolbar buttons ---- */}
       <div
         ref={centerRef}
+        id={TOOLBAR_VIEWPORT_ID}
         className={`unified-header-center toolbar-btn-scope${toolbarVisible ? '' : ' collapsed'}`}
         onWheel={handleToolbarCenterWheel}
       >
@@ -570,16 +808,22 @@ export function UnifiedHeader({
             className='toolbar-drag-wrapper'
             style={{ transform: `translateX(${toolbarOffset}px)` }}
           >
+            {/* APP-HEADER-TOOLBAR-PAN-GRIP2: 他の toolbar button と同じ列の左端。
+                window drag overlay とは別要素で、native drag region にはしない。 */}
             <button
-              className='toolbar-drag-handle has-tooltip'
-              onMouseDown={handleDragHandleMouseDown}
-              onDoubleClick={onToolbarOffsetReset}
               type='button'
-              data-tooltip={t('header.dragToolbar')}
-              aria-label={t('header.dragToolbar')}
-              tabIndex={-1}
+              className='toolbar-btn-icon-only header-toolbar-pan-grip has-tooltip'
+              data-header-toolbar-pan-grip='true'
+              data-tooltip={t('header.toolbarPanGrip', 'tooltip')}
+              aria-label={t('header.toolbarPanGrip')}
+              onPointerDown={handleToolbarPanPointerDown}
+              onPointerMove={handleToolbarPanPointerMove}
+              onPointerUp={handleToolbarPanPointerEnd}
+              onPointerCancel={handleToolbarPanPointerEnd}
+              onLostPointerCapture={handleToolbarPanPointerEnd}
+              onDoubleClick={onToolbarOffsetReset}
             >
-              <IconGripVertical />
+              <IconGripVertical size={ICON_SIZE} stroke={ICON_STROKE} />
             </button>
         <button
           className='toolbar-btn-icon-only'
@@ -1095,6 +1339,69 @@ export function UnifiedHeader({
           </div>
         )}
       </div>
+
+      {/* APP-HEADER-OVERFLOW-DRAG1: toolbar が viewport より広いときだけ現れる薄い
+          scroll indicator。header 内側の下端へ絶対配置するので 36px の header 高は
+          変わらず、header / tab strip / 本文を押し下げない。track は left / right fixed
+          zone の間だけなので native window controls とも重ならない。 */}
+      {toolbarScrollIndicator && (
+        <div
+          className='toolbar-scroll-indicator'
+          data-toolbar-scroll-indicator='true'
+          style={{
+            left: `${toolbarScrollIndicator.trackLeft}px`,
+            width: `${toolbarScrollIndicator.trackWidth}px`,
+          }}
+        >
+          <div
+            className='toolbar-scroll-thumb'
+            data-toolbar-scroll-thumb='true'
+            style={{
+              width: `${toolbarScrollIndicator.thumbWidth}px`,
+              transform: `translateX(${toolbarScrollIndicator.thumbLeft}px)`,
+            }}
+            role='scrollbar'
+            aria-orientation='horizontal'
+            aria-controls={TOOLBAR_VIEWPORT_ID}
+            aria-label={t('header.toolbarScroll')}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(toolbarScrollIndicator.progress * 100)}
+            onPointerDown={handleThumbPointerDown}
+            onPointerMove={handleThumbPointerMove}
+            onPointerUp={handleThumbPointerEnd}
+            onPointerCancel={handleThumbPointerEnd}
+            onLostPointerCapture={handleThumbPointerEnd}
+            onDoubleClick={onToolbarOffsetReset}
+          />
+        </div>
+      )}
+
+      {/* APP-HEADER-OVERFLOW-DRAG1 native-fix: window drag region は toolbar より
+          後ろの DOM 順で宣言する。Electron は draggable region を順に union / difference
+          するので、overflow した toolbar button の no-drag 矩形が left fixed zone の上へ
+          広がっても、あとから来るこの drag 宣言が勝つ。位置は通常フローの場所取り要素
+          （grip slot / app-name）を同一 snapshot で測って合わせるだけで、renderer から
+          window 座標を操作したり新しい IPC を足したりはしない。 */}
+      {windowDragRegions.grip && (
+        <span
+          className='header-window-drag-grip'
+          data-header-window-drag-grip='true'
+          style={headerRectStyle(windowDragRegions.grip)}
+          title={t('header.windowDragGrip')}
+          aria-hidden='true'
+        >
+          <IconGripHorizontal />
+        </span>
+      )}
+      {windowDragRegions.appName && (
+        <span
+          className='header-window-drag-overlay'
+          data-header-window-drag-overlay='app-name'
+          style={headerRectStyle(windowDragRegions.appName)}
+          aria-hidden='true'
+        />
+      )}
     </header>
   )
 }

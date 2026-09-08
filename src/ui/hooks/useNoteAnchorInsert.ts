@@ -25,8 +25,17 @@ type UseNoteAnchorInsertOptions = {
   getPlainModeKind: () => PlainModeKind | null
   noticeConfirmed: boolean
   onNoticeConfirmedChange: (value: boolean) => void
-  /** notes.json write + anchor 挿入成功後に呼ぶ (hover preview 再反映用)。 */
-  onInsertSuccess?: (id: string) => void
+  /**
+   * notes.json write + anchor 挿入成功後に呼ぶ (hover preview 再反映用)。
+   * STICKY-NOTE-DISCARD-CONSISTENCY1: anchor はまだ durable save されていないので、
+   * 呼び出し側は identity を受け取って provisional として追跡する。
+   */
+  onInsertSuccess?: (inserted: {
+    id: string
+    projectRoot: string
+    relativeFile: string
+    fingerprint: string
+  }) => void
 }
 
 type PendingInsert = {
@@ -108,7 +117,7 @@ export function useNoteAnchorInsert({
           return
         }
         setModal(null)
-        onInsertSuccess?.(result.id)
+        onInsertSuccess?.({ id: result.id, ...result.provisional })
       })
       .finally(() => {
         busyRef.current = false
@@ -118,6 +127,15 @@ export function useNoteAnchorInsert({
   const handleCancel = useCallback(() => {
     pendingRef.current = null
     setModal(null)
+  }, [])
+
+  /**
+   * STICKY-NOTE-DISCARD-CONSISTENCY1: 付箋関連の失敗を同じ notice modal で見せる。
+   * 破棄 cleanup の fail-closed を、ユーザーが必ず気付ける形で伝えるために使う。
+   */
+  const showNotice = useCallback((message: string) => {
+    pendingRef.current = null
+    setModal({ kind: 'notice', message })
   }, [])
 
   return {
@@ -130,5 +148,6 @@ export function useNoteAnchorInsert({
     handleNoteAnchorFirstNoticeConfirm: handleFirstNoticeConfirm,
     handleNoteAnchorSubmit: handleSubmit,
     handleNoteAnchorCancel: handleCancel,
+    showNoteAnchorNotice: showNotice,
   }
 }

@@ -23,6 +23,13 @@ export type VisualFocusCurrentLineControllerOptions = {
    * current-line overlay during composition / IME range; hide only for non-composing range selection.
    */
   getIsComposing: () => boolean
+  /**
+   * 局所 contenteditable IME スロット PoC が active な間は current line 帯を隠す
+   * (`docs/local-contenteditable-ime-poc-design-2026-07.md` §4.7)。
+   * overlay が PM caret 位置の帯より上に来るため、帯だけが古い位置へ残るのを防ぐ。
+   * geometry 実装自体は変更しない。
+   */
+  getIsLocalImeEditingActive?: () => boolean
 }
 
 function headInCodeBlock(state: EditorState): boolean {
@@ -331,6 +338,10 @@ export function createVisualFocusCurrentLineController(
       return
     }
     if (options.getIsSourceModeActive() || options.getIsParagraphPlainActive()) {
+      overlay.setHidden(true)
+      return
+    }
+    if (options.getIsLocalImeEditingActive?.() === true) {
       overlay.setHidden(true)
       return
     }

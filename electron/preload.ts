@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { UiLanguageMode } from '../src/settings/types'
 import type { NyozeNotesStore } from '../src/project/noteStore'
+import type { ProvisionalNoteCleanupRequest } from '../src/project/provisionalNoteCleanup'
 import type {
   HtmlTemplatePart,
   WebBookAssetFailure,
@@ -15,6 +16,7 @@ import type {
   ProjectCreateResult,
   ProjectReadNotesResult,
   ProjectWriteNotesResult,
+  ProjectDiscardProvisionalNotesResult,
   ProjectMissingFileNotesResult,
   BookFullOutlineResult,
   ChapterNeighborsResult,
@@ -30,41 +32,162 @@ import type {
   ProjectPanelContextResult,
 } from '../src/project/projectIpcTypes'
 
-const e2eBridge =
-  process.env.NYOZE_E2E === '1'
-    ? {
-        readDocumentFixture: (filePath: string) =>
-          ipcRenderer.invoke('e2e:readDocumentFixture', filePath) as Promise<
-            {
-              content: string
-              savedStat: { mtimeMs: number; size: number } | null
-            } | null
-          >,
-        establishWorkspaceRoot: (dirPath: string) =>
-          ipcRenderer.invoke('e2e:establishWorkspaceRoot', dirPath) as Promise<
-            string | null
-          >,
-        establishLibrariesFixture: (payload: {
-          libraryRoots: string[]
-          activeRoot: string
-        }) =>
-          ipcRenderer.invoke(
-            'e2e:establishLibrariesFixture',
-            payload,
-          ) as Promise<
-            { ok: true; activeRoot: string } | { ok: false; error: string }
-          >,
-        queueOpenPathResult: (payload: {
-          kind: 'file' | 'directory'
-          path: string
-        }) =>
-          ipcRenderer.invoke('e2e:queueOpenPathResult', payload) as Promise<
-            { ok: true } | { ok: false; error: string }
-          >,
-        dispatchMenuCommand: (command: string) =>
-          ipcRenderer.invoke('e2e:dispatchMenuCommand', command) as Promise<boolean>,
-      }
-    : undefined
+/**
+ * E2E 有効判定は main の `MAIN_E2E_ENABLED`（`NYOZE_E2E` かつ **非 packaged**）だけを正本にする。
+ *
+ * preload は sandbox 実行のため `app.isPackaged` を自分で判定できず、`process.env` は
+ * 起動時のコピーしか見えない。環境変数だけを guard にすると packaged build でも
+ * `NYOZE_E2E=1` を立てるだけで renderer 完結の診断入口（IME latency probe 等）が
+ * 有効になってしまうため、main へ同期問い合わせした結果を必須条件にする。
+ *
+ * main 側でも packaged 時に `process.env.NYOZE_E2E` を落としているので二重防御になる。
+ */
+function resolveMainE2eEnabled(): boolean {
+  if (process.env.NYOZE_E2E !== '1') return false
+  try {
+    return ipcRenderer.sendSync('e2e:isEnabled') === true
+  } catch {
+    // 応答が取れない場合は安全側で無効。
+    return false
+  }
+}
+
+/**
+ * E2E-UX1b: main が検証した theme enum だけを同期で受け取る。
+ * 失敗時・非 E2E 時は `null`（renderer 側は何もしない）。
+ */
+function readE2eBootstrapTheme(): {
+  uiTheme: string
+  documentTheme: string
+  docColor: { pageColor: string; textColor: string; headingColor: string } | null
+} | null {
+  try {
+    const value = ipcRenderer.sendSync('e2e:bootstrapTheme') as
+      | {
+          uiTheme?: unknown
+          documentTheme?: unknown
+          docColor?: {
+            pageColor?: unknown
+            textColor?: unknown
+            headingColor?: unknown
+          } | null
+        }
+      | null
+      | undefined
+    if (!value) return null
+    if (typeof value.uiTheme !== 'string') return null
+    if (typeof value.documentTheme !== 'string') return null
+    const raw = value.docColor
+    // main が検証済みだが、preload でも 3 値そろっているときだけ通す。
+    const docColor =
+      raw &&
+      typeof raw.pageColor === 'string' &&
+      typeof raw.textColor === 'string' &&
+      typeof raw.headingColor === 'string'
+        ? {
+            pageColor: raw.pageColor,
+            textColor: raw.textColor,
+            headingColor: raw.headingColor,
+          }
+        : null
+    return {
+      uiTheme: value.uiTheme,
+      documentTheme: value.documentTheme,
+      docColor,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * P3-A1a: 作者限定 pilot（局所 IME slot safety shell）の availability。
+ *
+ * **`NYOZE_E2E` を pilot gate として再利用しない。** E2E 診断入口とは独立した
+ * hidden env（`NYOZE_LOCAL_IME_PILOT`、`electron/localImePilotGate.ts` が正本）で、
+ * exact `'1'` 以外はすべて OFF。preload は sandbox 実行で `app.isPackaged` を
+ * 判定できないため、main の同期 IPC を**必須条件**にする（main 側でも packaged 時に
+ * env を落としているので二重防御）。
+ *
+ * renderer へ渡すのは main が認めた read-only boolean だけで、任意設定・本文・path・
+ * session state は一切載せない。settings.json / localStorage へも保存しない。
+ */
+function resolveLocalImePilotAvailable(): boolean {
+  if (process.env.NYOZE_LOCAL_IME_PILOT !== '1') return false
+  try {
+    return ipcRenderer.sendSync('localImePilot:isAvailable') === true
+  } catch {
+    // 応答が取れない場合は安全側で無効。
+    return false
+  }
+}
+
+const localImePilotBridge = resolveLocalImePilotAvailable()
+  ? {
+      available: true as const,
+    }
+  : undefined
+
+/**
+ * P3-EXP1: packaged Experimental Preview の read-only capability。
+ *
+ * preload は sandbox 実行で `app.isPackaged` も `process.platform` の policy も
+ * 判定できないため、**main の同期 IPC だけを正本**にする（env は読まない）。
+ * renderer へ渡すのは fixed boolean 1 個だけで、session 操作・本文・path・
+ * diagnostics・任意 payload は載せない。既定 OFF の preference は settings.json 側が
+ * 正本なので、この capability だけで機能が ON になることはない。
+ */
+function resolveLocalImeExperimentalPreviewCapable(): boolean {
+  try {
+    return (
+      ipcRenderer.sendSync('localImeExperimentalPreview:isCapable') === true
+    )
+  } catch {
+    // 応答が取れない場合は安全側で無効。
+    return false
+  }
+}
+
+const localImeExperimentalPreviewBridge = resolveLocalImeExperimentalPreviewCapable()
+  ? { capable: true as const }
+  : undefined
+
+const e2eBridge = resolveMainE2eEnabled()
+  ? {
+      enabled: true as const,
+      readDocumentFixture: (filePath: string) =>
+        ipcRenderer.invoke('e2e:readDocumentFixture', filePath) as Promise<
+          {
+            content: string
+            savedStat: { mtimeMs: number; size: number } | null
+          } | null
+        >,
+      establishWorkspaceRoot: (dirPath: string) =>
+        ipcRenderer.invoke('e2e:establishWorkspaceRoot', dirPath) as Promise<
+          string | null
+        >,
+      establishLibrariesFixture: (payload: {
+        libraryRoots: string[]
+        activeRoot: string
+      }) =>
+        ipcRenderer.invoke('e2e:establishLibrariesFixture', payload) as Promise<
+          { ok: true; activeRoot: string } | { ok: false; error: string }
+        >,
+      queueOpenPathResult: (payload: { kind: 'file' | 'directory'; path: string }) =>
+        ipcRenderer.invoke('e2e:queueOpenPathResult', payload) as Promise<
+          { ok: true } | { ok: false; error: string }
+        >,
+      dispatchMenuCommand: (command: string) =>
+        ipcRenderer.invoke('e2e:dispatchMenuCommand', command) as Promise<boolean>,
+      /**
+       * E2E-UX1b: 初回 paint 前に renderer が同期で読む theme bootstrap。
+       * preload 評価時に一度だけ main へ同期問い合わせし、read-only な値として
+       * 公開する（renderer から書き換える口は無い）。E2E gate の内側なので
+       * packaged では `e2e` 自体が `undefined`。
+       */
+      bootstrapTheme: readE2eBootstrapTheme(),
+    }
+  : undefined
 
 contextBridge.exposeInMainWorld('nyozeBridge', {
   versions: {
@@ -422,6 +545,10 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
         'menu:show-shortcuts',
         'menu:bug-report',
         'menu:feedback',
+        // P2-G1b: Edit menu Undo / Redo / Select All（native role 置換後の renderer 送出）
+        'menu:edit-undo',
+        'menu:edit-redo',
+        'menu:edit-select-all',
       ] as const
       const handlers = channels.map((channel) => {
         const fn = () => callback(channel)
@@ -498,6 +625,16 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
       ipcRenderer.invoke('project:resolveMissingFileNotes', filePath) as Promise<ProjectMissingFileNotesResult>,
     writeNotes: (filePath: string, store: NyozeNotesStore) =>
       ipcRenderer.invoke('project:writeNotes', filePath, store) as Promise<ProjectWriteNotesResult>,
+    // STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄時の provisional note cleanup。
+    discardProvisionalNotes: (
+      filePath: string,
+      request: ProvisionalNoteCleanupRequest,
+    ) =>
+      ipcRenderer.invoke(
+        'project:discardProvisionalNotes',
+        filePath,
+        request,
+      ) as Promise<ProjectDiscardProvisionalNotesResult>,
     updateTitle: (filePathOrAnchor: string | ProjectPanelContextIpcRequest, title: string) =>
       ipcRenderer.invoke('project:updateTitle', filePathOrAnchor, title) as Promise<ProjectUpdateTitleResult>,
     updateBookManifestV3: (
@@ -574,6 +711,27 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
     reportSaveBeforeClose: (requestId: number, ok: boolean) => {
       ipcRenderer.send('app:saveBeforeClose:result', { requestId, ok })
     },
+    /**
+     * STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄で close / quit する前の
+     * provisional 付箋 cleanup 要求。結果は save-before-close と同じ result channel
+     * へ返す（main 側は同一の pending map で待つ）。
+     */
+    onRequestDiscardBeforeClose: (callback: (requestId: number) => void) => {
+      const channel = 'app:requestDiscardBeforeClose'
+      const handler = (_event: Electron.IpcRendererEvent, payload: { requestId?: number }) => {
+        const requestId = payload?.requestId
+        if (typeof requestId !== 'number') return
+        callback(requestId)
+      }
+      ipcRenderer.on(channel, handler)
+      return () => {
+        ipcRenderer.removeListener(channel, handler)
+      }
+    },
   },
   e2e: e2eBridge,
+  // P3-A1a: 作者限定 pilot の read-only capability。非 available 時は undefined。
+  localImePilot: localImePilotBridge,
+  // P3-EXP1: packaged Experimental Preview の read-only capability。非 capable 時は undefined。
+  localImeExperimentalPreview: localImeExperimentalPreviewBridge,
 })

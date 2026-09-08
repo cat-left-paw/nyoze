@@ -9,7 +9,8 @@
   },
   "files": [
     "dist",
-    "dist-electron"
+    "dist-electron",
+    "!**/*.sync-conflict-*"
   ],
   "mac": {
     "icon": "build/icons/icon.icns",

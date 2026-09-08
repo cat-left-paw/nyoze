@@ -316,6 +316,35 @@ export type ProjectWriteNotesResult =
     }
 
 /**
+ * `project:discardProvisionalNotes` の結果。
+ *
+ * STICKY-NOTE-DISCARD-CONSISTENCY1: 未保存 anchor に対応する provisional note を、
+ * 明示的な破棄時に **id 単位で**取り除くための read-modify-write。renderer は
+ * 追跡した id / 相対 file / fingerprint と、期待する project root を渡すだけで、
+ * project root 自体は main が document path から再解決する。
+ *
+ * - `project-mismatch`: renderer が期待した project root と main の解決結果が違う。
+ * - `identity-mismatch` / `fingerprint-mismatch`: entry を再証明できない（外部変更等）。
+ *   いずれも 1 件も削除せず fail-closed にする。
+ */
+export type ProjectDiscardProvisionalNotesResult =
+  | { ok: true; removedIds: string[] }
+  | {
+      ok: false
+      reason:
+        | 'invalid-path'
+        | 'not-in-project'
+        | 'invalid-request'
+        | 'project-mismatch'
+        | 'identity-mismatch'
+        | 'fingerprint-mismatch'
+        | 'invalid'
+        | 'read-failed'
+        | 'existing-invalid'
+        | 'write-failed'
+    }
+
+/**
  * `project:updateTitle` の結果。
  * renderer は active file path だけを渡し、main 側で project root を解決して
  * `.nyoze/project.json` の `title` だけを更新する。

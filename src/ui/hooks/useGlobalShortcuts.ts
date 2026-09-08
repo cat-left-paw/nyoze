@@ -5,6 +5,7 @@ import type { WritingMode } from '../../settings/types'
 import type { SourceModeController } from './useSourceModeController'
 import {
   getPlainShortcutUnavailableMessage,
+  isImeUnsafeShortcutKeyboardEvent,
   matchesLeftPaneToggleShortcut,
   matchesOutlineShortcut,
   matchesParagraphPlainToggleShortcut,
@@ -14,10 +15,20 @@ import {
   type PlainModeKind,
 } from '../utils/plainModeCommandGate'
 import {
-  isProseMirrorFocused,
   resolveSelectAllShortcutRoute,
   resolveSelectAllShortcutTargetInfo,
 } from '../utils/selectAllShortcutRouting'
+import { classifyEditorMarkShortcut } from '../../editor-core/features/editorMarkShortcutClassification'
+import {
+  classifyEditorBlockStructureShortcut,
+} from '../../editor-core/features/editorBlockStructureShortcutClassification'
+import { runLocalImeOutlineCommand } from '../utils/localImeOutlineCommandPreflight'
+import { classifyListMoveShortcutTarget } from '../utils/listMoveShortcutTarget'
+import { runLocalImeListMoveCommand } from '../utils/localImeListMoveCommandPreflight'
+import {
+  isLocalImeHostBlockStructureShortcutFocusOwner,
+  runLocalImeHostCommand,
+} from '../utils/localImeHostCommandPreflight'
 
 type UseGlobalShortcutsOptions = {
   coreRef: RefObject<EditorCoreHandle | null>
@@ -64,17 +75,47 @@ export function useGlobalShortcuts({
 }: UseGlobalShortcutsOptions) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Windows AltGr は ctrl+alt として届く。pane / Paragraph Plain / Ruby 等の
+      // code 基準 shortcut として消費せず、通常文字入力へ委譲する。
+      // macOS Option は AltGraph=false のまま既存 shortcut を維持する。
+      if (
+        typeof e.getModifierState === 'function' &&
+        e.getModifierState('AltGraph')
+      ) {
+        return
+      }
       const mod = e.metaKey || e.ctrlKey
       const shift = e.shiftKey
       const alt = e.altKey
 
       // Search shortcuts (already handled elsewhere but kept for reference)
+      // P2-G2b: armed 局所 IME slot 中の IME 合成 keydown はここで消費しない。
       if (mod && !shift && !alt && e.key === 'f') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
+          return
+        }
         e.preventDefault()
         onOpenSearch()
         return
       }
       if (mod && !shift && !alt && e.key === 'h') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
+          return
+        }
         e.preventDefault()
         onOpenSearchReplace()
         return
@@ -92,7 +133,14 @@ export function useGlobalShortcuts({
           shift,
         })
       ) {
-        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
           return
         }
         e.preventDefault()
@@ -108,7 +156,14 @@ export function useGlobalShortcuts({
           shift,
         })
       ) {
-        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
           return
         }
         e.preventDefault()
@@ -167,7 +222,14 @@ export function useGlobalShortcuts({
         if (plainModeKind === 'full-plain') {
           return
         }
-        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
           return
         }
         if (getInternalDocActive?.()) {
@@ -199,6 +261,10 @@ export function useGlobalShortcuts({
       if (!core) return
 
       // Outline navigation (allowed on internal read-only docs — reading aid)
+      // P2-G2c1: armed 局所 IME slot 中は、既存 P1 document-action barrier で
+      // session を teardown した後の実 PM selection を正本として既存 Outline
+      // command を 1 回だけ実行する（composing / busy / recovery-required では
+      // 実行せず、fallback しない）。
       const outlineKind = matchesOutlineShortcut({
         code: e.code,
         key: e.key,
@@ -207,25 +273,65 @@ export function useGlobalShortcuts({
         shift,
       })
       if (outlineKind === 'fold') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
+          return
+        }
         e.preventDefault()
-        core.toggleCurrentHeadingFold()
+        runLocalImeOutlineCommand('outline-fold-toggle', () => {
+          core.toggleCurrentHeadingFold()
+        })
         return
       }
       if (outlineKind === 'comma') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
+          return
+        }
         e.preventDefault()
         if (writingMode === 'horizontal-tb') {
-          core.jumpToPreviousHeading()
+          runLocalImeOutlineCommand('outline-jump-previous-heading', () => {
+            core.jumpToPreviousHeading()
+          })
         } else {
-          core.jumpToNextHeading()
+          runLocalImeOutlineCommand('outline-jump-next-heading', () => {
+            core.jumpToNextHeading()
+          })
         }
         return
       }
       if (outlineKind === 'period') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
+          return
+        }
         e.preventDefault()
         if (writingMode === 'horizontal-tb') {
-          core.jumpToNextHeading()
+          runLocalImeOutlineCommand('outline-jump-next-heading', () => {
+            core.jumpToNextHeading()
+          })
         } else {
-          core.jumpToPreviousHeading()
+          runLocalImeOutlineCommand('outline-jump-previous-heading', () => {
+            core.jumpToPreviousHeading()
+          })
         }
         return
       }
@@ -248,7 +354,14 @@ export function useGlobalShortcuts({
           shift,
         })
       ) {
-        if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
           return
         }
         e.preventDefault()
@@ -256,52 +369,72 @@ export function useGlobalShortcuts({
         return
       }
 
-      // --- Mark commands ---
-      if (mod && !shift && !alt && key === 'b') {
+      // --- Mark commands（割り当ては editorMarkShortcutClassification と共有） ---
+      const markShortcut = classifyEditorMarkShortcut({
+        key: e.key,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+      })
+      if (markShortcut) {
         e.preventDefault()
-        core.execute('bold')
-        return
-      }
-      if (mod && !shift && !alt && key === 'i') {
-        e.preventDefault()
-        core.execute('italic')
-        return
-      }
-      if (mod && shift && !alt && key === 'x') {
-        e.preventDefault()
-        core.execute('strike')
+        core.execute(markShortcut)
         return
       }
       if (mod && !shift && !alt && key === 'k') {
+        if (
+          isImeUnsafeShortcutKeyboardEvent({
+            isComposing: e.isComposing,
+            keyCode: e.keyCode,
+            key: e.key,
+            cancelable: e.cancelable,
+          })
+        ) {
+          return
+        }
         e.preventDefault()
         onOpenLinkPrompt()
         return
       }
-      if (mod && shift && !alt && key === 'c') {
+
+      // --- Heading / Clear Format（割り当ては editorBlockStructureShortcutClassification と共有） ---
+      const blockStructure = classifyEditorBlockStructureShortcut({
+        key: e.key,
+        code: e.code,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        altGraphKey:
+          typeof e.getModifierState === 'function' && e.getModifierState('AltGraph'),
+        isComposing: e.isComposing,
+        keyCode: e.keyCode,
+        cancelable: e.cancelable,
+      })
+      if (blockStructure === 'clear-format') {
         e.preventDefault()
         core.clearFormat()
         return
       }
-
-      // --- Heading commands ---
-      if (mod && alt && !shift && key === '1') {
+      if (
+        blockStructure === 'heading-1' ||
+        blockStructure === 'heading-2' ||
+        blockStructure === 'heading-3' ||
+        blockStructure === 'paragraph'
+      ) {
+        const headingLevel =
+          blockStructure === 'heading-1' ? 1
+          : blockStructure === 'heading-2' ? 2
+          : blockStructure === 'heading-3' ? 3
+          : 0
+        if (!isLocalImeHostBlockStructureShortcutFocusOwner(document.activeElement)) {
+          return
+        }
         e.preventDefault()
-        core.toggleHeading(1)
-        return
-      }
-      if (mod && alt && !shift && key === '2') {
-        e.preventDefault()
-        core.toggleHeading(2)
-        return
-      }
-      if (mod && alt && !shift && key === '3') {
-        e.preventDefault()
-        core.toggleHeading(3)
-        return
-      }
-      if (mod && alt && !shift && key === '0') {
-        e.preventDefault()
-        core.toggleHeading(0) // Convert to paragraph
+        runLocalImeHostCommand('host-command-heading', () => {
+          core.toggleHeading(headingLevel)
+        })
         return
       }
 
@@ -315,35 +448,104 @@ export function useGlobalShortcuts({
       // When the editor has focus, always call preventDefault regardless of
       // whether the item can actually move, so the native jump never fires for
       // non-moveable positions (heading, plain paragraph, first/last list item).
+      //
+      // Local Window focus時はdocument-action barrierで安全にcloseしてから、
+      // 既存moveListItemUp/Downをexact 1回だけ実行する。
+      // `isProseMirrorFocused()` 自体は変更せず、`classifyListMoveShortcutTarget()`
+      // が内部でそのまま再利用する。
       if (mod && !shift && !alt) {
         if (writingMode === 'horizontal-tb') {
           if (e.key === 'ArrowUp') {
-            if (isProseMirrorFocused(document.activeElement)) {
+            const targetKind = classifyListMoveShortcutTarget(document.activeElement)
+            if (targetKind === 'prosemirror') {
               e.preventDefault()
               core.moveListItemUp()
+            } else if (targetKind === 'local-window') {
+              if (
+                isImeUnsafeShortcutKeyboardEvent({
+                  isComposing: e.isComposing,
+                  keyCode: e.keyCode,
+                  key: e.key,
+                  cancelable: e.cancelable,
+                })
+              ) {
+                return
+              }
+              e.preventDefault()
+              runLocalImeListMoveCommand('list-move-up', () => {
+                core.moveListItemUp()
+              })
             }
             return
           }
           if (e.key === 'ArrowDown') {
-            if (isProseMirrorFocused(document.activeElement)) {
+            const targetKind = classifyListMoveShortcutTarget(document.activeElement)
+            if (targetKind === 'prosemirror') {
               e.preventDefault()
               core.moveListItemDown()
+            } else if (targetKind === 'local-window') {
+              if (
+                isImeUnsafeShortcutKeyboardEvent({
+                  isComposing: e.isComposing,
+                  keyCode: e.keyCode,
+                  key: e.key,
+                  cancelable: e.cancelable,
+                })
+              ) {
+                return
+              }
+              e.preventDefault()
+              runLocalImeListMoveCommand('list-move-down', () => {
+                core.moveListItemDown()
+              })
             }
             return
           }
         } else {
           // vertical-rl
           if (e.key === 'ArrowRight') {
-            if (isProseMirrorFocused(document.activeElement)) {
+            const targetKind = classifyListMoveShortcutTarget(document.activeElement)
+            if (targetKind === 'prosemirror') {
               e.preventDefault()
               core.moveListItemUp()
+            } else if (targetKind === 'local-window') {
+              if (
+                isImeUnsafeShortcutKeyboardEvent({
+                  isComposing: e.isComposing,
+                  keyCode: e.keyCode,
+                  key: e.key,
+                  cancelable: e.cancelable,
+                })
+              ) {
+                return
+              }
+              e.preventDefault()
+              runLocalImeListMoveCommand('list-move-up', () => {
+                core.moveListItemUp()
+              })
             }
             return
           }
           if (e.key === 'ArrowLeft') {
-            if (isProseMirrorFocused(document.activeElement)) {
+            const targetKind = classifyListMoveShortcutTarget(document.activeElement)
+            if (targetKind === 'prosemirror') {
               e.preventDefault()
               core.moveListItemDown()
+            } else if (targetKind === 'local-window') {
+              if (
+                isImeUnsafeShortcutKeyboardEvent({
+                  isComposing: e.isComposing,
+                  keyCode: e.keyCode,
+                  key: e.key,
+                  cancelable: e.cancelable,
+                })
+              ) {
+                return
+              }
+              e.preventDefault()
+              runLocalImeListMoveCommand('list-move-down', () => {
+                core.moveListItemDown()
+              })
             }
             return
           }

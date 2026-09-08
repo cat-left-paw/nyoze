@@ -1,4 +1,5 @@
 import Bold from '@tiptap/extension-bold'
+import { Code } from '@tiptap/extension-code'
 import Link from '@tiptap/extension-link'
 import Italic from '@tiptap/extension-italic'
 import ListItem from '@tiptap/extension-list-item'
@@ -19,11 +20,17 @@ import { NyozeImage } from '../schema/nyozeImage'
 import { AutoTcyDecoration } from './autoTcyDecoration'
 import { HeadingFold } from './headingFold'
 import { SearchHighlight } from './searchHighlight'
-import { RubyPunctuationNowrap } from './rubyPunctuationNowrap'
+import {
+  RubyPunctuationNowrap,
+  type RubyPunctuationDomSyncDiagnostics,
+  type RubyPunctuationNowrapApplyDiagnostics,
+} from './rubyPunctuationNowrap'
 import { SpecialInlineBoundarySentinel } from './specialInlineBoundarySentinel'
 import { NoteAnchorProtection } from './noteAnchorProtection'
+import { LocalImeLocalWindowReservation } from './localImeLocalWindowReservationDecoration'
 import { VisualFocusBlockDecoration } from './visualFocusBlockDecoration'
 import type { VisualFocusBlockDecorationOptions } from './visualFocusBlockDecoration'
+import { buildInlineMarkInputRulesForMark } from '../features/inlineMarkInputRules'
 
 export const DEFAULT_EDITOR_CONTENT = `
   <p></p>
@@ -34,6 +41,12 @@ export type BuildExtensionsOptions = {
     isEnabled: () => boolean
     getDigitRange: () => { minDigits: number; maxDigits: number }
     getNumbersOnly?: () => boolean
+    beginPerfSpan?: () => (() => void) | null
+  }
+  rubyPunctuation?: {
+    beginPerfSpan?: () => (() => void) | null
+    beginApplyDiagnostics?: () => RubyPunctuationNowrapApplyDiagnostics | null
+    domSyncDiagnostics?: RubyPunctuationDomSyncDiagnostics
   }
   visualFocus?: VisualFocusBlockDecorationOptions
 }
@@ -47,26 +60,43 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
       underline: false,
       link: false,
       listItem: false,
-      code: {
-        HTMLAttributes: {
-          class: 'tategaki-md-code',
-        },
-      },
+      // input rule の仕様・意味論は `inlineMarkInputRules` を単一の正本にするため、
+      // StarterKit 同梱の Code を無効化して直後に同じ Code を明示登録する
+      // （mark 登録順は変えない: StarterKit が提供する mark は元から code だけ）。
+      code: false,
       codeBlock: false,
+    }),
+    Code.configure({
+      HTMLAttributes: {
+        class: 'tategaki-md-code',
+      },
+    }).extend({
+      addInputRules() {
+        return buildInlineMarkInputRulesForMark(this.name, this.type)
+      },
     }),
     Bold.extend({
       inclusive() {
         return false
+      },
+      addInputRules() {
+        return buildInlineMarkInputRulesForMark(this.name, this.type)
       },
     }),
     Italic.extend({
       inclusive() {
         return false
       },
+      addInputRules() {
+        return buildInlineMarkInputRulesForMark(this.name, this.type)
+      },
     }),
     Strike.extend({
       inclusive() {
         return false
+      },
+      addInputRules() {
+        return buildInlineMarkInputRulesForMark(this.name, this.type)
       },
     }),
     ListItem.extend({
@@ -125,12 +155,20 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
     AozoraRuby,
     AozoraTcy,
     SpecialInlineBoundarySentinel,
-    RubyPunctuationNowrap,
+    options?.rubyPunctuation
+      ? RubyPunctuationNowrap.configure(options.rubyPunctuation)
+      : RubyPunctuationNowrap,
     options?.autoTcy ? AutoTcyDecoration.configure(options.autoTcy) : AutoTcyDecoration,
     HeadingFold,
     SearchHighlight,
     ...(options?.visualFocus
       ? [VisualFocusBlockDecoration.configure(options.visualFocus)]
       : []),
+    // LOCAL-WINDOW-RESERVATION-PLUGIN-LIFETIME1: Local Window の source / reservation
+    // Decoration は host の**固定** plugin 構成に含める。Start / Stop で
+    // `state.reconfigure()` しないため、host の全 plugin view が再生成されない。
+    // 旧方式は `state.plugins` の末尾へ動的追加していたので、Decoration 合成順を
+    // 変えないよう **必ず最後**（VisualFocusBlockDecoration より後）に置くこと。
+    LocalImeLocalWindowReservation,
   ]
 }

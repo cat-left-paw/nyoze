@@ -549,6 +549,20 @@ export function sanitizeSettingsJson(
     );
   }
 
+  // RETIRE1: legacy keyはread-time migration inputとしてbooleanだけ通す。
+  // rendererの次回writeはこのkeyを除去し、runtimeやUIの正本にはしない。
+  if (typeof raw.experimentalLocalImeParagraphOverlayEnabled === "boolean") {
+    out.experimentalLocalImeParagraphOverlayEnabled =
+      raw.experimentalLocalImeParagraphOverlayEnabled;
+  }
+
+  // PUBLIC-ENTRY1: the strategy-neutral field is the product preference.
+  // Preserve presence as an explicit false for malformed values so renderer
+  // migration cannot fall back to a stale legacy ON value.
+  if (Object.prototype.hasOwnProperty.call(raw, "experimentalLocalImeEnabled")) {
+    out.experimentalLocalImeEnabled = raw.experimentalLocalImeEnabled === true;
+  }
+
   // 付箋 (Task 3A-3): 初回説明の確認済みフラグ。boolean のみ受け付ける。
   if (typeof raw.noteAnchorNoticeConfirmed === "boolean") {
     out.noteAnchorNoticeConfirmed = raw.noteAnchorNoticeConfirmed;

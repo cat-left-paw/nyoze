@@ -13,7 +13,7 @@
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
-GitHub Releasesでは`0.3.0-beta.2`をpre-releaseとして配布します。`0.3.0-beta.1`で確認されたアイドル時の高CPU使用率を修正しているため、GitHub版を利用する場合は`0.3.0-beta.2`へ更新してください。WindowsのMicrosoft Store公開版はアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`のままで、今回の新機能は含みません。Windowsで`0.3.0-beta.2`を試す場合はGitHub zipを使用してください。
+現在のGitHub Latestは`0.3.0-beta.2`です。次期版`0.4.0-beta.1`は公開準備中で、公開後はPre-releaseフラグを付けないGitHub Latestとします。Microsoft Storeも同じアプリ表示versionへ更新し、Store package versionは`1.2.2.0`とします。公開まではStore版`0.2.1-beta.1` / package version `1.2.1.0`が現行です。
 
 ## macOS
 

@@ -13,6 +13,8 @@ export type DisplaySettingsSectionKey =
   | 'caret'
   | 'paragraphPlain'
   | 'typewriter'
+  /** P3-EXP1: 実験的機能（macOS packaged capability があるときだけ表示）。 */
+  | 'experimental'
   | 'support'
 
 export type DisplaySettingsSectionOpenState = Record<DisplaySettingsSectionKey, boolean>
@@ -32,6 +34,7 @@ export const DEFAULT_DISPLAY_SETTINGS_SECTION_OPEN_STATE: DisplaySettingsSection
   caret: false,
   paragraphPlain: false,
   typewriter: false,
+  experimental: false,
   support: false,
 }
 

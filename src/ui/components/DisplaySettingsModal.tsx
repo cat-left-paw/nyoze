@@ -13,6 +13,7 @@ import {
   IconHighlight,
   IconLicense,
   IconNumbers,
+  IconFlask,
   IconPencilStar,
   IconShadowOff,
   IconThumbUp,
@@ -73,6 +74,7 @@ import { UI_THEME_VALUES } from "../../settings/themeUtils";
 import type { CaretColorMode } from "../../theme/caretColor";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { createUiTextGetter } from "../i18n/uiText";
+import type { LocalImeExperimentalPreviewView } from "../hooks/useLocalImeExperimentalPreview";
 import { DisplayNumberSlider } from "./DisplayNumberSlider";
 import {
   createDefaultDisplaySettingsSectionOpenState,
@@ -219,6 +221,13 @@ type DisplaySettingsModalProps = {
   onSendBugReport: () => void;
   onSendFeedback: () => void;
   onOpenRepository: () => void;
+  /**
+   * PUBLIC-ENTRY1: Local Window Experimentalの製品view。
+   * `settingVisible` が false（不明platform / 作者 pilot 起動）では
+   * セクションを一切 render しない。判定は pure policy 側が正本。
+   * Linux では注意文だけを追加表示し、capability 自体は main の available 判定が正本。
+   */
+  localImeExperimentalPreview?: LocalImeExperimentalPreviewView | null;
   /** 表示設定を開く直前の要求: 該当セクションを展開（ツールバー Typewriter 導線など） */
   expandSectionOnOpen?: DisplaySettingsSectionKey | null;
   onExpandSectionOnOpenConsumed?: () => void;
@@ -377,6 +386,7 @@ export function DisplaySettingsModal({
   onSendBugReport,
   onSendFeedback,
   onOpenRepository,
+  localImeExperimentalPreview,
   expandSectionOnOpen,
   onExpandSectionOnOpenConsumed,
 }: DisplaySettingsModalProps) {
@@ -685,7 +695,15 @@ export function DisplaySettingsModal({
   };
 
   return (
-    <div ref={overlayRef} className="prompt-overlay" onClick={onClose}>
+    <div
+      ref={overlayRef}
+      className="prompt-overlay"
+      // P3-EXP1: 「実験的機能」の停止 / 復旧導線を含むので、局所IMEの制御面として扱う。
+      // これが無いと表示設定を開く / 操作するだけで active session が終了し、
+      // 表示された時点で「安全に停止」が no-op になる。
+      data-local-ime-control-surface="true"
+      onClick={onClose}
+    >
       <section
         className="display-settings-dialog"
         onClick={(e) => e.stopPropagation()}
@@ -2659,6 +2677,139 @@ export function DisplaySettingsModal({
               </div>
             )}
           </div>
+
+          {/* ── PUBLIC-ENTRY1: available platform の Local Window Experimental ── */}
+          {localImeExperimentalPreview?.settingVisible ? (
+            <div className="settings-section">
+              <SectionHeading
+                title={t("displaySettings.section.experimental")}
+                icon={IconFlask}
+                isOpen={sectionOpenState.experimental}
+                onToggle={() => toggleSection("experimental")}
+              />
+              {sectionOpenState.experimental && (
+                <div
+                  className="settings-section-body"
+                  data-testid="settings-experimental-local-ime"
+                >
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          data-testid="settings-experimental-local-ime-toggle"
+                          checked={localImeExperimentalPreview.toggleOn}
+                          disabled={!localImeExperimentalPreview.settingInteractive}
+                          onChange={(e) =>
+                            localImeExperimentalPreview.onChangeEnabled(e.target.checked)
+                          }
+                        />
+                        {t("displaySettings.experimentalLocalIme.enabled")}
+                      </label>
+                      <div className="setting-item-desc setting-item-desc-multiline">
+                        {t("displaySettings.experimentalLocalIme.enabled", "helper")}
+                      </div>
+                      {platform === "linux" && (
+                        <div className="setting-item-desc">
+                          {t("displaySettings.experimentalLocalIme.linuxUnsupported")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {localImeExperimentalPreview.effectiveEnabled && (
+                    <div className="setting-item">
+                      <div className="setting-item-info">
+                        <div className="setting-item-name">
+                          {t("displaySettings.experimentalLocalIme.status")}
+                        </div>
+                        <div
+                          className="setting-item-desc"
+                          data-testid="settings-experimental-local-ime-status"
+                        >
+                          {t(
+                            localImeExperimentalPreview.runtimeState === "enabled-active"
+                              ? "displaySettings.experimentalLocalIme.status.active"
+                              : localImeExperimentalPreview.runtimeState === "recovery-suspended"
+                                ? "displaySettings.experimentalLocalIme.status.attention"
+                                : "displaySettings.experimentalLocalIme.status.inactive",
+                          )}
+                        </div>
+                        {localImeExperimentalPreview.controls.showAttentionNotice && (
+                          <div className="setting-item-desc">
+                            {t(
+                              localImeExperimentalPreview.controls.showRetry
+                                ? "localImeExperimentalPreview.notice.attention"
+                                : localImeExperimentalPreview.controls.recoveryHasRetainedPayload
+                                  ? "localImeExperimentalPreview.notice.attentionNonRetryable"
+                                  : "localImeExperimentalPreview.notice.attentionNonRetryableNoPayload",
+                            )}
+                          </div>
+                        )}
+                        {localImeExperimentalPreview.forceResetPending && (
+                          <div className="setting-item-desc">
+                            {t("displaySettings.experimentalLocalIme.discard.confirm", "helper")}
+                          </div>
+                        )}
+                      </div>
+                      <div className="setting-item-control settings-experimental-actions">
+                        {localImeExperimentalPreview.controls.showRetry && (
+                          <button
+                            type="button"
+                            className="font-register-btn"
+                            data-testid="settings-experimental-local-ime-retry"
+                            onClick={localImeExperimentalPreview.onRetryRecovery}
+                          >
+                            {t("displaySettings.experimentalLocalIme.retry")}
+                          </button>
+                        )}
+                        {localImeExperimentalPreview.recoveryDraftCopyAvailable && (
+                          <button
+                            type="button"
+                            className="font-register-btn"
+                            data-testid="settings-experimental-local-ime-copy-draft"
+                            onClick={localImeExperimentalPreview.onCopyRecoveryDraft}
+                          >
+                            {t("displaySettings.experimentalLocalIme.copyDraft")}
+                          </button>
+                        )}
+                        {localImeExperimentalPreview.forceResetPending ? (
+                          <>
+                            <button
+                              type="button"
+                              className="font-register-btn"
+                              data-testid="settings-experimental-local-ime-force-reset-confirm"
+                              onClick={localImeExperimentalPreview.onConfirmForceReset}
+                            >
+                              {t("displaySettings.experimentalLocalIme.discard.confirm")}
+                            </button>
+                            <button
+                              type="button"
+                              className="font-register-btn"
+                              data-testid="settings-experimental-local-ime-force-reset-cancel"
+                              onClick={localImeExperimentalPreview.onCancelForceReset}
+                            >
+                              {t("common.cancel")}
+                            </button>
+                          </>
+                        ) : (
+                          localImeExperimentalPreview.controls.showForceReset && (
+                            <button
+                              type="button"
+                              className="font-register-btn"
+                              data-testid="settings-experimental-local-ime-force-reset"
+                              onClick={localImeExperimentalPreview.onRequestForceReset}
+                            >
+                              {t("displaySettings.experimentalLocalIme.discard")}
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
 
           {/* ── Section 12: サポート ── */}
           <div className="settings-section">

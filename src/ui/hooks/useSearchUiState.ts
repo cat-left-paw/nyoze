@@ -36,6 +36,7 @@ export function useSearchUiState({ coreRef }: UseSearchUiStateOptions) {
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [searchState, setSearchState] = useState<SearchState>(EMPTY_SEARCH_STATE)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const pendingSearchCloseRestoreCoreRef = useRef<EditorCoreHandle | null>(null)
   // Track the last query/case that was actually submitted to the plugin
   const committedRef = useRef<{ query: string; caseSensitive: boolean }>({
     query: '',
@@ -54,32 +55,52 @@ export function useSearchUiState({ coreRef }: UseSearchUiStateOptions) {
     })
   }, [coreRef, open])
 
+  const cancelPendingSearchCloseRestore = useCallback(() => {
+    const pending = pendingSearchCloseRestoreCoreRef.current
+    pending?.cancelSearchCloseFocusRestore()
+    pendingSearchCloseRestoreCoreRef.current = null
+    const current = coreRef.current
+    if (current && current !== pending) current.cancelSearchCloseFocusRestore()
+  }, [coreRef])
+
   const openSearch = useCallback(() => {
+    cancelPendingSearchCloseRestore()
     setOpen(true)
     // Select all text in search input when opening
     setTimeout(() => {
       searchInputRef.current?.focus()
       searchInputRef.current?.select()
     }, 0)
-  }, [])
+  }, [cancelPendingSearchCloseRestore])
 
   const openSearchReplace = useCallback(() => {
+    cancelPendingSearchCloseRestore()
     setOpen(true)
     setReplaceOpen(true)
     setTimeout(() => {
       searchInputRef.current?.focus()
       searchInputRef.current?.select()
     }, 0)
-  }, [])
+  }, [cancelPendingSearchCloseRestore])
 
   const closeSearch = useCallback(() => {
+    const core = coreRef.current
+    const token = core?.captureSearchCloseFocusRestore()
+    pendingSearchCloseRestoreCoreRef.current = core
     setOpen(false)
     setReplaceOpen(false)
-    coreRef.current?.closeSearch()
+    core?.closeSearch()
     setSearchState(EMPTY_SEARCH_STATE)
     committedRef.current = { query: '', caseSensitive: false }
-    // Restore focus to the editor (BETA-A11Y1)
-    setTimeout(() => coreRef.current?.focusEditor(), 0)
+    // 既存 BETA-A11Y1 の unmount 後 macrotask 1 回だけ。新しい delay は足さない。
+    // 後刻の coreRef.current ではなく capture 元 Core へ適用する。
+    setTimeout(() => {
+      if (pendingSearchCloseRestoreCoreRef.current === core) {
+        pendingSearchCloseRestoreCoreRef.current = null
+      }
+      if (token) core?.applySearchCloseFocusRestore(token)
+      else core?.focusEditor()
+    }, 0)
   }, [coreRef])
 
   // Only updates local state — does NOT trigger a search

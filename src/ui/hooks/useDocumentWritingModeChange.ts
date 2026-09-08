@@ -10,6 +10,7 @@ import {
 } from '../../editor-core/io/frontmatterDocumentSettings'
 import { countBodyCharacters } from '../utils/countBodyCharacters'
 import type { WritingMode } from '../../settings/types'
+import { isLocalImeDocumentActionAllowed } from '../../editor-core/features/localImeDocumentActionBarrier'
 import type { ActiveTabPatch } from './useAppUiState'
 
 /** `useDocumentWritingModeChange` が参照する `useAppUiState` の最小サブセット。 */
@@ -37,6 +38,9 @@ export function useDocumentWritingModeChange(
       if (ui.activeTab.internalDocId) return
       if (ui.fullPlainEditActive) return
       if (ui.paragraphPlainModeActive) return
+      // 局所 IME slot session barrier: writing-mode 変更は frontmatter 更新から
+      // 再 load / 再 layout へ進むため、未確定 payload があるうちは通さない。
+      if (!isLocalImeDocumentActionAllowed('writing-mode-change')) return
 
       const core = coreRef.current
       if (!core) return

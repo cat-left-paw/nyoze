@@ -1718,8 +1718,18 @@ export const UI_TEXT_REGISTRY = {
   'header.hideToolbar': {
     label: { ja: 'ツールバーを隠す', en: 'Hide Toolbar' },
   },
-  'header.dragToolbar': {
-    label: { ja: 'ツールバーを移動', en: 'Drag Toolbar' },
+  'header.windowDragGrip': {
+    label: { ja: 'ドラッグでウィンドウを移動', en: 'Drag to move window' },
+  },
+  'header.toolbarPanGrip': {
+    label: { ja: 'ドラッグでツールバーを左右に移動', en: 'Drag to move toolbar' },
+    tooltip: {
+      ja: 'ドラッグでツールバーを左右に移動（ダブルクリックで位置を戻す）',
+      en: 'Drag to move toolbar (double-click to reset)',
+    },
+  },
+  'header.toolbarScroll': {
+    label: { ja: 'ツールバーを左右に移動', en: 'Scroll toolbar' },
   },
   'editor.bold': {
     label: { ja: '太字', en: 'Bold' },
@@ -2636,6 +2646,178 @@ export const UI_TEXT_REGISTRY = {
   },
   'displaySettings.section.support': {
     label: { ja: 'サポート', en: 'Support' },
+  },
+  // PUBLIC-ENTRY1: Local Window Experimental product entry（既定 OFF）。
+  'displaySettings.section.experimental': {
+    label: { ja: '実験的機能', en: 'Experimental' },
+  },
+  'displaySettings.experimentalLocalIme.enabled': {
+    label: {
+      ja: '長文編集モード（実験的）',
+      en: 'Long document editing mode (Experimental)',
+    },
+    helper: {
+      ja:
+        '実験的機能です。既定はOFFで、ONにしたときだけ有効になります。\n' +
+        '対応する本文位置では、自動的に長文編集モードを開始します。\n' +
+        'ルビや縦中横の境界、対象外の位置では通常のエディタへ安全に戻ります。\n' +
+        '設定はONのままなので、次の対応位置で自動的に再開できます。',
+      en:
+        'Experimental. Off by default; it only takes effect while turned on.\n' +
+        'At supported text positions, long document editing mode starts automatically.\n' +
+        'At ruby/TCY boundaries and other unsupported positions, editing safely returns to the normal editor.\n' +
+        'The setting stays on, so it can resume automatically at the next supported position.',
+    },
+  },
+  'displaySettings.experimentalLocalIme.linuxUnsupported': {
+    label: {
+      ja: 'Linuxでも試験的に利用できますが、動作保証および公式サポートの対象外です。',
+      en: 'Available experimentally on Linux, but not officially supported or guaranteed.',
+    },
+  },
+  'toolbar.experimentalLocalIme.enable': {
+    label: { ja: '長文編集モードをオン', en: 'Turn on long document editing mode' },
+  },
+  'toolbar.experimentalLocalIme.disable': {
+    label: { ja: '長文編集モードをオフ', en: 'Turn off long document editing mode' },
+  },
+  'toolbar.experimentalLocalIme.attention': {
+    label: {
+      ja: '長文編集モード（確認が必要）',
+      en: 'Long document editing mode (needs attention)',
+    },
+  },
+  'displaySettings.experimentalLocalIme.status': {
+    label: { ja: '状態', en: 'Status' },
+  },
+  'displaySettings.experimentalLocalIme.status.inactive': {
+    label: { ja: '待機中', en: 'Idle' },
+  },
+  'displaySettings.experimentalLocalIme.status.active': {
+    label: { ja: '編集中', en: 'Editing' },
+  },
+  'displaySettings.experimentalLocalIme.status.attention': {
+    label: { ja: '確認が必要', en: 'Needs attention' },
+  },
+  'displaySettings.experimentalLocalIme.status.halted': {
+    label: { ja: '停止（再起動まで無効）', en: 'Stopped until restart' },
+  },
+  'displaySettings.experimentalLocalIme.stop': {
+    label: { ja: '安全に停止', en: 'Stop safely' },
+  },
+  'displaySettings.experimentalLocalIme.retry': {
+    label: { ja: '再試行', en: 'Retry' },
+  },
+  'displaySettings.experimentalLocalIme.copyDraft': {
+    label: { ja: '下書きをコピー', en: 'Copy draft' },
+  },
+  'displaySettings.experimentalLocalIme.discard': {
+    label: { ja: '下書きを破棄して停止…', en: 'Discard draft and stop…' },
+  },
+  'displaySettings.experimentalLocalIme.discard.confirm': {
+    label: { ja: '下書きを破棄して停止', en: 'Discard draft and stop' },
+    helper: {
+      ja: '保持中の下書きを破棄します。取り消せません。',
+      en: 'Discards the retained draft. This cannot be undone.',
+    },
+  },
+  'displaySettings.experimentalLocalIme.forceReset': {
+    label: { ja: '強制リセット…', en: 'Force reset…' },
+  },
+  'displaySettings.experimentalLocalIme.forceReset.confirm': {
+    label: { ja: '破棄して初期化', en: 'Discard and reset' },
+    helper: {
+      ja: '未確定の入力を破棄します。取り消せません。',
+      en: 'Discards input that has not been committed yet. This cannot be undone.',
+    },
+  },
+  'localImeExperimentalPreview.notice.attention': {
+    label: {
+      ja:
+        '長文編集モードが未確定の入力を保持したまま停止しています。' +
+        '再試行、下書きのコピー、または確認付きの破棄を選んでください。',
+      en:
+        'Long document editing mode is holding uncommitted text. ' +
+        'Retry, copy the draft, or explicitly confirm discarding it.',
+    },
+  },
+  'localImeExperimentalPreview.notice.attentionNonRetryable': {
+    label: {
+      ja:
+        '長文編集モードが未確定の入力を保持したまま停止しています。' +
+        '強制リセットは保持中の未確定入力を破棄します。',
+      en:
+        'Long document editing mode is holding uncommitted text. ' +
+        'Force reset discards the retained uncommitted input.',
+    },
+  },
+  'localImeExperimentalPreview.notice.attentionNonRetryableNoPayload': {
+    label: {
+      ja:
+        '長文編集モードが停止しました。未確定入力は保持していません。' +
+        '強制リセットは長文編集モードの状態だけを初期化します。',
+      en:
+        'Long document editing mode stopped without retaining uncommitted text. ' +
+        'Force reset only clears the long document editing mode state.',
+    },
+  },
+  'displaySettings.experimentalLocalIme.forceReset.confirmNoPayload': {
+    label: {
+      ja: '状態を初期化',
+      en: 'Reset state',
+    },
+    helper: {
+      ja: '未確定入力は保持されていません。長文編集モードの状態だけを初期化します。',
+      en: 'No uncommitted text is retained. This only clears the long document editing mode state.',
+    },
+  },
+  'localImeExperimentalPreview.notice.halted': {
+    label: {
+      ja:
+        '長文編集モードをこの起動では停止しました。以降は通常のエディタで編集できます。',
+      en:
+        'Long document editing mode stopped for this session. Editing continues in the normal editor.',
+    },
+  },
+  'localImeExperimentalPreview.notice.unapplied': {
+    label: {
+      ja: '長文編集モードを終了しました。通常のエディタで操作を再実行してください。',
+      en: 'Long document editing mode ended. Please redo that action in the normal editor.',
+    },
+  },
+  'localImeExperimentalPreview.notice.awaitingComposition': {
+    label: {
+      ja: '変換の確定を待っています。確定後に長文編集モードをOFFにします。',
+      en:
+        'Waiting for the current conversion to commit; long document editing mode turns off after that.',
+    },
+  },
+  'localImeExperimentalPreview.notice.busy': {
+    label: {
+      ja: '確定処理中のためOFFにできませんでした。少し待ってからもう一度お試しください。',
+      en: 'Could not turn it off while committing. Please wait a moment and try again.',
+    },
+  },
+  'localImeExperimentalPreview.notice.dismiss': {
+    label: { ja: '通知を閉じる', en: 'Dismiss notification' },
+  },
+  'localImeExperimentalPreview.status.off': {
+    label: {
+      ja: '長文編集モード: オフ',
+      en: 'Long document editing mode: Off',
+    },
+  },
+  'localImeExperimentalPreview.status.ready': {
+    label: {
+      ja: '長文編集モード: 待機中',
+      en: 'Long document editing mode: Waiting',
+    },
+  },
+  'localImeExperimentalPreview.status.editing': {
+    label: {
+      ja: '長文編集モード: 編集中',
+      en: 'Long document editing mode: Editing',
+    },
   },
   'displaySettings.fontSize': {
     label: { ja: 'フォントサイズ', en: 'Font Size' },

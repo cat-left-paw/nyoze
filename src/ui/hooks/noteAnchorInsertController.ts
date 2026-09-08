@@ -2,6 +2,7 @@ import { createNoteAnchorId } from '../../editor-core/io/noteAnchor'
 import type { SelectionRange } from '../../editor-core/types'
 import { toProjectRelativeFilePath } from '../../project/notePath'
 import { createNoteEntry } from '../../project/noteStore'
+import { computeNoteEntryFingerprint } from '../../project/provisionalNoteCleanup'
 import type {
   ProjectResolveResult,
   ProjectReadNotesResult,
@@ -73,7 +74,21 @@ export type NoteAnchorPrepareResult =
   | { kind: 'blocked'; message: string }
 
 export type NoteAnchorCommitResult =
-  | { kind: 'inserted'; id: string }
+  | {
+      kind: 'inserted'
+      id: string
+      /**
+       * STICKY-NOTE-DISCARD-CONSISTENCY1: anchor はまだ durable save されていないので、
+       * 呼び出し側は tab identity を足して provisional として追跡する。
+       * projectRoot / relativeFile / fingerprint は submit 時点の再解決結果で、
+       * 後続 cleanup の identity 再証明に使う。
+       */
+      provisional: {
+        projectRoot: string
+        relativeFile: string
+        fingerprint: string
+      }
+    }
   | { kind: 'failed'; message: string }
 
 /**
@@ -159,13 +174,17 @@ export async function commitNoteAnchorInsert(
   }
 
   const id = createNoteAnchorId()
+  // text は複数行をそのまま保存。title は createNoteEntry が trim / 空省略する。
+  const entry = createNoteEntry({
+    file: relativeFile,
+    title: options.title,
+    text: options.text,
+  })
+  // store 全体を保持して `notes` だけ更新する。`stickyNoteTags` 等の
+  // top-level field を落とすと、付箋追加が既存の project データを消してしまう。
   const store: NyozeNotesStore = {
-    version: notes.store.version,
-    notes: {
-      ...notes.store.notes,
-      // text は複数行をそのまま保存。title は createNoteEntry が trim / 空省略する。
-      [id]: createNoteEntry({ file: relativeFile, title: options.title, text: options.text }),
-    },
+    ...notes.store,
+    notes: { ...notes.store.notes, [id]: entry },
   }
 
   const written = await bridge.writeNotes(options.activeFilePath, store)
@@ -177,5 +196,13 @@ export async function commitNoteAnchorInsert(
     // notes.json には entry が残る (orphan) が、本文は無傷でメモも失われない。
     return { kind: 'failed', message: NOTE_ANCHOR_INSERT_ERROR_MESSAGE }
   }
-  return { kind: 'inserted', id }
+  return {
+    kind: 'inserted',
+    id,
+    provisional: {
+      projectRoot: resolved.project.projectRoot,
+      relativeFile,
+      fingerprint: computeNoteEntryFingerprint(entry),
+    },
+  }
 }

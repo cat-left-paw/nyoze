@@ -20,6 +20,7 @@ import {
   IconPencil,
   IconScissors,
   IconTrash,
+  IconWriting,
   type Icon,
 } from "@tabler/icons-react";
 import type { UiLanguageMode } from "../../settings/types";
@@ -36,6 +37,7 @@ import {
 } from "../hooks/useFileExplorer";
 import type { FileExplorerRole } from "../../project/fileExplorerRoles";
 import type { DocumentContextInfo } from "../../project/documentContextRole";
+import type { LocalImeLocalEditingPresentationSource } from "../../editor-core/features/localImeLocalEditingPresentationStatus";
 import {
   MATERIALS_DISPLAY_ROLES,
   type ProjectAssetRole,
@@ -43,6 +45,7 @@ import {
 import { ProjectRoleIcon } from "./projectRoleIcons";
 import { PaneTablerIcon } from "./PaneTablerIcon";
 import { FileExplorerProjectListSection } from "./FileExplorerProjectListSection";
+import { LocalImeLocalEditingStatusIcon } from "./LocalImeLocalEditingStatusIcon";
 import type { ProjectListUiState } from "../hooks/useProjectList";
 
 /** 「資料として登録」role 選択の i18n ラベルキー（Project タブと同じ表記）。 */
@@ -134,6 +137,28 @@ function FileExplorerIconTab({
 }
 
 /**
+ * 左ペイン下部の文字数 icon。native `title` ではなく既存 `useFloatingTooltip` で
+ * toolbar chip と同じ見た目を出す（`.pane-left` の overflow で CSS `::after` が clip されるため）。
+ * クリック可能な第二 control にはせず、親 summary へ bubble する。
+ */
+function FileExplorerDocInfoCharacterIcon({ label }: { label: string }) {
+  const { anchorProps, tooltip } = useFloatingTooltip(label);
+  return (
+    <>
+      <span
+        className="file-explorer-doc-info-characters"
+        role="img"
+        aria-label={label}
+        {...anchorProps}
+      >
+        <PaneTablerIcon icon={IconWriting} size="xs" />
+      </span>
+      {tooltip}
+    </>
+  );
+}
+
+/**
  * 左ペイン header の書庫管理 icon-only ボタン。
  * aria-label + floating tooltip（useFloatingTooltip）で library.menuOpen を表示する。
  * native `title` は使わず、右ペイン / 書庫・作品 tab と同じ chip 見た目に揃える。
@@ -210,6 +235,11 @@ type FileExplorerPaneProps = {
     translatorText: string;
     writingModeLabel: string;
   };
+  /**
+   * LOCAL-WINDOW-PRODUCT-LABEL-STATUS1: App が既に確定した製品表示状態。
+   * FileExplorerPane は preview hook を再起動せず、この slice だけを読む。
+   */
+  localImeStatusPresentation: LocalImeLocalEditingPresentationSource;
   canPaste: boolean;
   openTabFilePaths: string[];
   activeTabFilePath: string | null;
@@ -295,6 +325,7 @@ export function FileExplorerPane({
   clipboardSourcePath,
   operationError,
   activeDocumentInfo,
+  localImeStatusPresentation,
   canPaste,
   openTabFilePaths,
   activeTabFilePath,
@@ -868,12 +899,16 @@ export function FileExplorerPane({
           aria-controls="file-explorer-doc-info-details"
         >
           <div className="file-explorer-doc-info-summary-main">
-            <span className="file-explorer-doc-info-title">
-              {t("explorer.docInfo.characters")}
-            </span>
+            <FileExplorerDocInfoCharacterIcon
+              label={t("explorer.docInfo.characters")}
+            />
             <span className="file-explorer-doc-info-summary-count">
               {activeDocumentInfo.characterCount.toLocaleString(numberLocale)}
             </span>
+            <LocalImeLocalEditingStatusIcon
+              uiLanguageMode={uiLanguageMode}
+              presentationSource={localImeStatusPresentation}
+            />
           </div>
           <IconChevronDown
             size={14}

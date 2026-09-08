@@ -3,6 +3,8 @@ import type { EditorTab } from "../hooks/useAppUiState";
 import { normalizeForCompare } from "../hooks/useFileExplorer";
 import type { FileExplorerRole } from "../../project/fileExplorerRoles";
 import { ProjectRoleIcon } from "./projectRoleIcons";
+import { useLocalImeDraftDirtyTabId } from "../hooks/useLocalImeDraftDirty";
+import { resolveLocalImeEffectiveTabDirty } from "../../editor-core/features/localImeDraftDirtyState";
 
 export type EditorTabStripProps = {
   tabs: EditorTab[];
@@ -35,6 +37,11 @@ export function EditorTabStrip({
   tabLimitReached,
   editorTabActionsSlot,
 }: EditorTabStripProps) {
+  /**
+   * OVERLAY-DIRTY1: 未commit paragraph overlay draft の contribution。
+   * `tab.dirty`（canonical host dirty）は書き換えず、表示時に OR するだけ。
+   */
+  const draftDirtyTabId = useLocalImeDraftDirtyTabId(activeTabId);
   return (
     <div className="editor-tab-strip">
       <div className="editor-tab-list">
@@ -42,6 +49,11 @@ export function EditorTabStrip({
           const tabRole = tab.filePath
             ? tabRoles?.get(normalizeForCompare(tab.filePath))
             : undefined;
+          const effectiveDirty = resolveLocalImeEffectiveTabDirty({
+            canonicalHostDirty: tab.dirty,
+            tabId: tab.id,
+            draftDirtyTabId,
+          });
           return (
             <button
               key={tab.id}
@@ -59,7 +71,7 @@ export function EditorTabStrip({
                 </span>
               )}
               <span className="editor-tab-title">{tab.title}</span>
-              {tab.dirty && <span className="editor-tab-dirty">●</span>}
+              {effectiveDirty && <span className="editor-tab-dirty">●</span>}
               {tabs.length > 1 && (
                 <span
                   className="editor-tab-close"

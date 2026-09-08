@@ -1,6 +1,12 @@
 import { Node } from '@tiptap/core'
 
 /**
+ * TCY body の製品制約（1-4 chars from `[A-Za-z0-9!?]`）の単一の正本。
+ * `EditorCore` の toggle 判定と Local Window の capability 判定が共有する。
+ */
+export const AOZORA_TCY_BODY_PATTERN = /^[A-Za-z0-9!?]{1,4}$/
+
+/**
  * Inline node for tate-chu-yoko (horizontal-in-vertical text).
  *
  * Syntax: ｟body｠

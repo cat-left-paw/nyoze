@@ -5,6 +5,8 @@ import type { useAppUiState } from "./useAppUiState";
 import type { useSearchUiState } from "./useSearchUiState";
 import type { useLargeDocumentGuard } from "./useLargeDocumentGuard";
 import type { BookPageViewerToolbarAvailability } from "./useBookExportMenuAvailability";
+import { isLocalImeDocumentActionAllowed } from "../../editor-core/features/localImeDocumentActionBarrier";
+import type { LocalImeExperimentalPreviewView } from "./useLocalImeExperimentalPreview";
 
 type UiState = ReturnType<typeof useAppUiState>;
 type SearchUiState = ReturnType<typeof useSearchUiState>;
@@ -14,6 +16,7 @@ export type UseEditorTabActionsSlotOptions = {
   ui: UiState;
   search: SearchUiState;
   largeDocGuard: LargeDocumentGuard;
+  localImeExperimentalPreview: LocalImeExperimentalPreviewView;
   activeDocumentCharacterCount: number;
   toggleParagraphPlainMode: () => void;
   toggleFullPlainEdit: () => void;
@@ -33,6 +36,7 @@ export function useEditorTabActionsSlot({
   ui,
   search,
   largeDocGuard,
+  localImeExperimentalPreview,
   activeDocumentCharacterCount,
   toggleParagraphPlainMode,
   toggleFullPlainEdit,
@@ -54,16 +58,32 @@ export function useEditorTabActionsSlot({
       fullPlainEditActive={ui.fullPlainEditActive}
       rubyVisible={ui.rubyVisible}
       onToggleRubyVisible={() => {
+        // 局所 IME slot session barrier は `setRubyVisible()` より前に置く。
+        // ここで UI state を先に反転させると、中断された切替を 1 回の再操作で
+        // 実行できなくなる（UI state だけ反転 → 確定後の再クリックで元へ戻り、
+        // core と一致して何も起きない）。effect 側の barrier は防御として残す。
+        if (!isLocalImeDocumentActionAllowed("ruby-visibility-toggle")) return;
         largeDocGuard.requestGuardedAction(
           activeDocumentCharacterCount,
           "ルビ表示の切替は、大きな文書では数秒かかる場合があります。続行しますか。",
-          () => ui.setRubyVisible((v) => !v),
+          () => {
+            // 大文書確認ダイアログの間に composition が始まることもあるため再確認する。
+            if (!isLocalImeDocumentActionAllowed("ruby-visibility-toggle")) return;
+            ui.setRubyVisible((v) => !v);
+          },
         );
       }}
       paragraphPlainModeActive={ui.paragraphPlainModeActive}
       onToggleParagraphPlainMode={toggleParagraphPlainMode}
       canParagraphPlain={headerCommandAvailability.canParagraphPlain}
       onToggleFullPlainEdit={toggleFullPlainEdit}
+      localImeExperimentalPreviewVisible={localImeExperimentalPreview.settingVisible}
+      localImeExperimentalPreviewInteractive={localImeExperimentalPreview.settingInteractive}
+      localImeExperimentalPreviewToggleOn={localImeExperimentalPreview.toggleOn}
+      localImeExperimentalPreviewNeedsAttention={
+        localImeExperimentalPreview.productStatus === "attention"
+      }
+      onLocalImeExperimentalPreviewChange={localImeExperimentalPreview.onChangeEnabled}
       displaySettingsOpen={ui.displaySettingsOpen}
       onOpenDisplaySettings={() => ui.setDisplaySettingsOpen(true)}
       onOpenDisplaySettingsForTypewriter={() =>

@@ -1,4 +1,5 @@
 import type { PlainModeKind } from './plainModeCommandGate'
+import { isNativeTextFormControl } from './nativeTextTarget'
 
 export type SelectAllShortcutTargetInfo = {
   tagName: string | null
@@ -12,16 +13,6 @@ export type SelectAllShortcutRoute =
   | 'full-plain'
   | 'paragraph-plain'
   | 'none'
-
-const NATIVE_TEXT_INPUT_TYPES = new Set([
-  'text',
-  'search',
-  'email',
-  'password',
-  'tel',
-  'url',
-  'number',
-])
 
 export function resolveSelectAllShortcutTargetInfo(
   target: EventTarget | null,
@@ -40,13 +31,9 @@ export function resolveSelectAllShortcutTargetInfo(
 export function shouldRespectNativeSelectAll(
   targetInfo: SelectAllShortcutTargetInfo,
 ): boolean {
+  // Select All は generic contenteditable も native 扱いにする（既存挙動）。
   if (targetInfo.isContentEditable) return true
-  if (targetInfo.tagName === 'textarea') return true
-  if (targetInfo.tagName !== 'input') return false
-  return (
-    targetInfo.inputType === null ||
-    NATIVE_TEXT_INPUT_TYPES.has(targetInfo.inputType)
-  )
+  return isNativeTextFormControl(targetInfo)
 }
 
 /**

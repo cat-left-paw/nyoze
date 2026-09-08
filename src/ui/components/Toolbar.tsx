@@ -603,7 +603,12 @@ export function Toolbar({
       <button
         className={`toolbar-btn-iconized toolbar-btn-icon-only${displaySettingsOpen ? " toggle-active" : ""}`}
         onClick={onOpenDisplaySettings}
+        onMouseDown={(e) => e.preventDefault()}
         type="button"
+        // P3-EXP1: 表示設定は局所IME Preview の停止 / 復旧導線を含む。開く操作自体が
+        // active session を終了させないよう制御面として marking し、mousedown の
+        // 既定 focus 移動も止めて閉じたあと編集面へ focus が戻るようにする。
+        data-local-ime-control-surface="true"
         data-tooltip={t("editor.viewSettings")}
         aria-label={t("editor.viewSettings")}
         aria-pressed={displaySettingsOpen}

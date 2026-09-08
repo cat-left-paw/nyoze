@@ -25,59 +25,26 @@
  * 十分に取ることで実機では稀に抑える。
  */
 
+import {
+  computeOverlayReservedHostTargetPx,
+  parseCssFontSizeToPx,
+  parseCssLineHeightToPx,
+  resolveOverlayReservedEpsilonPx,
+} from './overlayReservedBlockLayout'
+
+export { parseCssFontSizeToPx, parseCssLineHeightToPx } from './overlayReservedBlockLayout'
+
 export type ParagraphPlainReservedStepPxCache = {
   signature: string
   stepPx: number
 }
 
-const FALLBACK_FONT_PX = 16
-const FALLBACK_LINE_HEIGHT_RATIO = 1.2
 const MIN_STEP_PX = 4
 const MAX_STEP_PX = 512
 
 function clampStep(px: number): number {
-  if (!Number.isFinite(px)) return FALLBACK_FONT_PX
+  if (!Number.isFinite(px)) return 16
   return Math.min(MAX_STEP_PX, Math.max(MIN_STEP_PX, Math.round(px)))
-}
-
-/** `"19px"` / `"12"` などから px を推定（不正時は fallback）。 */
-export function parseCssFontSizeToPx(value: string | undefined, fallbackPx: number): number {
-  if (!value || typeof value !== 'string') return fallbackPx
-  const v = value.trim().toLowerCase()
-  if (v.endsWith('px')) {
-    const n = Number.parseFloat(v.slice(0, -2))
-    return Number.isFinite(n) && n > 0 ? n : fallbackPx
-  }
-  const n = Number.parseFloat(v)
-  return Number.isFinite(n) && n > 0 ? n : fallbackPx
-}
-
-/**
- * line-height を px に落とす。`normal`・単位なし・px を想定。
- */
-export function parseCssLineHeightToPx(
-  lineHeight: string | undefined,
-  fontSizePx: number,
-): number {
-  if (!lineHeight || typeof lineHeight !== 'string') {
-    return clampStep(fontSizePx * FALLBACK_LINE_HEIGHT_RATIO)
-  }
-  const v = lineHeight.trim().toLowerCase()
-  if (v === 'normal') {
-    return clampStep(fontSizePx * FALLBACK_LINE_HEIGHT_RATIO)
-  }
-  if (v.endsWith('px')) {
-    const n = Number.parseFloat(v.slice(0, -2))
-    return clampStep(Number.isFinite(n) && n > 0 ? n : fontSizePx * FALLBACK_LINE_HEIGHT_RATIO)
-  }
-  const unitless = Number.parseFloat(v)
-  if (Number.isFinite(unitless) && unitless > 0) {
-    if (unitless < 32 && !v.includes('%')) {
-      return clampStep(fontSizePx * unitless)
-    }
-    return clampStep(unitless)
-  }
-  return clampStep(fontSizePx * FALLBACK_LINE_HEIGHT_RATIO)
 }
 
 /** 押し出し軸の「ブロック寸法」ベース（ideal と同じ軸）。 */
@@ -95,9 +62,7 @@ export function paragraphPlainReserveAxisBasePx(params: {
  * 比例項と下限・上限でクリップする。
  */
 export function resolveComfortableReservedEpsilonPx(stepPx: number): number {
-  const s = Math.max(1, stepPx)
-  const proportional = Math.round(s * 0.12)
-  return Math.min(6, Math.max(3, proportional))
+  return resolveOverlayReservedEpsilonPx(Math.max(1, stepPx)) ?? 3
 }
 
 /**
@@ -113,16 +78,11 @@ export function computeComfortableReservedHostTargetPx(params: {
   /** 省略時は `resolveComfortableReservedEpsilonPx(stepPx)` */
   epsilonPx?: number
 }): number {
-  const safeStep = Math.max(1, params.stepPx)
-  const epsilon =
-    params.epsilonPx ?? resolveComfortableReservedEpsilonPx(safeStep)
-  const overflow = Math.max(0, params.idealPx - params.basePx)
-  if (overflow <= epsilon) {
-    return params.basePx
-  }
-  const excess = overflow - epsilon
-  const steps = Math.ceil(excess / safeStep)
-  return params.basePx + steps * safeStep
+  return computeOverlayReservedHostTargetPx({
+    ...params,
+    stepPx: Math.max(1, params.stepPx),
+    epsilonPx: params.epsilonPx ?? resolveComfortableReservedEpsilonPx(params.stepPx),
+  }) ?? params.basePx
 }
 
 /**
@@ -144,7 +104,7 @@ export function resolveParagraphPlainReservedStepPx(
     return { stepPx: cache.stepPx, cache }
   }
 
-  const fontSizePx = parseCssFontSizeToPx(fontSizeRaw, FALLBACK_FONT_PX)
+  const fontSizePx = parseCssFontSizeToPx(fontSizeRaw, 16)
   const isVertical = wm === 'vertical-rl'
   const stepPx = isVertical
     ? clampStep(fontSizePx)

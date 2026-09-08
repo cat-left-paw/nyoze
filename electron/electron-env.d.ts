@@ -358,6 +358,12 @@ interface Window {
     menu: {
       setBookExportAvailable: (available: boolean) => void
       openAppMenu: (uiLanguageMode: import('../src/settings/types').UiLanguageMode) => Promise<void>
+      /**
+       * Application menu → renderer command.
+       * P2-G1b で追加した Edit 系は `menu:edit-undo` / `menu:edit-redo` /
+       * `menu:edit-select-all` の固定 3 channel のみ（汎用 command IPC は設けない）。
+       * 受信側は `isEditMenuChannel` / `editMenuChannelToOperation` で絞り込む。
+       */
       onMenuCommand: (callback: (command: string) => void) => () => void
     }
     project: {
@@ -434,6 +440,15 @@ interface Window {
         filePath: string,
         store: import('../src/project/noteStore').NyozeNotesStore,
       ) => Promise<import('../src/project/projectIpcTypes').ProjectWriteNotesResult>
+      /**
+       * STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄時に、未保存 anchor に対応する
+       * provisional note を id 単位で取り除く。project root は main 側で document path
+       * から再解決し、request の projectRoot と一致しなければ 1 件も削除しない。
+       */
+      discardProvisionalNotes: (
+        filePath: string,
+        request: import('../src/project/provisionalNoteCleanup').ProvisionalNoteCleanupRequest,
+      ) => Promise<import('../src/project/projectIpcTypes').ProjectDiscardProvisionalNotesResult>
       /** bounded file path または context write anchor だけを渡し、main 側で project root を解決して title を更新する。 */
       updateTitle: (
         filePathOrAnchor:
@@ -502,8 +517,18 @@ interface Window {
       setDocumentDirty: (dirty: boolean) => Promise<boolean>
       onRequestSaveBeforeClose: (callback: (requestId: number) => void) => () => void
       reportSaveBeforeClose: (requestId: number, ok: boolean) => void
+      /**
+       * STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄で close / quit する前の
+       * provisional 付箋 cleanup 要求。結果は reportSaveBeforeClose で返す。
+       */
+      onRequestDiscardBeforeClose: (callback: (requestId: number) => void) => () => void
     }
     e2e?: {
+      /**
+       * main の `MAIN_E2E_ENABLED`（`NYOZE_E2E` かつ非 packaged）。preload はこれが
+       * true のときだけ bridge 自体を expose し、renderer も true を必須条件にする。
+       */
+      enabled: true
       readDocumentFixture: (filePath: string) => Promise<{
         content: string
         savedStat: { mtimeMs: number; size: number } | null
@@ -518,6 +543,43 @@ interface Window {
         path: string
       }) => Promise<{ ok: true } | { ok: false; error: string }>
       dispatchMenuCommand: (command: string) => Promise<boolean>
+      /**
+       * E2E-UX1b: 初回 paint 前に同期適用する theme bootstrap。
+       * main が検証済みの enum だけを返す。非 E2E では `e2e` 自体が存在しない。
+       */
+      bootstrapTheme: {
+        uiTheme: string
+        documentTheme: string
+        /** 3 値そろった `#RRGGBB` のときだけ非 null。 */
+        docColor: {
+          pageColor: string
+          textColor: string
+          headingColor: string
+        } | null
+      } | null
+    }
+    /**
+     * P3-A1a: 作者限定 internal pilot（局所 IME slot safety shell）の
+     * read-only capability。main の `LOCAL_IME_PILOT_AVAILABLE`
+     * （`NYOZE_LOCAL_IME_PILOT === '1'` かつ**非 packaged**）が true のときだけ
+     * preload が expose する。boolean 1 個だけで、任意設定・本文・path は載せない。
+     * `available` は HUD と手動 arm 導線を出してよいという意味で、
+     * session を開始した状態（`enabled`）ではない。
+     */
+    localImePilot?: {
+      available: true
+    }
+    /**
+     * LOCAL-WINDOW-PUBLIC-ENTRY1: 対応platformのread-only製品capability。
+     *
+     * mainのLocal Window platform authorityが対応を認め、作者pilotが非availableのときだけ
+     * preloadがexposeする。
+     * **`capable` は「設定 UI を出してよい」だけで、有効化ではない。** 実効有効化は
+     * settings.jsonの`experimentalLocalImeEnabled`（既定false）が
+     * 正本で、この bridge には preference も session 操作も diagnostics も載せない。
+     */
+    localImeExperimentalPreview?: {
+      capable: true
     }
   }
   __NYOZE_E2E__?: {
@@ -530,6 +592,96 @@ interface Window {
       anchorPos: number;
       headPos: number;
     } | null;
+    /**
+     * P2-G2b: `EditorCoreHandle.peekMarkdown()` の読み取り専用入口。live PM
+     * state を保存せず serialize するだけ（file / IPC には触れない）。
+     */
+    peekMarkdown?: () => string | null;
+    /**
+     * P2-G1a: `EditorCoreHandle.routeLocalImeEditMenuCommand()` の実経路入口。
+     * 製品の Edit menu はまだ native role なので、integration port →
+     * controller port → 既存 P2-D1 adapter を実 instance で通す唯一の検証手段。
+     */
+    routeLocalImeEditMenuCommand?: (
+      operation: import('../src/editor-core/features/localImeEditMenuCommandState').LocalImeEditMenuOperation,
+    ) =>
+      | import('../src/editor-core/features/localImeEditMenuCommandState').LocalImeEditMenuCommandResult
+      | null;
+    runEditorUndoRedo?: (operation: 'undo' | 'redo') => boolean;
+    localImeLocalWindow?: {
+      snapshot: () =>
+        | import('../src/editor-core/features/localImeLocalWindowController').LocalImeLocalWindowSnapshot
+        | null
+      setFailure: (
+        failure: import('../src/editor-core/features/localImeLocalWindowController').LocalImeLocalWindowFailureForTest,
+      ) => void
+      dispatchHostContentChange: (
+        kind: import('../src/editor-core/features/localImeLocalWindowController').LocalImeLocalWindowHostContentChangeForTest,
+      ) => boolean
+      setLocalSelection: (anchor: number, head?: number) => boolean
+      dispatchLocalGrowth: (additionalBlocks: number, text?: string) => boolean
+      /** LOCAL-WINDOW-RECOVERY-RESTART1 typed portの診断入口（E2E gate内だけ）。 */
+      recovery?: {
+        epoch: () => number | null
+        diagnostics: () =>
+          | import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowRecoveryDiagnostics
+          | null
+        requestEnabled: (
+          enabled: boolean,
+          epoch?: number,
+        ) =>
+          | import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowEnableOutcome
+          | null
+        retry: () =>
+          import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowRecoveryRetryOutcome
+        retryAtEpoch: (
+          epoch: number,
+        ) =>
+          | import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowRecoveryRetryOutcome
+          | null
+        exportMarkdown: () =>
+          import('../src/editor-core/features/localImeLocalWindowRecoveryExport').LocalImeLocalWindowRecoveryExportResult
+        copyMarkdown: (
+          mode?: 'capture' | 'fail',
+        ) => Promise<
+          import('../src/editor-core/features/localImeLocalWindowRecoveryExport').LocalImeLocalWindowRecoveryCopyResult
+        >
+        readCapturedClipboard: () => { markdown: string | null; writeCount: number }
+        discard: (
+          confirmed: boolean,
+        ) =>
+          import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowRecoveryDiscardOutcome
+        restart: () =>
+          import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowRestartOutcome
+        restartAtEpoch: (
+          epoch: number,
+        ) =>
+          import('../src/editor-core/features/localImeLocalWindowRecoveryRuntime').LocalImeLocalWindowRestartOutcome
+        /** test only: restartのStart経路へone-shot failureを仕込む。 */
+        injectRestartStartFailure: (
+          kind: 'start-wiring' | 'start-wiring-and-settlement',
+        ) => void
+      }
+    }
+    longDocNavigationPerformance?: {
+      snapshot: () => ReturnType<
+        import('../src/editor-core/features/localImeIntegration').LocalImeIntegrationHandle['getNavigationPerformanceSnapshotForE2e']
+      >
+    }
+    /** EDITOR-INTERACTION-PERF1: non-packaged E2E-only host composition read-back. */
+    hostImeComposition?: {
+      active: () => boolean
+    }
+    /**
+     * runtime の strategy-neutral coarse status 診断。
+     * 本文・selection・geometry・path は載せない。
+     */
+    localImeLocalEditingStatus?: {
+      snapshot: () => {
+        localEditingStatus: import('../src/editor-core/features/localImeLocalEditingStatusState').LocalImeLocalEditingStatus
+        localEditingStatusPublishCount: number
+      }
+    }
     loadFileIntoActiveTab: (
       filePath: string,
     ) => Promise<"loaded" | "activated-existing" | "cancelled" | false>
@@ -539,6 +691,23 @@ interface Window {
     openShortcutReferenceDoc?: () => Promise<
       'added' | 'tab-limit' | 'cancelled' | false
     >
+    /** LOCAL-WINDOW-DOCUMENT-LEAVE1: non-packaged E2E-only tab observation/operation port. */
+    documentLeaveTabs?: {
+      snapshot: () => readonly {
+        id: string
+        title: string
+        dirty: boolean
+        filePath: string | null
+        markdownSnapshot: string
+        savedStat: { mtimeMs: number; size: number } | null
+        internalDocId?: string
+        active: boolean
+      }[]
+      switchTo: (tabId: string) => Promise<'switched' | 'cancelled'>
+      add: () => Promise<'added' | 'tab-limit' | 'cancelled'>
+      close: (tabId: string) => Promise<void>
+      injectDocumentIdentity: (documentIdentity: string | null) => void
+    }
     macosArrowScrollClampE2eEvaluate?: (payload: {
       gate: import('../src/editor-core/features/macosArrowScrollClamp').MacosArrowScrollClampGateInput
       beforeTop: number
@@ -576,6 +745,50 @@ interface Window {
     /** NYOZE_E2E: shorten chapter boundary auto-hide delay for tests. */
     chapterBoundaryHideDelayMs?: number
     setChapterBoundaryHideDelayMsForE2e?: (delayMs: number) => void
+    /**
+     * NYOZE_E2E: fetchAndPatchSavedStat の patchTab 直前で 1 回だけ止まる latch。
+     * production は arm しない。
+     */
+    savedStatPatchHold?: {
+      arm: () => boolean
+      release: () => boolean
+      snapshot: () => { armed: boolean; waiting: boolean }
+    }
+    /**
+     * NYOZE_E2E: leave snapshot capture 後〜functional update 前で 1 回だけ止まる latch。
+     * production は arm しない。
+     */
+    tabLeaveSnapshotApplyHold?: {
+      arm: () => boolean
+      release: () => boolean
+      snapshot: () => { armed: boolean; waiting: boolean }
+    }
+    /**
+     * NYOZE_E2E: baseline / 将来 PoC 共通の IME composition latency probe
+     * (`docs/ime-composition-latency-probe.md`)。診断専用で、起動するまで
+     * listener / PerformanceObserver / rAF / timer を作らない。
+     */
+    imeLatencyProbe?: {
+      start: (options?: {
+        mode?: string
+        targetSelector?: string
+        maxSamples?: number
+        pendingTimeoutMs?: number
+      }) =>
+        | { ok: true; targetKind: string; mode: string }
+        | { ok: false; error: string }
+      stop: (reason?: string) => boolean
+      reset: (reason?: string) => boolean
+      snapshot: () =>
+        | import('../src/editor-core/features/imeCompositionLatencyStats').ImeCompositionLatencyReport
+        | null
+      report: (options?: { pendingTimeoutMs?: number }) => Promise<
+        | import('../src/editor-core/features/imeCompositionLatencyStats').ImeCompositionLatencyReport
+        | null
+      >
+      destroy: (reason?: string) => boolean
+      isActive: () => boolean
+    }
   }
   __NYOZE_PP_PROFILE__?: Array<{
     op: 'click-switch' | 'enter-reentry' | 'arrow-switch'

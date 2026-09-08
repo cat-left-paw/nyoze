@@ -273,6 +273,14 @@ export type SettingsJson = {
    * 擬似キャレット点滅: overlay の opacity animation ON/OFF。既定 true。
    */
   pseudoCaretBlinkEnabled?: boolean
+  /** @deprecated read-only migration input。新規保存・runtime起動には使わない。 */
+  experimentalLocalImeParagraphOverlayEnabled?: boolean
+  /**
+   * LOCAL-WINDOW-PUBLIC-ENTRY1: strategy-neutral Local IME Experimental opt-in.
+   * Fresh profile and malformed values are OFF. The legacy paragraph-overlay
+   * field is accepted only as an idempotent read-time migration source.
+   */
+  experimentalLocalImeEnabled?: boolean
   /**
    * 付箋 (Task 3A-3): 初回付箋作成時の説明を確認済みか。既定 false。設定 UI なし。
    */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { HeadingInfo, LineBreakPolicy } from "../../editor-core/types";
@@ -28,6 +28,7 @@ import type { TypewriterRuntimeRef } from "../hooks/typewriterRuntimeRef";
 import { resolveVisibleOutlineItems } from "../utils/outlineVisibility";
 import { OutlineModeToggle, type OutlineMode } from "./OutlineModeToggle";
 import { FileExplorerPane } from "./FileExplorerPane";
+import type { LocalImeLocalEditingPresentationSource } from "../../editor-core/features/localImeLocalEditingPresentationStatus";
 import { FrontmatterView } from "./FrontmatterView";
 import type { ProjectDocumentStartDisplay } from "../../project/projectDocumentStartDisplay";
 import { ProjectDocumentStartViews } from "./ProjectDocumentStartViews";
@@ -87,6 +88,7 @@ type WorkspaceProps = {
   fileExplorerClipboardSourcePath: string | null;
   fileExplorerOperationError: string | null;
   activeDocumentInfo: ActiveDocumentInfo;
+  localImeStatusPresentation: LocalImeLocalEditingPresentationSource;
   canFileExplorerPaste: boolean;
   tabs: EditorTab[];
   /**
@@ -123,6 +125,11 @@ type WorkspaceProps = {
   activeHeadingIndex: number;
   foldedHeadingPositions: Set<number>;
   onDividerMouseDown: (side: "left" | "right", e: ReactMouseEvent) => void;
+  /**
+   * APP-PANE-TOGGLE-PERF-PSEUDOCARET1: pane open / width の DOM commit 後に
+   * 既存 `schedulePseudoCaretUpdate()` へ通知する。表示専用。第二schedulerは作らない。
+   */
+  onPaneGeometryCommitted?: () => void;
   onFileExplorerCreateNote: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerCreateFolder: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerCreateProjectForFolder: (entry: FileExplorerVisibleEntry | null) => void;
@@ -199,6 +206,7 @@ export function Workspace({
   fileExplorerClipboardSourcePath,
   fileExplorerOperationError,
   activeDocumentInfo,
+  localImeStatusPresentation,
   canFileExplorerPaste,
   tabs,
   tabRoles,
@@ -228,6 +236,7 @@ export function Workspace({
   activeHeadingIndex,
   foldedHeadingPositions,
   onDividerMouseDown,
+  onPaneGeometryCommitted,
   onFileExplorerCreateNote,
   onFileExplorerCreateFolder,
   onFileExplorerCreateProjectForFolder,
@@ -268,6 +277,10 @@ export function Workspace({
   chapterBoundaryNavSlot,
   editorTabActionsSlot,
 }: WorkspaceProps) {
+  useLayoutEffect(() => {
+    onPaneGeometryCommitted?.();
+  }, [leftPaneOpen, rightPaneOpen, leftWidth, rightWidth, onPaneGeometryCommitted]);
+
   const t = createUiTextGetter(uiLanguageMode);
   const hideDocumentStartOverlays = paragraphPlainModeActive;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
@@ -503,6 +516,7 @@ export function Workspace({
           clipboardSourcePath={fileExplorerClipboardSourcePath}
           operationError={fileExplorerOperationError}
           activeDocumentInfo={activeDocumentInfo}
+          localImeStatusPresentation={localImeStatusPresentation}
           canPaste={canFileExplorerPaste}
           openTabFilePaths={openTabFilePaths}
           activeTabFilePath={activeTabFilePath}
@@ -587,7 +601,10 @@ export function Workspace({
             className={`editor-surface${fullPlainEditActive ? " is-hidden-for-plain" : ""}`}
             onClick={(e) => {
               const t = e.target as Element;
-              if (t.closest(".ProseMirror") || t.closest(".frontmatter-view")) return;
+              if (
+                t.closest('.editor-core-host > .ProseMirror') ||
+                t.closest(".frontmatter-view")
+              ) return;
               onEmptyUntitledSurfaceClick?.();
             }}
           >

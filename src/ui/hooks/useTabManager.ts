@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type {
   EditorCoreHandle,
@@ -22,12 +22,26 @@ import { countBodyCharacters } from "../utils/countBodyCharacters";
 import {
   buildTabLeaveContentFields,
   resolveTabLeaveDirtyState,
+  applyTabLeaveSnapshotOntoCurrentTab,
 } from "./tabLeaveSnapshot";
+import {
+  deferTabLeaveSnapshotApplyForE2e,
+} from "../utils/savedStatPatchLatchForE2e";
 import {
   shouldGuardSourceModeBeforeTabClose,
   type GuardResult,
 } from "./sourceModeDraftGuard";
 import { detectEol } from "../../editor-core/io/eolHelper";
+import {
+  prepareLocalImeDocumentLeave,
+  proveLocalImeDocumentLeaveAfterBarrier,
+  resolveLocalImeDocumentLeaveDerivedDirty,
+  resolveLocalImeDocumentLeavePromptAuthority,
+  type LocalImeDocumentLeaveCapture,
+  type LocalImeDocumentLeaveDirtyNotice,
+  type LocalImeDocumentLeaveOperation,
+  type LocalImeDocumentLeaveProof,
+} from "./localImeDocumentLeaveSafety";
 import {
   createShortcutReferenceEditorTab,
   deriveShortcutReferenceTabCore,
@@ -56,6 +70,8 @@ export type TabManagerDeps = {
   confirmContinueWithUnsavedChanges: (options?: {
     forcePrompt?: boolean;
     saveTargetTab?: UnsavedChangesSaveTargetTab;
+    localImeDocumentActionPrepared?: boolean;
+    proveBeforeDiskWrite?: () => boolean;
   }) => Promise<boolean>;
   onTabContentLoaded: (
     markdown: string,
@@ -75,10 +91,25 @@ export type TabManagerDeps = {
   ) => void;
   /** New-tab default writing mode from app settings. */
   defaultWritingMode: WritingMode;
+  /**
+   * LOCAL-WINDOW-PACKAGED-REARM-POLISH1: 現在 render 時点の**実効**書字方向
+   * （手動切替 > frontmatter > Document Type 既定を解決済みの値）。同一 tab の
+   * document 切替完了を、新文書の書字方向が反映された commit で確定するために使う。
+   */
+  effectiveWritingMode: WritingMode;
   /** New-tab default line break policy from app settings. */
   defaultLineBreakPolicy: LineBreakPolicy;
   /** BETA-SP1: Source Mode ドラフト消失防止ガード。 */
-  guardSourceModeDraft: () => Promise<GuardResult>;
+  guardSourceModeDraft: (options?: {
+    localImeDocumentActionPrepared?: boolean;
+    proveBeforeDiskWrite?: () => boolean;
+  }) => Promise<GuardResult>;
+  localImeDraftDirtyOwnerTabId: string | null;
+  readLocalImeDraftDirtyNotice: () => LocalImeDocumentLeaveDirtyNotice;
+  prepareLocalImeDocumentAction: (
+    reason: LocalImeDocumentLeaveOperation,
+  ) => { readonly status: string };
+  isLocalImeDocumentActionPending: () => boolean;
 };
 
 /** Maximum number of simultaneously open tabs. */
@@ -93,15 +124,8 @@ export type ActiveTabLoadResult =
 
 export type UnsavedChangesSaveTargetTab = Pick<
   EditorTab,
-  "id" | "title" | "filePath" | "savedStat"
+  "id" | "title" | "filePath" | "savedStat" | "eol"
 >;
-
-type TabLeaveSnapshotPrep = {
-  dirty: boolean;
-  markdown: string;
-  frontmatterFields: FrontmatterFields;
-  characterCount: number;
-};
 
 /** Result of addNewTab / openFileInTab to distinguish tab-limit from guard cancel. */
 export type TabAddResult = "added" | "tab-limit" | "cancelled";
@@ -142,95 +166,174 @@ export function useTabManager(deps: TabManagerDeps) {
   const depsRef = useRef(deps);
   depsRef.current = deps;
 
-  const prepareTabLeaveSnapshot = useCallback((): TabLeaveSnapshotPrep | null => {
+  /**
+   * LOCAL-WINDOW-PACKAGED-REARM-POLISH1: 同一 tab の document 切替の完了通知。
+   *
+   * `loadMarkdown()` 直後に完了させると、新文書の tab metadata（frontmatter /
+   * `writingModeFollowsTypeRecommendation`）と実効書字方向がまだ反映されていないため、
+   * 書字方向の異なる文書へ切り替えると旧方向で先に取得してしまう。nonce は
+   * `patchActiveTab()` と同じ commit で進めるので、この effect が走る時点では
+   * 新 tab row から解決された `--editor-writing-mode` が既に適用済みである
+   * （`useAppUiState` の適用 effect は同じ commit の**先**に宣言されている）。
+   * timer / rAF は使わず、実 state / DOM 反映に結び付いた typed completion だけを使う。
+   */
+  const [documentSwitchNonce, setDocumentSwitchNonce] = useState(0);
+  const completedDocumentSwitchNonceRef = useRef(0);
+  useEffect(() => {
+    if (documentSwitchNonce === completedDocumentSwitchNonceRef.current) return;
+    completedDocumentSwitchNonceRef.current = documentSwitchNonce;
+    const d = depsRef.current;
+    d.coreRef.current?.completeLocalImeLocalWindowTransition(
+      "document-switch",
+      d.effectiveWritingMode,
+    );
+  }, [documentSwitchNonce]);
+
+  const readLocalImeDocumentLeaveState = useCallback(() => {
+    const d = depsRef.current;
+    return {
+      activeTabId: d.activeTabId,
+      dirtyOwnerTabId: d.localImeDraftDirtyOwnerTabId,
+      dirtyNotice: d.readLocalImeDraftDirtyNotice(),
+      tabs: d.tabs,
+      documentActionPending: d.isLocalImeDocumentActionPending(),
+    };
+  }, []);
+
+  const beginDocumentLeave = useCallback(
+    (
+      operation: LocalImeDocumentLeaveOperation,
+    ): LocalImeDocumentLeaveProof<EditorTab> => {
+      const d = depsRef.current;
+      return prepareLocalImeDocumentLeave({
+        operation,
+        readBeforeBarrier: () => ({
+          activeTabId: d.activeTabId,
+          dirtyOwnerTabId: d.localImeDraftDirtyOwnerTabId,
+          dirtyNotice: d.readLocalImeDraftDirtyNotice(),
+        }),
+        prepareDocumentAction: d.prepareLocalImeDocumentAction,
+        readAfterBarrier: readLocalImeDocumentLeaveState,
+      });
+    },
+    [readLocalImeDocumentLeaveState],
+  );
+
+  const reproveDocumentLeave = useCallback(
+    (capture: LocalImeDocumentLeaveCapture): LocalImeDocumentLeaveProof<EditorTab> =>
+      proveLocalImeDocumentLeaveAfterBarrier({
+        capture,
+        state: readLocalImeDocumentLeaveState(),
+      }),
+    [readLocalImeDocumentLeaveState],
+  );
+
+  const prepareTabLeaveSnapshot = useCallback((
+    capture: LocalImeDocumentLeaveCapture,
+  ): EditorTab | null => {
     const d = depsRef.current;
     const core = d.coreRef.current;
     if (!core) return null;
+    const proofBeforeSnapshot = reproveDocumentLeave(capture);
+    if (!proofBeforeSnapshot.ok) return null;
 
     const paragraphPlainOverlayChanged =
       core.hasParagraphPlainPendingOverlayChanges();
     if (!core.commitParagraphPlainIfActive()) return null;
 
-    const markdown = core.peekMarkdown();
+    let markdown: string;
+    try {
+      markdown = core.peekMarkdown();
+    } catch {
+      return null;
+    }
+    const proofAfterSnapshot = reproveDocumentLeave(capture);
+    if (!proofAfterSnapshot.ok) return null;
     const { frontmatterFields, characterCount } =
       buildTabLeaveContentFields(markdown);
-    const dirty = resolveTabLeaveDirtyState({
-      internalDocId: d.activeTab.internalDocId,
+    const canonicalDirty = resolveTabLeaveDirtyState({
+      internalDocId: proofAfterSnapshot.activeTab.internalDocId,
       paragraphPlainOverlayChanged,
-      currentDirty: d.activeTab.dirty,
-      cleanMarkdownSnapshot: d.activeTab.cleanMarkdownSnapshot,
+      currentDirty: proofAfterSnapshot.activeTab.dirty,
+      cleanMarkdownSnapshot: proofAfterSnapshot.activeTab.cleanMarkdownSnapshot,
       currentMarkdown: markdown,
     });
-
-    d.patchActiveTab({
+    const dirty = resolveLocalImeDocumentLeaveDerivedDirty({
+      canonicalDirty,
+      capture,
+      tabId: proofAfterSnapshot.activeTab.id,
+      internalDocument: Boolean(proofAfterSnapshot.activeTab.internalDocId),
+    });
+    const scrollPosition = d.captureEditorScroll();
+    const snapshot: EditorTab = {
+      ...proofAfterSnapshot.activeTab,
       dirty,
       markdownSnapshot: markdown,
       frontmatterFields,
       characterCount,
-    });
-
-    return {
-      dirty,
-      markdown,
-      frontmatterFields,
-      characterCount,
+      scrollTop: scrollPosition.scrollTop,
+      scrollLeft: scrollPosition.scrollLeft,
     };
-  }, []);
+
+    // active IDを後から再解決せず、captureしたsource tabへfunctional updateする。
+    // setActiveTabIdと同一React batchになっても元tab snapshotを失わない。
+    const applySnapshot = () => {
+      d.setTabs((tabs) =>
+        tabs.map((tab) =>
+          tab.id === capture.activeTabId
+            ? applyTabLeaveSnapshotOntoCurrentTab(tab, snapshot)
+            : tab,
+        ),
+      );
+    };
+    // E2E-only: production never arms this, so apply は同期のまま。
+    if (!deferTabLeaveSnapshotApplyForE2e(applySnapshot)) {
+      applySnapshot();
+    }
+    return snapshot;
+  }, [reproveDocumentLeave]);
 
   /**
    * Read the current active tab plus the live core markdown as a self-contained snapshot.
    * Used when we need to restore the current document after a temporary tab switch.
    */
-  const captureActiveTabSnapshot = useCallback((): EditorTab | null => {
-    const d = depsRef.current;
-    const tabLeaveState = prepareTabLeaveSnapshot();
-    if (!tabLeaveState) return null;
-    const scrollPosition = d.captureEditorScroll();
-    return {
-      ...d.activeTab,
-      dirty: tabLeaveState.dirty,
-      markdownSnapshot: tabLeaveState.markdown,
-      frontmatterFields: tabLeaveState.frontmatterFields,
-      characterCount: tabLeaveState.characterCount,
-      scrollTop: scrollPosition.scrollTop,
-      scrollLeft: scrollPosition.scrollLeft,
-    };
-  }, [prepareTabLeaveSnapshot]);
+  const captureActiveTabSnapshot = useCallback((
+    capture: LocalImeDocumentLeaveCapture,
+  ): EditorTab | null => prepareTabLeaveSnapshot(capture), [prepareTabLeaveSnapshot]);
 
   /**
    * Snapshot the current active tab's editor content into its tab record.
    * Syncs markdownSnapshot, frontmatterFields, and characterCount atomically.
    */
+  const snapshotActiveTabWithCapture = useCallback((
+    capture: LocalImeDocumentLeaveCapture,
+  ): boolean => captureActiveTabSnapshot(capture) !== null, [captureActiveTabSnapshot]);
+
   const snapshotActiveTab = useCallback((): boolean => {
-    const d = depsRef.current;
-    const snapshot = captureActiveTabSnapshot();
-    if (!snapshot) return false;
-    d.patchActiveTab({
-      dirty: snapshot.dirty,
-      markdownSnapshot: snapshot.markdownSnapshot,
-      frontmatterFields: snapshot.frontmatterFields,
-      characterCount: snapshot.characterCount,
-      scrollTop: snapshot.scrollTop,
-      scrollLeft: snapshot.scrollLeft,
-    });
-    return true;
-  }, [captureActiveTabSnapshot]);
+    const prepared = beginDocumentLeave("snapshot-active-tab");
+    return prepared.ok && snapshotActiveTabWithCapture(prepared.capture);
+  }, [beginDocumentLeave, snapshotActiveTabWithCapture]);
 
   /**
    * Restore a tab's snapshot into the editor.
    * NOTE: Must prepare the core with the target tab's effective policy first,
    * because restore still reparses markdown through core.loadMarkdown().
    */
-  const restoreTab = useCallback((tab: EditorTab) => {
+  const restoreTab = useCallback((tab: EditorTab): boolean => {
     const d = depsRef.current;
     const core = d.coreRef.current;
-    if (!core) return;
+    if (!core) return false;
+    const previousPath = d.activeTab.filePath ?? null;
     d.notifyActiveDocumentPath?.(tab.filePath ?? null);
     d.setSuppressNextDirty(true);
     d.ensureSafeLineBreakPolicyBeforeDocumentLoad({
       targetTabSnapshot: tab,
     });
-    core.loadMarkdown(tab.markdownSnapshot);
+    if (!core.loadMarkdown(tab.markdownSnapshot)) {
+      d.setSuppressNextDirty(false);
+      d.notifyActiveDocumentPath?.(previousPath);
+      return false;
+    }
     core.clearHistory();
     core.setReadOnly(Boolean(tab.internalDocId));
     d.closePlainEditModes();
@@ -245,6 +348,7 @@ export function useTabManager(deps: TabManagerDeps) {
       scrollTop: tab.scrollTop,
       scrollLeft: tab.scrollLeft,
     });
+    return true;
   }, []);
 
   /**
@@ -259,24 +363,29 @@ export function useTabManager(deps: TabManagerDeps) {
       const d = depsRef.current;
       if (targetTabId === d.activeTabId) return "switched";
       if (switchingRef.current) return "cancelled";
+      const prepared = beginDocumentLeave("tab-switch");
+      if (!prepared.ok) return "cancelled";
       switchingRef.current = true;
       try {
-        const smResult = await d.guardSourceModeDraft();
+        const smResult = await d.guardSourceModeDraft({
+          localImeDocumentActionPrepared: true,
+          proveBeforeDiskWrite: () => reproveDocumentLeave(prepared.capture).ok,
+        });
         if (smResult === "cancelled") return "cancelled";
-        if (!snapshotActiveTab()) return "cancelled";
+        if (!snapshotActiveTabWithCapture(prepared.capture)) return "cancelled";
         const targetTab =
           overrideTargetTab && overrideTargetTab.id === targetTabId
             ? overrideTargetTab
             : d.tabs.find((t) => t.id === targetTabId);
         if (!targetTab) return "cancelled";
+        if (!restoreTab(targetTab)) return "cancelled";
         d.setActiveTabId(targetTabId);
-        restoreTab(targetTab);
         return "switched";
       } finally {
         switchingRef.current = false;
       }
     },
-    [snapshotActiveTab, restoreTab],
+    [beginDocumentLeave, reproveDocumentLeave, snapshotActiveTabWithCapture, restoreTab],
   );
 
   /**
@@ -287,23 +396,30 @@ export function useTabManager(deps: TabManagerDeps) {
     const d = depsRef.current;
     if (d.tabs.length >= MAX_OPEN_TABS) return "tab-limit";
     if (switchingRef.current) return "cancelled";
+    const prepared = beginDocumentLeave("tab-add");
+    if (!prepared.ok) return "cancelled";
     switchingRef.current = true;
     try {
-      const smResult = await d.guardSourceModeDraft();
+      const smResult = await d.guardSourceModeDraft({
+        localImeDocumentActionPrepared: true,
+        proveBeforeDiskWrite: () => reproveDocumentLeave(prepared.capture).ok,
+      });
       if (smResult === "cancelled") return "cancelled";
-      if (!snapshotActiveTab()) return "cancelled";
+      if (!snapshotActiveTabWithCapture(prepared.capture)) return "cancelled";
       const newTab = makeEmptyTab(
         d.defaultWritingMode,
         d.defaultLineBreakPolicy,
       );
-      d.addTab(newTab);
-      d.setActiveTabId(newTab.id);
       // New tab is an empty document — keep the app default tab policy as-is.
       const core = d.coreRef.current;
       if (core) {
         d.notifyActiveDocumentPath?.(newTab.filePath ?? null);
         d.setSuppressNextDirty(true);
-        core.loadMarkdown(newTab.markdownSnapshot);
+        if (!core.loadMarkdown(newTab.markdownSnapshot)) {
+          d.setSuppressNextDirty(false);
+          d.notifyActiveDocumentPath?.(d.activeTab.filePath ?? null);
+          return "cancelled";
+        }
         core.clearHistory();
         core.setReadOnly(false);
         d.closePlainEditModes();
@@ -319,11 +435,13 @@ export function useTabManager(deps: TabManagerDeps) {
           depsRef.current.coreRef.current?.focusEditor();
         }, 0);
       }
+      d.addTab(newTab);
+      d.setActiveTabId(newTab.id);
       return "added";
     } finally {
       switchingRef.current = false;
     }
-  }, [snapshotActiveTab]);
+  }, [beginDocumentLeave, reproveDocumentLeave, snapshotActiveTabWithCapture]);
 
   /** Close a tab. If dirty, shows unsaved guard. Last tab cannot be closed. */
   const closeTab = useCallback(
@@ -342,6 +460,15 @@ export function useTabManager(deps: TabManagerDeps) {
         const shouldTemporarilyActivateDirtyTab =
           !wasActiveTab && tabToClose.dirty;
         let previousActiveTabSnapshot: EditorTab | null = null;
+        const prepared =
+          wasActiveTab || shouldTemporarilyActivateDirtyTab
+            ? beginDocumentLeave(
+                wasActiveTab
+                  ? "tab-close-active"
+                  : "tab-close-background-activation",
+              )
+            : null;
+        if (prepared && !prepared.ok) return;
 
         let smResult: GuardResult = "proceed";
         if (
@@ -354,46 +481,68 @@ export function useTabManager(deps: TabManagerDeps) {
           // BETA-SP1: guard only when closing this tab leaves the current
           // active document. Background clean tab close must not touch the
           // current Source Mode session.
-          smResult = await d.guardSourceModeDraft();
+          smResult = await d.guardSourceModeDraft({
+            localImeDocumentActionPrepared: prepared?.ok === true,
+            proveBeforeDiskWrite: prepared?.ok
+              ? () => reproveDocumentLeave(prepared.capture).ok
+              : undefined,
+          });
           if (smResult === "cancelled") return;
         }
 
-        const activeTabLeaveState =
-          wasActiveTab
-            ? prepareTabLeaveSnapshot()
+        const activeTabLeaveSnapshot =
+          wasActiveTab && prepared?.ok
+            ? captureActiveTabSnapshot(prepared.capture)
             : null;
-        if (wasActiveTab && !activeTabLeaveState) return;
+        if (wasActiveTab && !activeTabLeaveSnapshot) return;
 
         // If closing the active tab and it is dirty, run unsaved guard.
         // When smResult === "resolved", save/discard already handled the draft
         // and the user has been prompted — skip the normal dirty guard to avoid
         // a second prompt.
+        const activeClosePromptAuthority =
+          activeTabLeaveSnapshot
+            ? resolveLocalImeDocumentLeavePromptAuthority({
+                disposition: "destructive",
+                derivedDirty: activeTabLeaveSnapshot.dirty,
+              })
+            : null;
         if (
           smResult !== "resolved" &&
           wasActiveTab &&
-          (activeTabLeaveState?.dirty ?? tabToClose.dirty)
+          activeClosePromptAuthority?.mustPrompt
         ) {
           const canProceed = await d.confirmContinueWithUnsavedChanges({
-            forcePrompt: true,
+            forcePrompt: activeClosePromptAuthority.forcePrompt,
+            saveTargetTab: activeTabLeaveSnapshot
+              ? {
+                  id: activeTabLeaveSnapshot.id,
+                  title: activeTabLeaveSnapshot.title,
+                  filePath: activeTabLeaveSnapshot.filePath,
+                  savedStat: activeTabLeaveSnapshot.savedStat,
+                  eol: activeTabLeaveSnapshot.eol,
+                }
+              : undefined,
+            localImeDocumentActionPrepared: true,
+            proveBeforeDiskWrite: prepared?.ok
+              ? () => reproveDocumentLeave(prepared.capture).ok
+              : () => false,
           });
           if (!canProceed) return;
+          if (
+            !prepared?.ok ||
+            !reproveDocumentLeave(prepared.capture).ok
+          ) return;
         }
 
         // For non-active dirty tabs: snapshot (safe — guard already ran),
         // switch to the target tab, then show its unsaved guard.
         if (shouldTemporarilyActivateDirtyTab) {
-          previousActiveTabSnapshot = captureActiveTabSnapshot();
+          if (!prepared?.ok) return;
+          previousActiveTabSnapshot = captureActiveTabSnapshot(prepared.capture);
           if (!previousActiveTabSnapshot) return;
-          d.patchActiveTab({
-            dirty: previousActiveTabSnapshot.dirty,
-            markdownSnapshot: previousActiveTabSnapshot.markdownSnapshot,
-            frontmatterFields: previousActiveTabSnapshot.frontmatterFields,
-            characterCount: previousActiveTabSnapshot.characterCount,
-            scrollTop: previousActiveTabSnapshot.scrollTop,
-            scrollLeft: previousActiveTabSnapshot.scrollLeft,
-          });
+          if (!restoreTab(tabToClose)) return;
           d.setActiveTabId(tabId);
-          restoreTab(tabToClose);
           const canProceed = await d.confirmContinueWithUnsavedChanges({
             forcePrompt: true,
             saveTargetTab: {
@@ -401,11 +550,12 @@ export function useTabManager(deps: TabManagerDeps) {
               title: tabToClose.title,
               filePath: tabToClose.filePath,
               savedStat: tabToClose.savedStat,
+              eol: tabToClose.eol,
             },
           });
           if (!canProceed) {
+            if (!restoreTab(previousActiveTabSnapshot)) return;
             d.setActiveTabId(previousActiveTabSnapshot.id);
-            restoreTab(previousActiveTabSnapshot);
             return;
           }
         }
@@ -413,17 +563,18 @@ export function useTabManager(deps: TabManagerDeps) {
         const remainingTabs = d.tabs.filter((t) => t.id !== tabId);
 
         if (wasActiveTab) {
+          if (!prepared?.ok || !reproveDocumentLeave(prepared.capture).ok) return;
           // Find adjacent tab to switch to
           const closedIndex = d.tabs.findIndex((t) => t.id === tabId);
           const nextTab =
             remainingTabs[Math.min(closedIndex, remainingTabs.length - 1)];
+          if (!restoreTab(nextTab)) return;
           d.removeTab(tabId);
           d.setActiveTabId(nextTab.id);
-          restoreTab(nextTab);
         } else if (previousActiveTabSnapshot) {
+          if (!restoreTab(previousActiveTabSnapshot)) return;
           d.removeTab(tabId);
           d.setActiveTabId(previousActiveTabSnapshot.id);
-          restoreTab(previousActiveTabSnapshot);
         } else {
           d.removeTab(tabId);
         }
@@ -431,7 +582,12 @@ export function useTabManager(deps: TabManagerDeps) {
         switchingRef.current = false;
       }
     },
-    [captureActiveTabSnapshot, prepareTabLeaveSnapshot, restoreTab],
+    [
+      beginDocumentLeave,
+      captureActiveTabSnapshot,
+      reproveDocumentLeave,
+      restoreTab,
+    ],
   );
 
   /**
@@ -460,13 +616,21 @@ export function useTabManager(deps: TabManagerDeps) {
 
       // Tab limit guard
       if (d.tabs.length >= MAX_OPEN_TABS) return "tab-limit";
+      if (switchingRef.current) return "cancelled";
+      const prepared = beginDocumentLeave("open-file-new-tab");
+      if (!prepared.ok) return "cancelled";
+      switchingRef.current = true;
+      try {
 
       // BETA-SP1: Source Mode guard before snapshot
-      const smResult = await d.guardSourceModeDraft();
+      const smResult = await d.guardSourceModeDraft({
+        localImeDocumentActionPrepared: true,
+        proveBeforeDiskWrite: () => reproveDocumentLeave(prepared.capture).ok,
+      });
       if (smResult === "cancelled") return "cancelled";
 
       // Snapshot current tab, create new one with the loaded content
-      if (!snapshotActiveTab()) return "cancelled";
+      if (!snapshotActiveTabWithCapture(prepared.capture)) return "cancelled";
 
       const { frontmatterPrefix } = splitLeadingFrontmatter(content);
       const fields = parseFrontmatterFields(frontmatterPrefix);
@@ -497,9 +661,6 @@ export function useTabManager(deps: TabManagerDeps) {
         sourceModeTopOffset: null,
       };
 
-      d.addTab(newTab);
-      d.setActiveTabId(newTab.id);
-
       // File load — use ensureSafe for "load document" path
       const core = d.coreRef.current;
       if (core) {
@@ -508,7 +669,11 @@ export function useTabManager(deps: TabManagerDeps) {
         d.ensureSafeLineBreakPolicyBeforeDocumentLoad({
           targetTabSnapshot: newTab,
         });
-        core.loadMarkdown(content);
+        if (!core.loadMarkdown(content)) {
+          d.setSuppressNextDirty(false);
+          d.notifyActiveDocumentPath?.(d.activeTab.filePath ?? null);
+          return "cancelled";
+        }
         core.clearHistory();
         core.setReadOnly(false);
         d.closePlainEditModes();
@@ -521,9 +686,14 @@ export function useTabManager(deps: TabManagerDeps) {
         );
         d.resetEditorScroll();
       }
+      d.addTab(newTab);
+      d.setActiveTabId(newTab.id);
       return "added";
+      } finally {
+        switchingRef.current = false;
+      }
     },
-    [snapshotActiveTab, switchTab],
+    [beginDocumentLeave, reproveDocumentLeave, snapshotActiveTabWithCapture, switchTab],
   );
 
   /**
@@ -558,28 +728,88 @@ export function useTabManager(deps: TabManagerDeps) {
         }
       }
 
+      if (switchingRef.current) return "cancelled";
+      const prepared = beginDocumentLeave("active-tab-load");
+      if (!prepared.ok) return "cancelled";
+      switchingRef.current = true;
+      try {
+
       // BETA-SP1: Source Mode guard before dirty check.
       // "resolved" = save/discard で Source Mode draft を解決済み → dirty guard 不要。
       // "proceed"  = Source Mode 非該当 or draft なし → dirty は PM Doc 基準で正確。
-      const smResult = await d.guardSourceModeDraft();
+      const smResult = await d.guardSourceModeDraft({
+        localImeDocumentActionPrepared: true,
+        proveBeforeDiskWrite: () => reproveDocumentLeave(prepared.capture).ok,
+      });
       if (smResult === "cancelled") return "cancelled";
-      const activeTabLeaveState = prepareTabLeaveSnapshot();
-      if (!activeTabLeaveState) return "cancelled";
-
+      const activeTabLeaveSnapshot = captureActiveTabSnapshot(prepared.capture);
+      if (!activeTabLeaveSnapshot) return "cancelled";
       // When smResult === "resolved", save/discard already handled the draft
       // and the user has been prompted. Skip the normal dirty guard to avoid
       // a second prompt (depsRef.current is stale within this async continuation).
-      if (smResult !== "resolved" && activeTabLeaveState.dirty) {
-        const canProceed = await d.confirmContinueWithUnsavedChanges();
+      const loadPromptAuthority =
+        resolveLocalImeDocumentLeavePromptAuthority({
+          disposition: "destructive",
+          derivedDirty: activeTabLeaveSnapshot.dirty,
+        });
+      if (smResult !== "resolved" && loadPromptAuthority.mustPrompt) {
+        const canProceed = await d.confirmContinueWithUnsavedChanges({
+          forcePrompt: loadPromptAuthority.forcePrompt,
+          saveTargetTab: {
+            id: activeTabLeaveSnapshot.id,
+            title: activeTabLeaveSnapshot.title,
+            filePath: activeTabLeaveSnapshot.filePath,
+            savedStat: activeTabLeaveSnapshot.savedStat,
+            eol: activeTabLeaveSnapshot.eol,
+          },
+          localImeDocumentActionPrepared: true,
+          proveBeforeDiskWrite: () => reproveDocumentLeave(prepared.capture).ok,
+        });
         if (!canProceed) return "cancelled";
       }
+      if (!reproveDocumentLeave(prepared.capture).ok) return "cancelled";
 
       const { frontmatterPrefix } = splitLeadingFrontmatter(content);
       const fields = parseFrontmatterFields(frontmatterPrefix);
       const charCount = countBodyCharacters(content);
       const eol = detectEol(content);
 
-      // Update active tab metadata
+      // Load into editor
+      const core = d.coreRef.current;
+      if (core) {
+        d.notifyActiveDocumentPath?.(resolvedPath);
+        d.setSuppressNextDirty(true);
+        d.ensureSafeLineBreakPolicyBeforeDocumentLoad({
+          targetTabSnapshot: {
+            id: d.activeTab.id,
+            frontmatterFields: fields,
+            lineBreakPolicy: d.activeTab.lineBreakPolicy,
+          },
+        });
+        // LOCAL-WINDOW-PACKAGED-REARM-POLISH1: ここまで到達した「ユーザー操作による
+        // 同一タブの document 切替」だけを bounded token にする。dirty ダイアログ /
+        // Save As / Source Mode ガードの取消はこの行に来ないので token は作られず、
+        // 起動直後の initial load とも typed に分かれる（continuity 未成立なら false）。
+        core.beginLocalImeLocalWindowTransition("document-switch");
+        if (!core.loadMarkdown(content)) {
+          core.cancelLocalImeLocalWindowTransition("document-switch");
+          d.setSuppressNextDirty(false);
+          d.notifyActiveDocumentPath?.(d.activeTab.filePath ?? null);
+          return "cancelled";
+        }
+        core.clearHistory();
+        core.setReadOnly(false);
+        d.closePlainEditModes();
+        d.refreshHeadings();
+        d.onTabContentLoaded(
+          content,
+          fields,
+          charCount,
+          core.getDocumentMarkdownOptions(),
+        );
+        d.resetEditorScroll();
+      }
+      // Editor replacement succeeded. Only now publish the new path/tab metadata.
       d.patchActiveTab({
         title,
         filePath: resolvedPath,
@@ -601,35 +831,20 @@ export function useTabManager(deps: TabManagerDeps) {
         internalDocId: undefined,
         internalShortcutBundleKey: undefined,
       });
-
-      // Load into editor
-      const core = d.coreRef.current;
-      if (core) {
-        d.notifyActiveDocumentPath?.(resolvedPath);
-        d.setSuppressNextDirty(true);
-        d.ensureSafeLineBreakPolicyBeforeDocumentLoad({
-          targetTabSnapshot: {
-            id: d.activeTab.id,
-            frontmatterFields: fields,
-            lineBreakPolicy: d.activeTab.lineBreakPolicy,
-          },
-        });
-        core.loadMarkdown(content);
-        core.clearHistory();
-        core.setReadOnly(false);
-        d.closePlainEditModes();
-        d.refreshHeadings();
-        d.onTabContentLoaded(
-          content,
-          fields,
-          charCount,
-          core.getDocumentMarkdownOptions(),
-        );
-        d.resetEditorScroll();
-      }
+      // 同じ commit で完了 nonce を進める。実際の取得は、この tab row から解決された
+      // 書字方向が反映された後の effect で最大 1 回だけ行う。
+      setDocumentSwitchNonce((previous) => previous + 1);
       return "loaded";
+      } finally {
+        switchingRef.current = false;
+      }
     },
-    [prepareTabLeaveSnapshot, switchTab],
+    [
+      beginDocumentLeave,
+      captureActiveTabSnapshot,
+      reproveDocumentLeave,
+      switchTab,
+    ],
   );
 
   const openOrFocusShortcutReferenceTab = useCallback(
@@ -660,17 +875,16 @@ export function useTabManager(deps: TabManagerDeps) {
             ...core,
             dirty: false,
           };
-          d.patchTab(existing.id, {
-            ...core,
-            dirty: false,
-          });
-
           if (d.activeTabId === existing.id) {
-            restoreTab(merged);
+            if (!restoreTab(merged)) return "cancelled";
+            d.patchTab(existing.id, { ...core, dirty: false });
             return "added";
           }
 
           const r = await switchTab(existing.id, merged);
+          if (r !== "cancelled") {
+            d.patchTab(existing.id, { ...core, dirty: false });
+          }
           return r === "cancelled" ? "cancelled" : "added";
         }
 
@@ -683,21 +897,38 @@ export function useTabManager(deps: TabManagerDeps) {
       }
 
       if (d.tabs.length >= MAX_OPEN_TABS) return "tab-limit";
-      const smResult = await d.guardSourceModeDraft();
+      if (switchingRef.current) return "cancelled";
+      const prepared = beginDocumentLeave("shortcut-reference");
+      if (!prepared.ok) return "cancelled";
+      switchingRef.current = true;
+      try {
+      const smResult = await d.guardSourceModeDraft({
+        localImeDocumentActionPrepared: true,
+        proveBeforeDiskWrite: () => reproveDocumentLeave(prepared.capture).ok,
+      });
       if (smResult === "cancelled") return "cancelled";
-      if (!snapshotActiveTab()) return "cancelled";
+      if (!snapshotActiveTabWithCapture(prepared.capture)) return "cancelled";
       const newTab = createShortcutReferenceEditorTab(
         args.title,
         args.markdown,
         d.defaultLineBreakPolicy,
         args.bundleKey,
       );
+      if (!restoreTab(newTab)) return "cancelled";
       d.addTab(newTab);
       d.setActiveTabId(newTab.id);
-      restoreTab(newTab);
       return "added";
+      } finally {
+        switchingRef.current = false;
+      }
     },
-    [restoreTab, snapshotActiveTab, switchTab],
+    [
+      beginDocumentLeave,
+      reproveDocumentLeave,
+      restoreTab,
+      snapshotActiveTabWithCapture,
+      switchTab,
+    ],
   );
 
   return {

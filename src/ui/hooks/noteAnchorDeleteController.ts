@@ -101,8 +101,10 @@ export async function commitNoteAnchorDelete(
   }
 
   const now = new Date().toISOString()
+  // STICKY-NOTE-STORE-FIELD-PRESERVATION1: store 全体を保持して `notes` だけ更新する。
+  // `stickyNoteTags` 等の top-level field を落とすと、付箋削除が project のタグ定義を消す。
   const store: NyozeNotesStore = {
-    version: notes.store.version,
+    ...notes.store,
     notes: {
       ...notes.store.notes,
       [options.id]: {

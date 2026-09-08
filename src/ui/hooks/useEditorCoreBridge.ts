@@ -121,14 +121,17 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
   })
 
   return () => {
+    // dirty overlay / live composition がownerを必要とする間は破棄を拒否する。
+    // React cleanupは結果を返せないため、上流document-action barrierが先に
+    // 解決する契約とし、拒否時はrefとsubscriptionsを孤児化させない。
+    if (!core.destroy()) return
     unsubLog()
     unsubSel()
     unsubParagraphPlain()
     unsubLineBreakPolicy()
     unsubUpdate()
     unsubFoldChange()
-    core.destroy()
-    coreRef.current = null
+    if (coreRef.current === core) coreRef.current = null
   }
 }
 

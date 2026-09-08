@@ -9,9 +9,13 @@ export function resolveFoldToggleHeadingPos(
   foldToggleClass: string,
 ): number | null {
   const foldToggle = targetElement.closest(`.${foldToggleClass}`)
-  if (!(foldToggle instanceof HTMLElement)) return null
-  if (!foldToggle.dataset.headingPos) return null
-  const headingPos = Number(foldToggle.dataset.headingPos)
+  if (!foldToggle) return null
+  if (typeof HTMLElement !== 'undefined' && !(foldToggle instanceof HTMLElement)) {
+    return null
+  }
+  const foldEl = foldToggle as HTMLElement
+  if (!foldEl.dataset?.headingPos) return null
+  const headingPos = Number(foldEl.dataset.headingPos)
   if (!Number.isFinite(headingPos)) return null
   return headingPos
 }

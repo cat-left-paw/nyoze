@@ -6,6 +6,7 @@ import {
 import type { InternalDocId } from "../internalDocs/internalDocIds";
 import { countBodyCharacters } from "../utils/countBodyCharacters";
 import { isMarkdownDifferentFromClean } from "./dirtyTracking";
+import type { SavedFileStat } from "../utils/externalEditConflict";
 
 export function resolveTabLeaveDirtyState(args: {
   internalDocId?: InternalDocId;
@@ -32,5 +33,19 @@ export function buildTabLeaveContentFields(markdown: string): {
   return {
     frontmatterFields: parseFrontmatterFields(frontmatterPrefix),
     characterCount: countBodyCharacters(markdown),
+  };
+}
+
+/**
+ * leave snapshot を現在 tab row へ載せる。savedStat だけは current が正本。
+ * snapshot.savedStat で上書きすると、後着の post-save patch を古い copy が潰す。
+ */
+export function applyTabLeaveSnapshotOntoCurrentTab<T extends { savedStat: SavedFileStat }>(
+  current: T,
+  snapshot: T,
+): T {
+  return {
+    ...snapshot,
+    savedStat: current.savedStat,
   };
 }

@@ -1,5 +1,5 @@
 import { Slice } from '@tiptap/pm/model'
-import type { EditorState } from '@tiptap/pm/state'
+import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { parseMarkdown } from '../io/parseMarkdown'
 import type { LineBreakPolicy, MarkdownDocumentOptions } from '../types'
@@ -37,6 +37,38 @@ function buildInlinePasteSlice(state: EditorState, parsedDoc: EditorState['doc']
   return new Slice(firstChild.content, 0, 0)
 }
 
+export type MarkdownPlainPasteInput = {
+  state: EditorState
+  plainText: string
+  lineBreakPolicy: LineBreakPolicy
+  documentMarkdownOptions: MarkdownDocumentOptions
+}
+
+export type MarkdownPlainPasteResult =
+  | { ok: true; tr: Transaction }
+  | { ok: false; reason: 'empty-parsed-content' }
+
+/**
+ * 通常 PM の Markdown-aware plain paste と局所 IME slot adapter が共有する primitive。
+ * `text/plain` を Nyoze Markdown として parse し、inline / block 挿入 slice を
+ * `replaceSelection` する transaction を組み立てるだけで、dispatch はしない
+ * （呼び出し側が guard・composing・scrollIntoView 契約を個別に持つため）。
+ */
+export function buildMarkdownPlainPasteTransaction(
+  input: MarkdownPlainPasteInput,
+): MarkdownPlainPasteResult {
+  const parsedDoc = parseMarkdown(input.state.schema, input.plainText, input.lineBreakPolicy, {
+    preserveEmptyParagraphs: input.documentMarkdownOptions.preserveEmptyParagraphs,
+  })
+  if (parsedDoc.content.size === 0) return { ok: false, reason: 'empty-parsed-content' }
+
+  const inlineSlice = buildInlinePasteSlice(input.state, parsedDoc)
+  const tr = inlineSlice
+    ? input.state.tr.replaceSelection(inlineSlice)
+    : input.state.tr.replaceSelection(new Slice(parsedDoc.content, 0, 0))
+  return { ok: true, tr }
+}
+
 export function createEditorPropsPasteHandler({
   getIsComposing,
   getLineBreakPolicy,
@@ -63,18 +95,16 @@ export function createEditorPropsPasteHandler({
     }
 
     const lineBreakPolicy = getLineBreakPolicy()
-    const parsedDoc = parseMarkdown(view.state.schema, plainText, lineBreakPolicy, {
-      preserveEmptyParagraphs:
-        getDocumentMarkdownOptions().preserveEmptyParagraphs,
+    const result = buildMarkdownPlainPasteTransaction({
+      state: view.state,
+      plainText,
+      lineBreakPolicy,
+      documentMarkdownOptions: getDocumentMarkdownOptions(),
     })
-    if (parsedDoc.content.size === 0) return false
+    if (!result.ok) return false
 
     event.preventDefault()
-    const inlineSlice = buildInlinePasteSlice(view.state, parsedDoc)
-    const tr = inlineSlice
-      ? view.state.tr.replaceSelection(inlineSlice)
-      : view.state.tr.replaceSelection(new Slice(parsedDoc.content, 0, 0))
-    view.dispatch(tr.scrollIntoView())
+    view.dispatch(result.tr.scrollIntoView())
     pushLog('paste', `markdownPlain policy=${lineBreakPolicy} chars=${plainText.length}`)
     return true
   }

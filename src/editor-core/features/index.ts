@@ -1,11 +1,31 @@
 export { clearStoredMarksAtBoundary } from './boundaryGuard'
 export { resolveAutoTcyDigitRange } from './autoTcy'
+export { createAutoTcyRuntimeController } from './autoTcyRuntimeController'
 export {
   resolveChecklistClickPos,
   resolveClickTargetElement,
   resolveFoldToggleHeadingPos,
 } from './clickRouting'
 export { createEditorClickHandler } from './clickCommandHandler'
+export {
+  captureHeadingFoldTarget,
+  resolveHeadingFoldTarget,
+} from './localImeHeadingFoldTarget'
+export type { HeadingFoldTargetIdentity } from './localImeHeadingFoldTarget'
+export {
+  LOCAL_IME_HEADING_FOLD_HANDOFF_REASON,
+  runLocalImeHeadingFoldHandoff,
+} from './localImeHeadingFoldHandoff'
+export type { LocalImeHeadingFoldHandoffResult } from './localImeHeadingFoldHandoff'
+export {
+  classifyEditorWidgetClickIntent,
+  commitEditorWidgetClickIntent,
+} from './editorWidgetClickIntent'
+export type {
+  EditorWidgetClickIntent,
+  EditorWidgetClickCommitResult,
+} from './editorWidgetClickIntent'
+export { createEditorWidgetClickWiring } from './editorWidgetClickWiring'
 export {
   isModifiedLinkClick,
   resolveModifiedLinkClick,
@@ -69,6 +89,12 @@ export {
   applyNoteAnchorPreviewsToDom,
   createNoteAnchorPreviewController,
 } from './noteAnchorPreviewController'
+export {
+  NOTE_ANCHOR_HOVER_PREVIEW_CLASS,
+  createNoteAnchorHoverPreviewController,
+  intersectPreviewRects,
+  resolveNoteAnchorPreviewPlacement,
+} from './noteAnchorHoverPreview'
 export { findNoteAnchorPosition } from './noteAnchorNavigation'
 export { createNoteAnchorJumpController } from './noteAnchorJumpController'
 export {
@@ -93,8 +119,15 @@ export { bindEditorDomEvents } from './domEventBindings'
 export { createEditorLifecycleCallbacks } from './editorLifecycleCallbacks'
 export { createEditorPropsKeyDownHandler } from './editorPropsKeydown'
 export { isInListContext, handleListTabKey } from './listTabNavigation'
-export { resetHomeEndState, notifySelectionChanged, handleHomeEndKey, _getHomeEndState } from './homeEndNavigation'
-export { createEditorPropsPasteHandler } from './editorPropsPaste'
+export { resetHomeEndState, notifySelectionChanged, handleHomeEndKey, runWithHomeEndSelectionMutation, _getHomeEndState } from './homeEndNavigation'
+export {
+  createEditorPropsPasteHandler,
+  buildMarkdownPlainPasteTransaction,
+} from './editorPropsPaste'
+export type {
+  MarkdownPlainPasteInput,
+  MarkdownPlainPasteResult,
+} from './editorPropsPaste'
 export {
   editorClipboardCopyCutDOMHandlers,
   handleEditorClipboardCopyOrCut,
@@ -142,6 +175,7 @@ export {
   scrollEditorSurfaceToRatio,
 } from './viewportAnchor'
 export { createSearchController } from './searchController'
+export { createLocalImePseudoCaretSlotAttachCallbacks } from './localImePseudoCaretWiring'
 export { createBasicCommandsController } from './basicCommandsController'
 export {
   applyObsidianParagraphBlockquoteTransform,
@@ -161,3 +195,53 @@ export type { SearchMatch } from './searchReplace'
 export { createVisualFocusCurrentLineController } from './visualFocusCurrentLine'
 export { createPseudoCaretController } from './pseudoCaretController'
 export type { PseudoCaretControllerHandle } from './pseudoCaretController'
+export { createLocalImeIntegration } from './localImeIntegration'
+export {
+  allocateSearchCloseFocusRestoreCoreInstanceId,
+  classifySearchCloseFocusOwner,
+  emitSearchCloseFocusTraceForTest,
+  nextSearchCloseFocusRestoreEpoch,
+  resolveSearchCloseFocusRestore,
+} from './localImeSearchCloseFocusRestore'
+export type { SearchCloseFocusRestoreToken } from './localImeSearchCloseFocusRestore'
+export { isProseMirrorHistoryTransaction } from './localImeHistoryTransaction'
+export { createLocalImeHostTransactionNotifier } from './localImeHostTransactionNotice'
+export { createLocalImeHostInputDomWiring } from './localImeHostInputDomWiring'
+export { buildLocalImeRubyPunctuationWiring } from './localImeRubyDecorationWiring'
+export { scheduleMacosArrowScrollClampForView } from './macosArrowScrollClampForView'
+export { createBareArrowNavigationDisplayHandoff } from './bareArrowNavigationDisplayHandoff'
+export { notifyLocalImeHomeEndNavigationHandoff } from './localImeHomeEndNavigationHandoff'
+export { notifyLocalImePageUpDownNavigationHandoff } from './localImePageUpDownNavigationHandoff'
+export { createLocalImeNavigationHandoffCallbacks } from './localImeNavigationHandoffWiring'
+export {
+  prepareLocalImePageUpDownHandoff,
+  runLocalImePageUpDownCommand,
+} from './localImePageUpDownCommandAdapter'
+export {
+  classifyEditorMarkShortcut,
+  editorMarkShortcutToLocalImeOperation,
+  localImeOperationToEditorMarkShortcut,
+} from './editorMarkShortcutClassification'
+export {
+  classifyEditorBlockStructureShortcut,
+  editorBlockStructureShortcutToLocalImeOperation,
+  localImeOperationToEditorBlockStructureShortcut,
+  isLocalImeBlockStructureOperation,
+} from './editorBlockStructureShortcutClassification'
+export { applyClearFormatMarksAndTcy } from './clearFormatCommand'
+export { runEditorMarkToggleCommand } from './editorMarkToggleCommand'
+export type {
+  EditorBlockStructureShortcutName,
+  LocalImeBlockStructureOperation,
+} from './editorBlockStructureShortcutClassification'
+export {
+  isLocalImeEditMenuOperation,
+  shouldFallBackToNormalEditingForEditMenuCommand,
+} from './localImeEditMenuCommandState'
+export type {
+  LocalImeEditMenuBlockedReason,
+  LocalImeEditMenuCommandResult,
+  LocalImeEditMenuOperation,
+} from './localImeEditMenuCommandState'
+export { notifyLocalImePointerSelectionHandoff } from './localImePointerSelectionHandoff'
+export type { EditorMarkShortcutName } from './editorMarkShortcutClassification'

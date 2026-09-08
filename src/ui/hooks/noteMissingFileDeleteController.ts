@@ -58,7 +58,8 @@ export function buildMissingFileNotesSoftDeleteStore(
   }
 
   if (!changed) return null
-  return { version: store.version, notes }
+  // STICKY-NOTE-STORE-FIELD-PRESERVATION1: store 全体を保持して `notes` だけ更新する。
+  return { ...store, notes }
 }
 
 export async function prepareMissingFileNoteDelete(

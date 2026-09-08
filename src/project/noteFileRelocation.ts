@@ -81,7 +81,8 @@ export function buildRelocatedNotesStore(
     }
   }
   if (!changed) return { store, changed: false }
-  return { store: { version: store.version, notes }, changed: true }
+  // STICKY-NOTE-STORE-FIELD-PRESERVATION1: store 全体を保持して `notes` だけ更新する。
+  return { store: { ...store, notes }, changed: true }
 }
 
 export type RelocateDirectoryOptions = {
@@ -137,5 +138,6 @@ export function buildRelocatedNotesStoreForDirectory(
     notes[id] = note
   }
   if (!changed) return { store, changed: false }
-  return { store: { version: store.version, notes }, changed: true }
+  // STICKY-NOTE-STORE-FIELD-PRESERVATION1: store 全体を保持して `notes` だけ更新する。
+  return { store: { ...store, notes }, changed: true }
 }
