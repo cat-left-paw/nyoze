@@ -33,6 +33,13 @@ export type LocalImeHostCommandReason =
   | 'host-command-code-block'
   | 'host-command-horizontal-rule'
   | 'host-command-block-directive'
+  /**
+   * EDITOR-SURFACE-DOCUMENT-END-CARET1: 本文末尾以降の編集面余白 click から文書末尾へ
+   * collapsed caret を置く selection-only 操作。block 変換ではないが、`caret を持つ
+   * host 文書へ触れる` 点は同じなので同じ barrier を使い、独自の pointer ownership /
+   * commit builder を作らない。
+   */
+  | 'host-command-document-end-caret'
 
 /**
  * heading / paragraph shortcut を HOSTCOMMAND1 barrier へ通してよい focus owner か。

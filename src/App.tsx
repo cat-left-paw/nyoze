@@ -27,6 +27,7 @@ import {
   DEFAULT_DISPLAY_SETTINGS,
   DEFAULT_DOC_FONT_PRESET,
   DEFAULT_DOC_HEADING_FONT,
+  DEFAULT_DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS,
   DEFAULT_EDITOR_ARROW_POINTER,
   DEFAULT_FRONTMATTER_SHOW_AUTHORS,
   DEFAULT_FRONTMATTER_SHOW_IN_PROJECT_FILES,
@@ -111,10 +112,11 @@ import {
   writeImeProfilerJsonLogs,
 } from "./ui/hooks/imeProfilerJsonLog";
 import { useTabManager, MAX_OPEN_TABS } from "./ui/hooks/useTabManager";
+import { useEditorSession } from "./ui/hooks/useEditorSession";
 import {
   guardSourceModeDraft as guardSourceModeDraftImpl,
 } from "./ui/hooks/sourceModeDraftGuard";
-import { prepareSaveBeforeCloseTabsSnapshot, saveAllDirtyTabsBeforeCloseDetailed, saveTabWithSaveAsDetailed } from "./ui/hooks/saveBeforeClose";
+import { applySuccessfulSaveToCloseTab, prepareSaveBeforeCloseTabsSnapshot, saveAllDirtyTabsBeforeCloseDetailed, saveTabWithSaveAsDetailed } from "./ui/hooks/saveBeforeClose";
 import type { ActiveTabSaveOutcome } from "./ui/hooks/saveBeforeClose";
 import {
   EMPTY_COMMAND_AVAILABILITY,
@@ -183,6 +185,7 @@ import { applyEol } from "./editor-core/io/eolHelper";
 import { awaitSavedStatPatchHoldForE2e } from "./ui/utils/savedStatPatchLatchForE2e";
 import { beginSaveDocumentFirstWins, buildExpectedDiskMarkdown, type SaveDocumentTarget } from "./ui/utils/saveDocumentFirstWins";
 import { shouldEnableAutoTcyDisplay } from "./editor-core/features/autoTcy";
+import { isEditingFocusVacant } from "./editor-core/features/editingFocusOwnerRestore";
 import { resolveCaretColor, resolveUiThemeAccentColor } from "./theme/caretColor";
 import { PromptModal } from "./ui/components/PromptModal";
 import { NoteAnchorModal } from "./ui/components/NoteAnchorModal";
@@ -283,6 +286,7 @@ type EditorSurfaceScroll = Pick<EditorTab, "scrollTop" | "scrollLeft">;
 // R3.5-2 P2: saveDocument の最終結果を ref 経由で close-before-save ラッパーに渡す。
 type SaveDocumentDetail = {
   backupWarning?: string;
+  savedFilePath?: string;
   canceled?: boolean;
   errorKind?: SaveErrorKind;
   errorMessage?: string;
@@ -415,6 +419,7 @@ function isSameCommandAvailability(
 
 function App() {
   const coreRef = useRef<EditorCoreHandle | null>(null);
+  const [editorCoreReady, setEditorCoreReady] = useState(false);
   const typewriterRuntimeRef = useRef<TypewriterRuntimeSnapshot>({
     enabled: DEFAULT_TYPEWRITER_MODE_ENABLED,
     offsetRatio: DEFAULT_TYPEWRITER_OFFSET_RATIO,
@@ -609,6 +614,12 @@ function App() {
       console.warn("[Nyoze] file explorer path relocation:", message);
     },
   });
+  /** active 文書の Source Mode draft / Paragraph Plain 未確定 overlay の probe。
+   *  `tab.dirty` へ即時反映されないため rename / move / 削除の preflight で併用する。 */
+  const hasActiveDocumentUncommittedDraft = useCallback(
+    () => ui.fullPlainEditActive || (coreRef.current?.hasParagraphPlainPendingOverlayChanges() ?? false),
+    [ui.fullPlainEditActive],
+  );
   // File Explorer 単一ファイル rename / move と open tab / 付箋 / 作品タブの整合は hook へ集約。
   const explorerMetadataBridge = useExplorerMetadataBridge({
     tabs: ui.tabs,
@@ -619,9 +630,7 @@ function App() {
     activeFilePath: ui.activeTab.filePath,
     // Source Mode draft / Paragraph Plain 未確定 overlay は tab.dirty に即時反映されないため、
     // active file の rename / move 前にこれらの未確定 draft を probe して安全側で拒否する。
-    hasActiveFileUncommittedDraft: () =>
-      ui.fullPlainEditActive ||
-      (coreRef.current?.hasParagraphPlainPendingOverlayChanges() ?? false),
+    hasActiveFileUncommittedDraft: hasActiveDocumentUncommittedDraft,
   });
   const [focusedDocumentNoteId, setFocusedDocumentNoteId] = useState<string | null>(
     null,
@@ -994,6 +1003,7 @@ function App() {
         maxDigits: ui.displaySettings.autoTcyMaxDigits,
       });
       onCoreReady(core);
+      setEditorCoreReady(true);
       syncCommandAvailability();
       refreshActiveDocumentCharacterCount();
       void refreshNoteAnchorPreviews();
@@ -1013,6 +1023,54 @@ function App() {
       ui.paragraphPlainModeActive,
       ui.writingMode,
     ],
+  );
+
+  /**
+   * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 削除フロー terminal state 後の focus 復帰。
+   * context menu / native confirm は破棄済みである前提で呼ばれる。非同期 trash /
+   * refresh の間にユーザーが別 UI へ移っていたら奪わないため、どちらの分岐でも
+   * focus が vacant なときだけ戻す。Source Mode 中は隠れた host PM を掴まず既存
+   * controller 境界を使い、それ以外の判定（Local Window が正規 owner か / active
+   * session の証明失敗で skip するか）は EditorCore 側が持つ。
+   */
+  const restoreEditingFocusAfterExplorerDelete = useCallback(() => {
+    if (ui.fullPlainEditActive) {
+      if (!isEditingFocusVacant(document.activeElement)) return;
+      sourceModeController.focus();
+      return;
+    }
+    coreRef.current?.focusCurrentEditingOwner();
+  }, [sourceModeController, ui.fullPlainEditActive]);
+
+  /**
+   * FILE-EXPLORER-CREATE-OPEN-TAB1 review-fix: File Explorer からの文書 open を
+   * 1 本の focus 契約へ揃える共通境界（新規作成 / 現在タブ load / 新しいタブ open）。
+   *
+   * - 文書 load / tab activation が**正式に成功した結果のときだけ** focus を戻す。
+   * - 開始時点の focus owner を控え、待機中に検索欄 / 設定 UI / 外部アプリへ移って
+   *   いたら奪い返さない（`focusCurrentEditingOwner()` が identity / generation /
+   *   DOM 接続を再証明し、Local Window が live owner なら host へ倒さない）。
+   * - 例外は `failed` へ正規化する。timer / polling / rAF / synthetic event は足さない。
+   */
+  const openDocumentWithFocus = useCallback(
+    async <T,>(
+      reason: string,
+      filePath: string,
+      open: (savedStat: SavedFileStat) => Promise<T>,
+      succeeded: (result: T) => boolean,
+    ): Promise<T | "failed"> => {
+      flushImeCompositionSideEffects(reason);
+      const handoffFrom = document.activeElement;
+      try {
+        const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
+        const result = await open(stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null);
+        if (succeeded(result)) coreRef.current?.focusCurrentEditingOwner(handoffFrom);
+        return result;
+      } catch {
+        return "failed";
+      }
+    },
+    [flushImeCompositionSideEffects],
   );
 
   const {
@@ -1055,23 +1113,35 @@ function App() {
     notifyFileSaved: notifyFileExplorerFileSaved,
   } = useFileExplorer({
     uiLanguageMode: ui.uiLanguageMode,
+    // 現在タブへ load。'loaded' / 'activated-existing'（重複 path の既存タブ activate）だけ focus。
     onFileContentLoaded: async (filePath, content) => {
-      flushImeCompositionSideEffects("file-load-active-tab");
-      const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
-      const saved: SavedFileStat = stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
-      void tabManager.loadIntoActiveTab(
+      await openDocumentWithFocus(
+        "file-load-active-tab",
         filePath,
-        getPathBaseName(filePath),
-        content,
-        saved,
+        (saved) => tabManager.loadIntoActiveTab(filePath, getPathBaseName(filePath), content, saved),
+        (result) => result === "loaded" || result === "activated-existing",
       );
     },
+    // 新しいタブで open。'added'（既存タブ activate を含む既存契約）だけ focus。
     onOpenFileInNewTab: async (filePath, content) => {
-      flushImeCompositionSideEffects("file-load-new-tab");
-      const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
-      const saved: SavedFileStat = stat ? { mtimeMs: stat.mtimeMs, size: stat.size } : null;
-      const opened = await tabManager.openFileInTab(filePath, getPathBaseName(filePath), content, saved);
+      const opened = await openDocumentWithFocus(
+        "file-load-new-tab",
+        filePath,
+        (saved) => tabManager.openFileInTab(filePath, getPathBaseName(filePath), content, saved),
+        (result) => result === "added",
+      );
       if (opened === "tab-limit") showTabLimitNotice();
+    },
+    // FILE-EXPLORER-CREATE-OPEN-TAB1: 作成成功後だけ、正本の openFileInTab で新しいタブへ開く。
+    // 開けなくても作成済みファイルは消さない（rollback しない）。案内は File Explorer 側が出す。
+    onOpenCreatedFileInNewTab: async (filePath) => {
+      const opened = await openDocumentWithFocus(
+        "file-create-new-tab",
+        filePath,
+        (saved) => tabManager.openFileInTab(filePath, getPathBaseName(filePath), "", saved),
+        (result) => result === "added",
+      );
+      return opened === "added" ? "opened" : opened;
     },
     onFileMoved: explorerMetadataBridge.onFileMoved,
     canTransferEntry: explorerMetadataBridge.canTransferEntry,
@@ -1080,6 +1150,13 @@ function App() {
       // 付箋は自動削除しない。missing-file 一覧へ反映するため refresh のみ。
       refreshNotesAfterDelete();
     },
+    // FILE-EXPLORER-CREATE-DELETE-FOCUS1: 削除フローの terminal state 通知。
+    // FILE-EXPLORER-DELETE-OPEN-TABS1: 削除と open tab の整合は tab manager 側の限定境界へ委ねる。
+    prepareDeleteTabPlan: (target) => tabManager.prepareFileExplorerDeleteTabPlan(target),
+    beginDeleteTabLease: (plan) => tabManager.beginFileExplorerDeleteTabLease(plan),
+    finalizeDeleteTabPlan: (plan) => tabManager.finalizeFileExplorerDeleteTabPlan(plan),
+    abandonDeleteTabPlan: () => tabManager.releaseFileExplorerDeleteTabLease(),
+    onDeleteEntrySettled: () => restoreEditingFocusAfterExplorerDelete(),
     // File Explorer からの v3 登録成功後、Project タブを refresh。
     onProjectRegistered: () => setProjectRefreshNonce((nonce) => nonce + 1),
     projectRefreshNonce,
@@ -1455,7 +1532,9 @@ function App() {
           });
           ui.markDirtyFalseForTab(targetTabId, md);
           await Promise.all([refreshActiveDocumentStat(savedFilePath), fetchAndPatchSavedStat(targetTabId, savedFilePath)]);
-          showBackupWarningIfPresent(backupWarning); saveDocumentDetailRef.current = { backupWarning }; return true;
+          showBackupWarningIfPresent(backupWarning);
+          saveDocumentDetailRef.current = { backupWarning, savedFilePath };
+          return true;
         };
 
         const saveCurrentDocumentAs = async (): Promise<boolean> => {
@@ -1813,7 +1892,11 @@ function App() {
       const detail = saveDocumentDetailRef.current as SaveDocumentDetail | null;
       saveDocumentDetailRef.current = null;
       if (ok) {
-        return { ok: true, backupWarning: detail?.backupWarning };
+        return {
+          ok: true,
+          backupWarning: detail?.backupWarning,
+          savedFilePath: detail?.savedFilePath,
+        };
       }
       if (detail?.canceled) {
         return { ok: false, reason: { kind: "canceled" } };
@@ -2013,7 +2096,32 @@ function App() {
     defaultWritingMode: ui.defaultWritingMode, effectiveWritingMode: ui.writingMode,
     defaultLineBreakPolicy: ui.defaultLineBreakPolicy,
     guardSourceModeDraft: guardSourceModeDraftFn,
-    localImeDraftDirtyOwnerTabId: localImeDraftDirtyTabId, readLocalImeDraftDirtyNotice: getLocalImeDraftDirtyNotice, prepareLocalImeDocumentAction: (reason) => requestLocalImeDocumentAction(reason), isLocalImeDocumentActionPending,
+    localImeDraftDirtyOwnerTabId: localImeDraftDirtyTabId, hasActiveDocumentUncommittedDraft, readLocalImeDraftDirtyNotice: getLocalImeDraftDirtyNotice, prepareLocalImeDocumentAction: (reason) => requestLocalImeDocumentAction(reason), isLocalImeDocumentActionPending,
+  });
+
+  const {
+    flush: flushEditorSession,
+    getStatusForE2e: getEditorSessionStatusForE2e,
+  } = useEditorSession({
+    coreReady: editorCoreReady,
+    settingsReady: ui.settingsSyncReady,
+    coreRef,
+    tabs: ui.tabs,
+    activeTabId: ui.activeTabId,
+    setTabs: ui.setTabs,
+    setActiveTabId: ui.setActiveTabId,
+    defaultWritingMode: ui.defaultWritingMode,
+    defaultLineBreakPolicy: ui.defaultLineBreakPolicy,
+    setSuppressNextDirty: ui.setSuppressNextDirty,
+    ensureSafeLineBreakPolicyBeforeDocumentLoad:
+      ui.ensureSafeLineBreakPolicyBeforeDocumentLoad,
+    closePlainEditModes: ui.closePlainEditModes,
+    refreshHeadings: ui.refreshHeadings,
+    resetEditorScroll,
+    notifyActiveDocumentPath: (filePath) => {
+      window.nyozeBridge?.document?.setActiveFilePath(filePath);
+    },
+    onActiveContentLoaded: setActiveDocumentCharacterCount,
   });
 
   const sendBugReport = useCallback(async () => {
@@ -2123,6 +2231,13 @@ function App() {
     // to commit before the controller's own rAF-debounced scheduleUpdate reads coords.
     const raf = window.requestAnimationFrame(() => {
       core.scheduleVisualFocusCurrentLineUpdate();
+      // PSEUDO-CARET-DOCUMENT-START-LAYOUT1: 擬似キャレットも同じ layout invalidation へ
+      // 接続する。document-start / frontmatter の mount・unmount は本文の配置だけを動かし
+      // PM transaction も focus / scroll / resize も伴わないため、controller の既存 listener
+      // では再計算が起きず、旧配置の座標（= メタデータ側）が残る。既存の同一 rAF と
+      // `schedulePseudoCaretUpdate()` を再利用するだけで、第二 scheduler / timer / polling は
+      // 足さない。selection・本文・dirty は触らない（表示座標の再読み取りだけ）。
+      core.schedulePseudoCaretUpdate();
     });
     return () => window.cancelAnimationFrame(raf);
   }, [
@@ -2204,6 +2319,7 @@ function App() {
     getLocalImeLocalWindowSnapshotForE2e: () => coreRef.current?.getLocalImeLocalWindowSnapshotForE2e() ?? null, getLocalImeNavigationPerformanceSnapshotForE2e: () => coreRef.current?.getLocalImeNavigationPerformanceSnapshotForE2e() ?? null, getHostImeCompositionActiveForE2e: () => coreRef.current?.isHostImeComposing() ?? false, setLocalImeLocalWindowFailureForE2e: (failure) => coreRef.current?.setLocalImeLocalWindowFailureForE2e(failure), injectLocalImeLocalWindowRestartStartFailureForE2e: (kind) => coreRef.current?.injectLocalImeLocalWindowRestartStartFailureForE2e(kind), dispatchLocalImeLocalWindowHostContentChangeForE2e: (kind) => coreRef.current?.dispatchLocalImeLocalWindowHostContentChangeForE2e(kind) ?? false, setLocalImeLocalWindowSelectionForE2e: (anchor, head) => coreRef.current?.setLocalImeLocalWindowSelectionForE2e(anchor, head) ?? false, dispatchLocalImeLocalWindowGrowthForE2e: (additionalBlocks, text) => coreRef.current?.dispatchLocalImeLocalWindowGrowthForE2e(additionalBlocks, text) ?? false,
     openOrFocusShortcutReferenceTab: tabManager.openOrFocusShortcutReferenceTab,
     documentLeaveTabsForE2e: { tabs: ui.tabs, activeTabId: ui.activeTabId, switchTo: tabManager.switchTab, add: tabManager.addNewTab, close: tabManager.closeTab },
+    getEditorSessionStatusForE2e,
     setPseudoCaretEnabledForE2e: ui.setPseudoCaretEnabled,
     setPseudoCaretThicknessForE2e: ui.setPseudoCaretThickness,
     setPseudoCaretBlinkEnabledForE2e: ui.setPseudoCaretBlinkEnabled,
@@ -2419,7 +2535,7 @@ function App() {
             if (outcome.ok) {
               const idx = closeTabs.findIndex((t) => t.id === ui.activeTabId);
               if (idx !== -1) {
-                closeTabs[idx] = { ...closeTabs[idx], dirty: false };
+                closeTabs[idx] = applySuccessfulSaveToCloseTab(closeTabs[idx]!, outcome.savedFilePath);
               }
             }
             return outcome;
@@ -2530,7 +2646,7 @@ function App() {
             }
             const idx = closeTabs.findIndex((t) => t.id === result.failedTab.id);
             if (idx !== -1) {
-              closeTabs[idx] = { ...closeTabs[idx], dirty: false };
+              closeTabs[idx] = applySuccessfulSaveToCloseTab(closeTabs[idx]!, detail?.savedFilePath);
             }
           } else {
             const saved = await handleNonActiveTabSaveAs(result.failedTab.id);
@@ -2543,7 +2659,15 @@ function App() {
       };
 
       void attempt()
-        .then((ok) => appState.reportSaveBeforeClose(requestId, ok))
+        .then(async (ok) => {
+          if (ok) {
+            // Save As may have changed a path inside this close handshake before
+            // React can commit another topology effect. Session failure is best-
+            // effort and never changes the save/close result.
+            await flushEditorSession(closeTabs, ui.activeTabId).catch(() => false);
+          }
+          appState.reportSaveBeforeClose(requestId, ok);
+        })
         .catch(() => appState.reportSaveBeforeClose(requestId, false));
     });
   }, [
@@ -2560,6 +2684,7 @@ function App() {
     notifyFileExplorerFileSaved,
     hasProvisionalNotesForDocument,
     resolveDurableNotesAfterSave,
+    flushEditorSession,
   ]);
 
   // BETA-C1: Centralized Undo/Redo routing — toolbar, shortcuts, and availability
@@ -3855,15 +3980,17 @@ function App() {
         pseudoCaretEnabled={ui.pseudoCaretEnabled}
         useEditorArrowPointer={ui.useEditorArrowPointer}
         typewriterRuntimeRef={typewriterRuntimeRef}
-        onEmptyUntitledSurfaceClick={() => {
-          if (
-            ui.activeTab.filePath === null &&
-            ui.activeTab.markdownSnapshot === "" &&
-            !ui.fullPlainEditActive &&
-            !ui.paragraphPlainModeActive
-          ) {
-            coreRef.current?.focusEditor();
-          }
+        onEditorSurfaceWhitespaceClick={() => {
+          // EDITOR-SURFACE-DOCUMENT-END-CARET1: 本文末尾以降の余白 click から文書末尾へ。
+          // internal / read-only は編集 caret を作らない。Source Mode / Paragraph Plain は
+          // 既存 owner を維持する。Local Window active 中は既存 document-action barrier
+          // 経由でだけ実行し（clean は teardown のみ / dirty は draft を exact once commit
+          // してから host へ）、composing / stale / recovery では run しない（fail-closed）。
+          if (ui.activeTab.internalDocId) return;
+          if (ui.fullPlainEditActive || ui.paragraphPlainModeActive) return;
+          runLocalImeHostCommand("host-command-document-end-caret", () => {
+            coreRef.current?.placeCaretAtDocumentEnd();
+          });
         }}
         searchBarSlot={
           <SearchBar
@@ -4221,6 +4348,9 @@ function App() {
           ui.setFrontmatterProjectShowTitle(DEFAULT_FRONTMATTER_PROJECT_SHOW_TITLE);
           ui.setFrontmatterProjectShowAuthors(DEFAULT_FRONTMATTER_PROJECT_SHOW_AUTHORS);
           ui.setUseEditorArrowPointer(DEFAULT_EDITOR_ARROW_POINTER);
+          ui.setDisableRendererAccessibilityOnWindows(
+            DEFAULT_DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS,
+          );
           ui.setPseudoCaretEnabled(DEFAULT_PSEUDO_CARET_ENABLED);
           ui.setPseudoCaretThickness(DEFAULT_PSEUDO_CARET_THICKNESS);
           ui.setPseudoCaretBlinkEnabled(DEFAULT_PSEUDO_CARET_BLINK_ENABLED);
@@ -4290,6 +4420,12 @@ function App() {
         onCaretColorModeChange={ui.setCaretColorMode}
         onCaretColorCustomChange={ui.setCaretColorCustom}
         onUseEditorArrowPointerChange={ui.setUseEditorArrowPointer}
+        disableRendererAccessibilityOnWindows={
+          ui.disableRendererAccessibilityOnWindows
+        }
+        onDisableRendererAccessibilityOnWindowsChange={
+          ui.setDisableRendererAccessibilityOnWindows
+        }
         pseudoCaretEnabled={ui.pseudoCaretEnabled}
         onPseudoCaretEnabledChange={ui.setPseudoCaretEnabled}
         pseudoCaretThickness={ui.pseudoCaretThickness}

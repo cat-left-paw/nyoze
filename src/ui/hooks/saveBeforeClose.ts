@@ -22,6 +22,7 @@ import {
   type LocalImeDocumentLeaveDirtyNotice,
   type LocalImeDocumentLeaveFailureReason,
 } from "./localImeDocumentLeaveSafety";
+import { getPathBaseName } from "../utils/path";
 
 // --- Types ---
 
@@ -98,8 +99,22 @@ export type SaveBeforeCloseResult =
 
 /** R3.5-2: active tab 保存の結果を orchestrator へ伝える */
 export type ActiveTabSaveOutcome =
-  | { ok: true; backupWarning?: string }
+  | { ok: true; backupWarning?: string; savedFilePath?: string }
   | { ok: false; reason: SaveBeforeCloseFailureReason };
+
+/** Keep the synchronous close snapshot aligned with a successful Save As. */
+export function applySuccessfulSaveToCloseTab<T extends DirtyTabInfo>(
+  tab: T,
+  savedFilePath?: string,
+): T {
+  return {
+    ...tab,
+    dirty: false,
+    ...(savedFilePath
+      ? { filePath: savedFilePath, title: getPathBaseName(savedFilePath) }
+      : {}),
+  };
+}
 
 /** orchestrator に渡す deps */
 export type SaveAllDirtyTabsDeps = {

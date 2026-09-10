@@ -20,6 +20,7 @@ import {
   IconCursorText,
   IconTool,
   IconTypography,
+  IconBrandWindows,
 } from "@tabler/icons-react";
 import type { TablerIcon } from "@tabler/icons-react";
 import type {
@@ -71,6 +72,7 @@ import {
   isSystemUiThemePreset,
 } from "../../settings/theme-packs";
 import { UI_THEME_VALUES } from "../../settings/themeUtils";
+import { isWindowsCompatibilitySectionVisible } from "../../settings/rendererAccessibilitySettings";
 import type { CaretColorMode } from "../../theme/caretColor";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { createUiTextGetter } from "../i18n/uiText";
@@ -180,6 +182,12 @@ type DisplaySettingsModalProps = {
   caretColorMode: CaretColorMode;
   caretColorCustom: string | null;
   useEditorArrowPointer: boolean;
+  /**
+   * WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows 限定 opt-in（既定 false）。
+   * 反映は Nyoze の再起動後で、この toggle は自動再起動を行わない。
+   */
+  disableRendererAccessibilityOnWindows: boolean;
+  onDisableRendererAccessibilityOnWindowsChange: (value: boolean) => void;
   onCaretColorModeChange: (mode: CaretColorMode) => void;
   onCaretColorCustomChange: (color: string | null) => void;
   onUseEditorArrowPointerChange: (value: boolean) => void;
@@ -348,6 +356,8 @@ export function DisplaySettingsModal({
   caretColorMode,
   caretColorCustom,
   useEditorArrowPointer,
+  disableRendererAccessibilityOnWindows,
+  onDisableRendererAccessibilityOnWindowsChange,
   onCaretColorModeChange,
   onCaretColorCustomChange,
   onUseEditorArrowPointerChange,
@@ -2806,6 +2816,64 @@ export function DisplaySettingsModal({
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* ── WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows 互換性 ── */}
+          {isWindowsCompatibilitySectionVisible(platform) ? (
+            <div className="settings-section">
+              <SectionHeading
+                title={t("displaySettings.section.windowsCompatibility")}
+                icon={IconBrandWindows}
+                isOpen={sectionOpenState.windowsCompatibility}
+                onToggle={() => toggleSection("windowsCompatibility")}
+              />
+              {sectionOpenState.windowsCompatibility && (
+                <div
+                  className="settings-section-body"
+                  data-testid="settings-windows-compatibility"
+                >
+                  <div className="setting-item">
+                    <div className="setting-item-info">
+                      <label className="setting-checkbox-label">
+                        <input
+                          type="checkbox"
+                          data-testid="settings-windows-disable-renderer-accessibility-toggle"
+                          checked={disableRendererAccessibilityOnWindows}
+                          onChange={(e) =>
+                            onDisableRendererAccessibilityOnWindowsChange(
+                              e.target.checked,
+                            )
+                          }
+                        />
+                        {t(
+                          "displaySettings.windowsCompatibility.disableRendererAccessibility",
+                        )}
+                      </label>
+                      <div className="setting-item-desc setting-item-desc-multiline">
+                        {t(
+                          "displaySettings.windowsCompatibility.disableRendererAccessibility",
+                          "helper",
+                        )}
+                      </div>
+                      <div
+                        className="setting-item-note"
+                        data-testid="settings-windows-disable-renderer-accessibility-warning"
+                      >
+                        {t(
+                          "displaySettings.windowsCompatibility.disableRendererAccessibilityWarning",
+                        )}
+                      </div>
+                      <div
+                        className="setting-item-note"
+                        data-testid="settings-windows-disable-renderer-accessibility-restart"
+                      >
+                        {t("displaySettings.windowsCompatibility.restartRequired")}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -13,7 +13,7 @@
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
-現在のGitHub Latestは`0.4.0-beta.1`です。Microsoft Store版も同じアプリ表示versionへ更新し、Store package versionは`1.2.2.0`とします。Storeへの反映は審査完了後となるため、それまではアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`が表示される場合があります。
+現在のGitHub Latestは`0.4.0-beta.1`です。次期版`0.4.0-beta.2`は公開準備中で、Microsoft Store版も同じアプリ表示versionへ更新する予定です。Storeへの反映はGitHub Releaseとは別に審査完了後となります。
 
 ## macOS
 
@@ -99,6 +99,12 @@ Microsoft Store 版は 2026-05-06 時点で公開済みです。
 - 現行版では多重起動を抑止しているため、片方が起動中はもう片方を同時に立ち上げることはできません。
 - 旧版どうしでは多重起動抑止がない場合がありますが、同じ設定を共有するため同時起動は避けてください。
 
+### 常駐アプリとの同時利用時に編集が著しく遅い場合
+
+一部のWindows環境では、DeepLなどの常駐アプリと同時に使用した際、Nyozeの編集が著しく遅くなる場合があります。その場合は、**表示設定 → Windows互換性 → Chromiumアクセシビリティを無効化する** を有効にし、Nyozeを再起動してください。
+
+この設定は既定OFFです。スクリーンリーダーなどの支援技術を利用している場合は有効にしないでください。詳しくは[MANUAL.mdのWindows互換性](./MANUAL.md#windows互換性windowsで編集が極端に遅い場合)を参照してください。
+
 ### 旧 installer 版を使っている人へ
 
 - `0.1.0-beta.1` / `0.1.0-beta.2` を installer で入れている場合でも、現行 beta は自動で上書き更新されません。
@@ -141,6 +147,8 @@ Nyoze の設定、バックアップ、ワークスペース状態は、アプ�
   - 保存前バックアップ
 - `workspace-state.json`
   - 最近のワークスペース状態
+- `editor-session-state.json`
+  - 終了時に開いていた保存済み文書のタブ、順序、アクティブなタブ
 
 場所:
 

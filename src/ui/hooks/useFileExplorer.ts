@@ -12,6 +12,13 @@ import {
 import type { BookManifestV3UpdateOperation } from '../../project/projectIpcTypes'
 import { detectProjectTextFileExtension } from '../../project/projectTextFileScan'
 import { useExplorerProjectList } from './useExplorerProjectList'
+import { confirmFileExplorerDelete } from '../utils/fileExplorerDeleteConfirmation'
+import type {
+  FileExplorerDeleteTabFinalizeResult,
+  FileExplorerDeleteTabPlan,
+  FileExplorerDeleteTabPreflight,
+} from '../utils/fileExplorerDeleteTabPlan'
+import { awaitExplorerTrashHoldForE2e } from '../utils/fileExplorerTrashLatchForE2e'
 
 /** 左ペインのタブ（UI 表示専用。Project / Book の source of truth ではない）。 */
 export type FileExplorerLeftPaneTab = 'library' | 'projects'
@@ -119,13 +126,94 @@ export type FileExplorerRegistrationApi = {
   onRegisterAsMaterial: (role: ProjectAssetRole) => void
 }
 
+/**
+ * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 削除フローの terminal state。
+ * `unavailable` は bridge / 対象が無く 1 度も confirm へ進まなかった場合。
+ */
+export type FileExplorerDeleteOutcome =
+  | 'deleted'
+  /** 削除は成功したが、閉じられない open tab を `filePath` から切り離して収束させた。 */
+  | 'deleted-detached'
+  | 'cancelled'
+  | 'failed'
+  | 'unavailable'
+  | 'blocked'
+
+/**
+ * FILE-EXPLORER-CREATE-OPEN-TAB1: 作成した新規文書を新しいタブで開いた結果。
+ *
+ * - `opened`: 新しいタブで開き、そのタブが active になった。
+ * - `tab-limit`: タブ数上限で開けなかった。
+ * - `cancelled`: document-leave（未保存ガード / Source Mode / Local Window）で中止した。
+ * - `failed`: open 経路が利用できない / 例外で開けなかった。
+ *
+ * `opened` 以外でも**作成済みファイルは削除しない**。File Explorer は作成した
+ * ファイルを選択状態のまま残し、理由が分かる案内を出すだけにする。
+ */
+export type FileExplorerCreatedFileOpenOutcome =
+  | 'opened'
+  | 'tab-limit'
+  | 'cancelled'
+  | 'failed'
+
+/** 作成には成功したが新しいタブで開けなかったときの案内（作成済みファイルは残る）。 */
+export const CREATED_NOTE_OPEN_NOTICES: Record<
+  Exclude<FileExplorerCreatedFileOpenOutcome, 'opened'>,
+  string
+> = {
+  'tab-limit':
+    '文書を作成しました。開いているタブが上限のため、新しいタブでは開けませんでした。不要なタブを閉じてから開いてください。',
+  cancelled:
+    '文書を作成しました。編集中の文書から移動できなかったため、新しいタブでは開けませんでした。保存または未保存の変更を解決してから開いてください。',
+  failed:
+    '文書を作成しました。新しいタブで開けませんでした。ファイル一覧から開いてください。',
+}
+
 type UseFileExplorerOptions = {
   uiLanguageMode: UiLanguageMode
   onFileContentLoaded: (filePath: string, content: string) => void
   onOpenFileInNewTab?: (filePath: string, content: string) => void
+  /**
+   * FILE-EXPLORER-CREATE-OPEN-TAB1: 新規文書の作成が**成功したときだけ**呼ぶ。
+   * 作成済み絶対 path を渡し、正本の `openFileInTab()` で新しいタブへ開かせる。
+   *
+   * 失敗しても作成済みファイルの rollback には使わない（削除しない）。
+   * 新規フォルダ作成では呼ばない。
+   */
+  onOpenCreatedFileInNewTab?: (
+    filePath: string,
+  ) => Promise<FileExplorerCreatedFileOpenOutcome>
   onFileMoved?: (fromPath: string, toPath: string, opts?: { isDirectory?: boolean }) => void
   /** ゴミ箱へ移動完了後 (付箋 missing-file 一覧などを refresh する用途) */
   onFileDeleted?: (path: string) => void
+  /**
+   * FILE-EXPLORER-DELETE-OPEN-TABS1: 削除確認より前に、削除対象と open tab の
+   * 整合を検査する。`ok: false` なら confirm も `trashItem` も行わずに中止する。
+   * 返る plan は immutable な値で、Cancel / trash 失敗では捨てるだけでよい。
+   */
+  prepareDeleteTabPlan?: (targetPath: string) => FileExplorerDeleteTabPreflight
+  /**
+   * `trashItem()` を呼ぶ直前の再証明 + 操作 lease 取得。確認ダイアログ表示中に
+   * 対象タブ / dirty / active document が変わっていたら false を返し、削除自体を中止する。
+   * true を返したら finalize / abandon のどちらかで必ず lease を解放する。
+   */
+  beginDeleteTabLease?: (plan: FileExplorerDeleteTabPlan) => boolean
+  /**
+   * trash 成功後にだけ呼ぶ。affected tab を close か detach へ**必ず**収束させ、
+   * どちらだったかを返す。ここで「何もしない」を選ぶと、ゴミ箱へ移動済みの path を
+   * 指す編集可能タブが残ってしまうため、結果は呼び出し側が必ず読む。
+   */
+  finalizeDeleteTabPlan?: (
+    plan: FileExplorerDeleteTabPlan,
+  ) => FileExplorerDeleteTabFinalizeResult
+  /** 確認 Cancel / trash 失敗などで plan を捨てるときの lease 解放（冪等）。 */
+  abandonDeleteTabPlan?: () => void
+  /**
+   * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 削除フローが terminal state に達した直後に
+   * 1 回だけ呼ぶ。成功・確認キャンセル・trash 失敗・対象なしのすべてを含む。
+   * 呼び出し側は「編集可能な文書へ入力できる状態」の復帰にだけ使う。
+   */
+  onDeleteEntrySettled?: (outcome: FileExplorerDeleteOutcome) => void
   /** v3 books.json への登録成功後に Project タブを refresh させる用途（nonce bump 等）。 */
   onProjectRegistered?: () => void
   /**
@@ -334,6 +422,32 @@ export function collectAncestors(dir: string, root: string): string[] {
   return ancestors
 }
 
+/**
+ * FILE-EXPLORER-CREATE-DELETE-FOCUS1: `trashItem()` の結果を boolean へ正規化する。
+ *
+ * main 側の handler は通常 false へ変換するが、IPC 拒否など Promise 自体が reject
+ * する経路が残る。reject を握らないと削除フローの terminal 通知（focus 復帰）へ
+ * 到達せず「どこへも入力できない」状態が残るため、reject も false と同じ失敗として
+ * 扱い、terminal exact once を契約にする。ここでは再試行も本文操作も行わない。
+ */
+/**
+ * FILE-EXPLORER-DELETE-OPEN-TABS1: trash 成功後、閉じられなかった open tab を
+ * `filePath` から切り離して収束させたときの案内。
+ */
+export const DELETE_DETACHED_TAB_NOTICE =
+  '削除しました。編集中だったタブはファイルとの関連付けを解除しました。内容は残っているので、必要なら別名で保存してください。'
+
+export async function trashEntryForDeleteFlow(
+  trashItem: (targetPath: string) => Promise<boolean>,
+  targetPath: string,
+): Promise<boolean> {
+  try {
+    return (await trashItem(targetPath)) === true
+  } catch {
+    return false
+  }
+}
+
 export function resolveCreateDestinationDir(
   rootDir: string,
   selectedPath: string | null,
@@ -400,8 +514,14 @@ export function useFileExplorer({
   uiLanguageMode,
   onFileContentLoaded,
   onOpenFileInNewTab,
+  onOpenCreatedFileInNewTab,
   onFileMoved,
   onFileDeleted,
+  onDeleteEntrySettled,
+  prepareDeleteTabPlan,
+  beginDeleteTabLease,
+  finalizeDeleteTabPlan,
+  abandonDeleteTabPlan,
   onProjectRegistered,
   canTransferEntry,
   onProjectFileTransferred,
@@ -882,10 +1002,28 @@ export function useFileExplorer({
         ...ancestors,
         getParentPath(destinationDir),
       ].filter((value): value is string => Boolean(value)))
+      // FILE-EXPLORER-CREATE-OPEN-TAB1: tab open の成否にかかわらず、作成済みファイルは
+      // 選択状態のまま残す（開けなかったときに利用者が自分で開く導線になる）。
       setSelectedPath(targetPath)
-      setOperationError(null)
+      // 作成に成功したときだけ、正本の open 経路で新しいタブへ開く。
+      // 開けなくても作成済みファイルは削除せず、既存タブ / 原稿にも触れない。
+      const openOutcome = onOpenCreatedFileInNewTab
+        ? await onOpenCreatedFileInNewTab(targetPath)
+        : null
+      setOperationError(
+        openOutcome === null || openOutcome === 'opened'
+          ? null
+          : CREATED_NOTE_OPEN_NOTICES[openOutcome],
+      )
     },
-    [bridge, fileExplorerDir, refreshDirectories, requestNameInput, suggestAvailableName],
+    [
+      bridge,
+      fileExplorerDir,
+      onOpenCreatedFileInNewTab,
+      refreshDirectories,
+      requestNameInput,
+      suggestAvailableName,
+    ],
   )
 
   const handleCreateFolder = useCallback(
@@ -1051,19 +1189,74 @@ export function useFileExplorer({
     [bridge, selectedEntry],
   )
 
+  /**
+   * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 削除フローの終端は必ず 1 回だけ通知する。
+   *
+   * context menu は呼び出し前に破棄済みで、削除確認の直前に focus は
+   * body へ落ちている。成功だけでなくキャンセル・失敗・対象なし・preflight 拒否でも
+   * 通知しないと「どこへも入力できない」状態が残る。通知先は focus 復帰にだけ使う契約で、
+   * ここで文書内容 / selection / dirty へは触れない。
+   *
+   * FILE-EXPLORER-DELETE-OPEN-TABS1: open tab との整合は host 側の限定 callback へ委ねる。
+   * 順序は preflight → confirm → 再証明 → trash → finalize(close) で固定する。
+   * dirty な affected tab があるときは confirm も trash も起こさず、plan は値なので
+   * Cancel / trash 失敗のときは捨てるだけ（tab / dirty / Local Window は触らない）。
+   */
   const handleDeleteEntry = useCallback(
     async (entry: FileExplorerVisibleEntry | null) => {
-      if (!bridge?.trashItem) return
-      const targetEntry = entry ?? selectedEntry
-      if (!targetEntry) return
-      const confirmed = window.confirm(
-        `「${targetEntry.name}」をゴミ箱に移動しますか？`,
-      )
-      if (!confirmed) return
-      const ok = await bridge.trashItem(targetEntry.path)
-      if (!ok) {
-        setOperationError('ゴミ箱への移動に失敗しました。パスと権限を確認してください。')
+      const trashItem = bridge?.trashItem
+      if (!trashItem) {
+        onDeleteEntrySettled?.('unavailable')
         return
+      }
+      const targetEntry = entry ?? selectedEntry
+      if (!targetEntry) {
+        onDeleteEntrySettled?.('unavailable')
+        return
+      }
+      // 1-3: 削除確認より前に open tab を preflight する。dirty なら削除操作自体を行わない。
+      const preflight = prepareDeleteTabPlan?.(targetEntry.path)
+      if (preflight && !preflight.ok) {
+        setOperationError(preflight.message)
+        onDeleteEntrySettled?.('blocked')
+        return
+      }
+      const plan = preflight?.plan ?? null
+      // 4-5: 既存の削除確認を exact once で表示する。Cancel なら何も変更しない。
+      const confirmed = await confirmFileExplorerDelete(targetEntry.name)
+      if (!confirmed) {
+        onDeleteEntrySettled?.('cancelled')
+        return
+      }
+      // 6: 確認中に対象タブ / dirty / active document が動いていたら削除しない。
+      //    同時に操作 lease を取り、finalize 完了まで tab 切替 / 追加 / close / load を止める。
+      //    未取得で戻るのは trash 前だけなので、ここでの fail-closed は安全側。
+      if (plan && beginDeleteTabLease && !beginDeleteTabLease(plan)) {
+        setOperationError(
+          '削除対象のタブの状態が変わりました。もう一度お試しください。',
+        )
+        onDeleteEntrySettled?.('blocked')
+        return
+      }
+      let finalizeResult: FileExplorerDeleteTabFinalizeResult | null = null
+      try {
+        // E2E 限定 hold。production では armed にならず即座に解決する。
+        await awaitExplorerTrashHoldForE2e()
+        // 7-8: trash は exact once。失敗したらタブは一切変更しない。
+        const ok = await trashEntryForDeleteFlow(trashItem, targetEntry.path)
+        if (!ok) {
+          setOperationError('ゴミ箱への移動に失敗しました。パスと権限を確認してください。')
+          onDeleteEntrySettled?.('failed')
+          return
+        }
+        // 9: trash 成功後は必ず finalize する。ここで skip すると、ゴミ箱へ移動済みの
+        //    path を指す編集可能タブが残り、このスライスが直す不整合を再現してしまう。
+        if (plan) {
+          finalizeResult = finalizeDeleteTabPlan?.(plan) ?? null
+        }
+      } finally {
+        // finalize 内でも解放するが、trash 失敗 / 例外経路でも必ず lease を戻す（冪等）。
+        abandonDeleteTabPlan?.()
       }
       if (clipboard && isSamePath(clipboard.sourcePath, targetEntry.path)) {
         setClipboard(null)
@@ -1081,9 +1274,30 @@ export function useFileExplorer({
       if (onFileDeleted) {
         onFileDeleted(targetEntry.path)
       }
+      // finalize 結果を無条件に 'deleted' へ潰さない。detach へ収束した場合は
+      // 「本文は残っているが保存先が無い」ことを利用者へ伝える。
+      if (finalizeResult === 'closed-with-detached') {
+        setOperationError(DELETE_DETACHED_TAB_NOTICE)
+        onDeleteEntrySettled?.('deleted-detached')
+        return
+      }
       setOperationError(null)
+      onDeleteEntrySettled?.('deleted')
     },
-    [bridge, clipboard, fileExplorerDir, onFileDeleted, refreshDirectories, selectedEntry, selectedPath],
+    [
+      bridge,
+      clipboard,
+      fileExplorerDir,
+      abandonDeleteTabPlan,
+      beginDeleteTabLease,
+      finalizeDeleteTabPlan,
+      onDeleteEntrySettled,
+      onFileDeleted,
+      prepareDeleteTabPlan,
+      refreshDirectories,
+      selectedEntry,
+      selectedPath,
+    ],
   )
 
   /**

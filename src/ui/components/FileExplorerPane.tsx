@@ -44,6 +44,7 @@ import {
 } from "../../project/projectBooksQuery";
 import { ProjectRoleIcon } from "./projectRoleIcons";
 import { PaneTablerIcon } from "./PaneTablerIcon";
+import { consumePendingDeleteTarget } from "./fileExplorerPendingDelete";
 import { FileExplorerProjectListSection } from "./FileExplorerProjectListSection";
 import { LocalImeLocalEditingStatusIcon } from "./LocalImeLocalEditingStatusIcon";
 import type { ProjectListUiState } from "../hooks/useProjectList";
@@ -357,6 +358,15 @@ export function FileExplorerPane({
   const [registerSubmenu, setRegisterSubmenu] = useState<"book" | "material" | null>(
     null,
   );
+  /**
+   * FILE-EXPLORER-CREATE-DELETE-FOCUS1: context menu の Delete で選ばれた対象。
+   * menu が unmount された次の commit で 1 回だけ削除フローへ渡す。
+   *
+   * 「消費済み」を state commit に依存させないため one-shot ref で持つ。state だと
+   * `setState(null)` が commit されるまで反映されず、同じ commit の snapshot で
+   * effect が再実行されると同じ対象を二重消費し得る。
+   */
+  const pendingDeleteEntryRef = useRef<FileExplorerVisibleEntry | null>(null);
 
   const selectedEntry = useMemo(
     () => visibleEntries.find((entry) => entry.selected) ?? null,
@@ -593,16 +603,33 @@ export function FileExplorerPane({
     onRevealInFileManager,
   ]);
 
+  /**
+   * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 削除フローは context menu を閉じてから開始する。
+   *
+   * `useFileExplorer` の削除は同期 `window.confirm()` から始まるので、ここで直接
+   * 呼ぶと menu が mount されたまま native modal が出て、focus owner も menu の
+   * button のままになる。unmount された時点で focus は body へ落ちるが、その時
+   * 誰も editor へ戻さないため以後の直接入力が本文へ入らない。
+   *
+   * そこで pending target だけを置いて menu を閉じ、menu が実際に unmount された
+   * commit 後の effect から exact 1 回だけ開始する（timer / rAF は使わない）。
+   */
   const handleContextDelete = useCallback(() => {
-    if (!canContextDelete) return;
-    onDeleteEntry(effectiveTargetEntry);
+    if (!canContextDelete || !effectiveTargetEntry) return;
+    pendingDeleteEntryRef.current = effectiveTargetEntry;
     closeContextMenu();
-  }, [
-    canContextDelete,
-    closeContextMenu,
-    effectiveTargetEntry,
-    onDeleteEntry,
-  ]);
+  }, [canContextDelete, closeContextMenu, effectiveTargetEntry]);
+
+  useEffect(() => {
+    // menu 表示中は消費しない。取り出せた時点で latch は同期的に空になっているので、
+    // effect が再実行されても 2 回目以降は対象なしで終わる。
+    const pending = consumePendingDeleteTarget(
+      pendingDeleteEntryRef,
+      contextMenu.visible,
+    );
+    if (!pending) return;
+    onDeleteEntry(pending);
+  }, [contextMenu.visible, onDeleteEntry]);
 
   const handleRegisterToBook = useCallback(
     (bookId: string) => {
@@ -633,6 +660,12 @@ export function FileExplorerPane({
         >
           {explorerTitle}
         </span>
+        {/*
+          FILE-EXPLORER-CREATE-DELETE-FOCUS1: 上部ボタンの作成先は選択項目から決める。
+          解決の正本は `useFileExplorer` の `resolveCreateDestinationDir()` なので、
+          ここでは選択 entry をそのまま渡すだけで path 文字列を加工しない
+          （フォルダ選択中 = その中 / ファイル選択中 = 親 / 未選択 = 書庫 root）。
+        */}
         <div className="pane-header-actions file-explorer-actions">
           <ExplorerActionIconButton
             label={t("explorer.newDocument")}
@@ -643,7 +676,7 @@ export function FileExplorerPane({
                 stroke={EXPLORER_ACTION_ICON_STROKE}
               />
             }
-            onClick={() => onCreateNote(null)}
+            onClick={() => onCreateNote(selectedEntry)}
             disabled={!fileExplorerDir || !rootDirLoaded}
           />
           <ExplorerActionIconButton
@@ -655,7 +688,7 @@ export function FileExplorerPane({
                 stroke={EXPLORER_ACTION_ICON_STROKE}
               />
             }
-            onClick={() => onCreateFolder(null)}
+            onClick={() => onCreateFolder(selectedEntry)}
             disabled={!fileExplorerDir || !rootDirLoaded}
           />
         </div>

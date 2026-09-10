@@ -548,10 +548,14 @@ export function createPseudoCaretController(
       hideWithNativeSlotCaret()
       return
     }
-    const externalSource = options.getExternalGeometrySource?.() ?? null
+    // Windows native confirm のように activeElement を stale に残したまま document
+    // focus だけを失う場合がある。pseudo caret は実 text-input owner の表示なので、
+    // `view.hasFocus()` / Local Window proof だけではなく document focus も必須にする。
+    const documentFocused = pmRoot.ownerDocument.hasFocus()
+    const externalSource = documentFocused ? (options.getExternalGeometrySource?.() ?? null) : null
     const finalSource = resolvePseudoCaretFinalSource({
       externalSourceAvailable: externalSource !== null,
-      pmFocus: view.hasFocus(),
+      pmFocus: documentFocused && view.hasFocus(),
       pmCollapsedOrComposing: view.state.selection.empty || options.getIsComposing() || view.composing,
     })
     if (finalSource === 'external' && externalSource) {
@@ -724,6 +728,8 @@ export function createPseudoCaretController(
     editorSurface.addEventListener('scroll', onScroll, { passive: true })
   }
   window.addEventListener('resize', onResize)
+  window.addEventListener('focus', onFocus)
+  window.addEventListener('blur', onBlur)
   pmRoot.addEventListener('focus', onFocus)
   pmRoot.addEventListener('blur', onBlur)
   // Read-only intent capture for vertical wrap-boundary affinity (no preventDefault / no state change).
@@ -755,6 +761,8 @@ export function createPseudoCaretController(
         editorSurface.removeEventListener('scroll', onScroll)
       }
       window.removeEventListener('resize', onResize)
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
       pmRoot.removeEventListener('focus', onFocus)
       pmRoot.removeEventListener('blur', onBlur)
       pmRoot.removeEventListener('keydown', noteNavigationIntent, true)

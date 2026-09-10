@@ -43,6 +43,18 @@ import {
   type LocalImeDocumentLeaveProof,
 } from "./localImeDocumentLeaveSafety";
 import {
+  applyFileExplorerDeleteTabFinalizePlan,
+  demoteFileExplorerDeleteTabFinalizePlanToDetach,
+  proveFileExplorerDeleteTabPlan,
+  resolveFileExplorerDeleteTabFinalizePlan,
+  resolveFileExplorerDeleteTabPreflight,
+  type FileExplorerDeleteTabFinalizePlan,
+  type FileExplorerDeleteTabFinalizeResult,
+  type FileExplorerDeleteTabPlan,
+  type FileExplorerDeleteTabPreflight,
+  type FileExplorerDeleteTabState,
+} from "../utils/fileExplorerDeleteTabPlan";
+import {
   createShortcutReferenceEditorTab,
   deriveShortcutReferenceTabCore,
 } from "../internalDocs/createShortcutReferenceTab";
@@ -105,6 +117,12 @@ export type TabManagerDeps = {
     proveBeforeDiskWrite?: () => boolean;
   }) => Promise<GuardResult>;
   localImeDraftDirtyOwnerTabId: string | null;
+  /**
+   * FILE-EXPLORER-DELETE-OPEN-TABS1: active 文書の Source Mode draft /
+   * Paragraph Plain 未確定 overlay 入力の probe。`tab.dirty` には即時反映されないため、
+   * 削除 preflight ではこれも dirty として扱う。
+   */
+  hasActiveDocumentUncommittedDraft?: () => boolean;
   readLocalImeDraftDirtyNotice: () => LocalImeDocumentLeaveDirtyNotice;
   prepareLocalImeDocumentAction: (
     reason: LocalImeDocumentLeaveOperation,
@@ -129,6 +147,9 @@ export type UnsavedChangesSaveTargetTab = Pick<
 
 /** Result of addNewTab / openFileInTab to distinguish tab-limit from guard cancel. */
 export type TabAddResult = "added" | "tab-limit" | "cancelled";
+
+/** FILE-EXPLORER-DELETE-OPEN-TABS1: trash 成功後の tab finalize の結果（正本は pure module）。 */
+export type { FileExplorerDeleteTabFinalizeResult };
 
 
 function makeEmptyTab(
@@ -161,6 +182,12 @@ function makeEmptyTab(
 
 export function useTabManager(deps: TabManagerDeps) {
   const switchingRef = useRef(false);
+  /**
+   * FILE-EXPLORER-DELETE-OPEN-TABS1: File Explorer 削除の操作 lease。
+   * `trashItem()` の直前から finalize 完了までの間だけ削除対象 path を保持し、
+   * `switchingRef` を握って tab lifecycle 操作を止める。
+   */
+  const deleteTabLeaseRef = useRef<string | null>(null);
 
   // Keep a ref to always access the latest deps without re-creating callbacks
   const depsRef = useRef(deps);
@@ -931,6 +958,204 @@ export function useTabManager(deps: TabManagerDeps) {
     ],
   );
 
+  /**
+   * FILE-EXPLORER-DELETE-OPEN-TABS1
+   *
+   * Nyoze 自身の File Explorer から削除した項目と open tab を整合させる境界。
+   * File Explorer / App はここを呼ぶだけで、`setTabs` / `setActiveTabId` /
+   * EditorCore 内部 DOM / Local Window 内部 DOM / dirty flag を直接触らない。
+   *
+   *   prepare(preflight) → confirm → beginLease(再証明 + 操作 lease)
+   *     → trashItem → finalize(close / detach) → release
+   *
+   * dirty な affected tab が 1 件でもあれば prepare が拒否し、confirm も trash も
+   * 起こらない（fail-closed が安全なのは trash 前まで）。lease 取得後は tab 切替 /
+   * 追加 / close / load / Shortcut Reference を全て拒否するので、trash 完了待ちの間に
+   * tab 構成・active tab・document identity は動かせない。lease で止められない
+   * 「active 文書への入力」だけは finalize 側で detach へ収束させる。
+   */
+  const readFileExplorerDeleteTabState = useCallback((): FileExplorerDeleteTabState => {
+    const d = depsRef.current;
+    return {
+      tabs: d.tabs,
+      activeTabId: d.activeTabId,
+      localImeDraftDirtyOwnerTabId: d.localImeDraftDirtyOwnerTabId,
+      localImeDraftDirtyNotice: d.readLocalImeDraftDirtyNotice(),
+      localImeDocumentActionPending: d.isLocalImeDocumentActionPending(),
+      activeDocumentHasUncommittedDraft:
+        d.hasActiveDocumentUncommittedDraft?.() ?? false,
+    };
+  }, []);
+
+  /** 削除確認より前の preflight。ok:false なら confirm も trash も行わない。 */
+  const prepareFileExplorerDeleteTabPlan = useCallback(
+    (targetPath: string): FileExplorerDeleteTabPreflight =>
+      resolveFileExplorerDeleteTabPreflight(
+        readFileExplorerDeleteTabState(),
+        targetPath,
+      ),
+    [readFileExplorerDeleteTabState],
+  );
+
+  /**
+   * `trashItem()` の直前に呼ぶ。plan を再証明し、成功したら操作 lease を取る。
+   *
+   * lease は既存の `switchingRef`（document lifecycle 進行中フラグ）そのもので、
+   * `switchTab` / `addNewTab` / `closeTab` / `openFileInTab` / `loadIntoActiveTab` /
+   * `openOrFocusShortcutReferenceTab` は全てこれを見て "cancelled" を返す。
+   * false（未取得）で返るのは trash 前だけなので、ここでの fail-closed は安全側。
+   */
+  const beginFileExplorerDeleteTabLease = useCallback(
+    (plan: FileExplorerDeleteTabPlan): boolean => {
+      if (switchingRef.current) return false;
+      if (!proveFileExplorerDeleteTabPlan(plan, readFileExplorerDeleteTabState())) {
+        return false;
+      }
+      deleteTabLeaseRef.current = plan.targetPath;
+      switchingRef.current = true;
+      return true;
+    },
+    [readFileExplorerDeleteTabState],
+  );
+
+  /** lease の解放。finalize 済み / 未取得でも安全に呼べる（冪等）。 */
+  const releaseFileExplorerDeleteTabLease = useCallback((): void => {
+    if (deleteTabLeaseRef.current === null) return;
+    deleteTabLeaseRef.current = null;
+    switchingRef.current = false;
+  }, []);
+
+  /**
+   * active tab を閉じるために別文書へ切り替える。成立しなければ ok:false を返し、
+   * 呼び出し側が detach へ降格する（trash 済みなので「何もしない」は選べない）。
+   */
+  const switchActiveDocumentForDeleteFinalize = useCallback(
+    (
+      finalizePlan: FileExplorerDeleteTabFinalizePlan,
+    ): { ok: true; newTab: EditorTab | null } | { ok: false } => {
+      const d = depsRef.current;
+      const prepared = beginDocumentLeave("tab-close-active");
+      if (!prepared.ok) return { ok: false };
+
+      // 残る tab が 0 件: Nyoze は最低 1 tab を保つので、既定 policy の空 tab を 1 件作る。
+      if (finalizePlan.nextActiveTabId === null) {
+        const newTab = makeEmptyTab(
+          d.defaultWritingMode,
+          d.defaultLineBreakPolicy,
+        );
+        const core = d.coreRef.current;
+        if (core) {
+          d.notifyActiveDocumentPath?.(newTab.filePath ?? null);
+          d.setSuppressNextDirty(true);
+          if (!core.loadMarkdown(newTab.markdownSnapshot)) {
+            d.setSuppressNextDirty(false);
+            return { ok: false };
+          }
+          core.clearHistory();
+          core.setReadOnly(false);
+          d.closePlainEditModes();
+          d.refreshHeadings();
+          d.onTabContentLoaded(
+            newTab.markdownSnapshot,
+            newTab.frontmatterFields,
+            newTab.characterCount,
+            core.getDocumentMarkdownOptions(),
+          );
+          d.resetEditorScroll();
+        }
+        return { ok: true, newTab };
+      }
+
+      const nextTab = d.tabs.find((tab) => tab.id === finalizePlan.nextActiveTabId);
+      if (!nextTab) return { ok: false };
+      if (!restoreTab(nextTab)) return { ok: false };
+      return { ok: true, newTab: null };
+    },
+    [beginDocumentLeave, restoreTab],
+  );
+
+  /**
+   * trash 成功後にだけ呼ぶ。affected tab を exact once で close / detach へ収束させる。
+   *
+   * ファイルは既にゴミ箱にあるので、ここに「証明できないから何もしない」分岐は無い。
+   * - 現在 state から close / detach を決め直す（古い snapshot のままでは閉じない）。
+   * - active tab が affected でなければ editor へ一切触れず、background tab だけ外す。
+   * - trash 待ちの間に未保存内容が乗った tab は閉じずに detach（本文を残し `filePath` を外す）。
+   * - document 切替が成立しない場合も active tab を detach へ降格して収束させる。
+   */
+  const finalizeFileExplorerDeleteTabPlan = useCallback(
+    (plan: FileExplorerDeleteTabPlan): FileExplorerDeleteTabFinalizeResult => {
+      const leased = deleteTabLeaseRef.current === plan.targetPath;
+      try {
+        const d = depsRef.current;
+        const live = readFileExplorerDeleteTabState();
+        const tabIdOrder = live.tabs.map((tab) => tab.id);
+        let finalizePlan = resolveFileExplorerDeleteTabFinalizePlan(
+          live,
+          plan.targetPath,
+        );
+        if (
+          finalizePlan.closeTabIds.length === 0 &&
+          finalizePlan.detachTabIds.length === 0
+        ) {
+          return "no-affected-tabs";
+        }
+
+        // lease を持たない呼び出し（規約違反）では document 切替を証明できない。
+        // editor へ触らない detach だけへ降格し、削除済み path は必ず外す。
+        if (!leased) {
+          finalizePlan = demoteFileExplorerDeleteTabFinalizePlanToDetach(
+            finalizePlan,
+            live.activeTabId,
+            tabIdOrder,
+          );
+        }
+
+        let newTab: EditorTab | null = null;
+        if (finalizePlan.requiresDocumentSwitch) {
+          const switched = switchActiveDocumentForDeleteFinalize(finalizePlan);
+          if (switched.ok) {
+            newTab = switched.newTab;
+          } else {
+            finalizePlan = demoteFileExplorerDeleteTabFinalizePlanToDetach(
+              finalizePlan,
+              live.activeTabId,
+              tabIdOrder,
+            );
+          }
+        }
+
+        const appliedNewTab = newTab;
+        d.setTabs((tabs) => {
+          const next = applyFileExplorerDeleteTabFinalizePlan(
+            tabs,
+            finalizePlan,
+            generateUntitledName,
+          );
+          return appliedNewTab ? [...next, appliedNewTab] : next;
+        });
+        const nextActiveTabId = appliedNewTab
+          ? appliedNewTab.id
+          : finalizePlan.nextActiveTabId;
+        if (nextActiveTabId !== null && nextActiveTabId !== live.activeTabId) {
+          d.setActiveTabId(nextActiveTabId);
+        }
+        return finalizePlan.detachTabIds.length > 0
+          ? "closed-with-detached"
+          : "closed";
+      } finally {
+        if (leased) {
+          deleteTabLeaseRef.current = null;
+          switchingRef.current = false;
+        }
+      }
+    },
+    [
+      readFileExplorerDeleteTabState,
+      switchActiveDocumentForDeleteFinalize,
+    ],
+  );
+
   return {
     switchTab,
     addNewTab,
@@ -939,5 +1164,9 @@ export function useTabManager(deps: TabManagerDeps) {
     loadIntoActiveTab,
     snapshotActiveTab,
     openOrFocusShortcutReferenceTab,
+    prepareFileExplorerDeleteTabPlan,
+    beginFileExplorerDeleteTabLease,
+    releaseFileExplorerDeleteTabLease,
+    finalizeFileExplorerDeleteTabPlan,
   };
 }

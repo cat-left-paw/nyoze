@@ -31,6 +31,9 @@ interface Window {
       node: string
     }
     platform: 'darwin' | 'win32' | 'linux' | string
+    fileExplorer?: {
+      confirmDelete: (name: string) => Promise<boolean>
+    }
     windowControls: {
       minimize: () => Promise<boolean>
       close: () => Promise<void>
@@ -333,6 +336,14 @@ interface Window {
           capacityWarningsAcknowledged?: boolean
         }
       }) => Promise<import('./bookExportOperation').BookExportIpcResult>
+    }
+    editorSession: {
+      restore: () => Promise<
+        import('../src/session/editorSessionTypes').EditorSessionRestoreResult
+      >
+      write: (
+        payload: import('../src/session/editorSessionTypes').EditorSessionPersistRequest,
+      ) => Promise<import('../src/session/editorSessionTypes').EditorSessionWriteResult>
     }
     settings: {
       read: () => Promise<Record<string, unknown> | null>
@@ -708,6 +719,9 @@ interface Window {
       close: (tabId: string) => Promise<void>
       injectDocumentIdentity: (documentIdentity: string | null) => void
     }
+    editorSession?: {
+      snapshot: () => import('../src/ui/hooks/useEditorSession').EditorSessionHydrationStatus
+    }
     macosArrowScrollClampE2eEvaluate?: (payload: {
       gate: import('../src/editor-core/features/macosArrowScrollClamp').MacosArrowScrollClampGateInput
       beforeTop: number
@@ -750,6 +764,16 @@ interface Window {
      * production は arm しない。
      */
     savedStatPatchHold?: {
+      arm: () => boolean
+      release: () => boolean
+      snapshot: () => { armed: boolean; waiting: boolean }
+    }
+    /**
+     * NYOZE_E2E: File Explorer 削除の操作 lease 取得後〜trashItem 呼び出し前で
+     * 1 回だけ止まる latch。trash 完了待ち中のタブ切替 / 編集を注入するために使う。
+     * production は arm しない。
+     */
+    explorerTrashHold?: {
       arm: () => boolean
       release: () => boolean
       snapshot: () => { armed: boolean; waiting: boolean }

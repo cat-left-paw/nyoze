@@ -7,9 +7,9 @@
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
-現行の GitHub Latest は `0.4.0-beta.1` です。Microsoft Store版もアプリ表示version `0.4.0-beta.1` / Store package version `1.2.2.0`へ更新します。Storeへの反映は審査完了後となるため、それまではアプリ表示version `0.2.1-beta.1` / package version `1.2.1.0`が表示される場合があります。
+現行の GitHub Latest は `0.4.0-beta.1` です。次期版 `0.4.0-beta.2` は公開準備中で、Microsoft Store版も同じアプリ表示versionへ更新する予定です。Storeへの反映はGitHub Releaseとは別に審査完了後となります。
 
-`0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。`0.4.0-beta.1`にもこの修正が含まれています。
+`0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。以後の版にもこの修正が含まれています。
 
 - 小説やエッセイを縦書きでそのまま書けます
 - Markdown 形式で保存されますが、普通のテキストとして扱えます
@@ -73,8 +73,9 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - Web Book（現在文書 / Book 全体を、reader付きの単一HTMLまたはWeb公開用packageとして作成。Chrome / Edgeでの閲覧・簡易印刷/PDF保存向け。ユーザー向けHTML出力はこの経路のみ）
 - 独立した読み取り専用 Page Viewer（現在の文書 / Book 全体、CSS Columns によるページ単位の閲覧、目次・アウトラインからの見出しジャンプ、ローカル画像、`:::page-break` / `:::blank-page-N` の表示）
 - Book 本文の章頭 / 章末オーバーレイと `Option/Alt + wheel` による前章末尾 / 次章先頭への移動
-- 複数タブでの文書の表示と編集
+- 複数タブでの文書の表示と編集、および終了時に開いていた保存済みタブの次回起動時復元
 - File Explorer での一覧表示と軽い単一ファイル操作（作成 / 名前変更 / 複製 / 移動 / ゴミ箱への削除）。Finder / Explorer を置き換える本格ファイルマネージャではありません
+- Windowsで一部の常駐アプリとの同時利用時に編集が著しく遅くなる場合の互換性設定
 - WYSIWYG での 自動 TCY （縦中横）表示（表示のみ、初期 OFF、数字だけ対象のオプションあり、保存内容は不変）
 - 独自記法を使った明示 TCY（縦中横）
 - 青空文庫形式のルビ、傍点への対応
@@ -179,7 +180,7 @@ author: 著者名
 
 ## 対応環境
 
-`0.4.0-beta.1`の公式配布対象は次の環境です。
+`0.4.0-beta.2`の公式配布予定対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
@@ -190,7 +191,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windowsでは、`0.4.0-beta.1`をGitHub x64 zipで公開し、Microsoft Store版も同じアプリ機能・表示versionへ更新します。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
+Windowsでは、`0.4.0-beta.2`をGitHub x64 zipで公開し、Microsoft Store版も同じアプリ機能・表示versionへ更新する予定です。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
 
 macOS 版は 2 種類あります。
 
@@ -309,7 +310,7 @@ Windows の `x64` zip を明示的に作る場合:
 npm run package:win:x64
 ```
 
-配布物は `release/<version>/` に出力されます。`0.4.0-beta.1`ではmacOS DMG、Windows zip、Microsoft Store版を公式scopeとし、Linux向け公式パッケージは提供しません。GitHub Release assetはDMGとzipで、Store用AppXはPartner Centerへ別途提出します。`npm run package` は通常、その実行環境に対応する 1 つの配布物を作ります。macOS DMG は arch を含む名前で出力されます。Windows zip は、展開時にファイルが散らからないよう `Nyoze-Windows-<version>-x64/` フォルダを含む形で作成します。
+配布物は `release/<version>/` に出力されます。`0.4.0-beta.2`ではmacOS DMG、Windows zip、Microsoft Store版を公式scopeとし、Linux向け公式パッケージは提供しません。GitHub Release assetはDMGとzipで、Store用AppXはPartner Centerへ別途提出します。`npm run package` は通常、その実行環境に対応する 1 つの配布物を作ります。macOS DMG は arch を含む名前で出力されます。Windows zip は、展開時にファイルが散らからないよう `Nyoze-Windows-<version>-x64/` フォルダを含む形で作成します。
 
 - `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - `Nyoze-Mac-<version>-x64-Installer.dmg`
@@ -334,6 +335,7 @@ npm run package:win:x64
 - 長文編集モードを安全に維持できない場合、未確定の編集内容を保護したまま「回復（recovery）」状態になることがあります。この状態では、再試行、下書きのコピー、確認後の破棄を選択できます。macOS / Windows実機ではこの状態を自然に再現できなかったため、回復状態での実機確認は未了です
 - ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
 - Windows の一部 AMD GPU + Chromium 系環境では、本文や `Source Mode` 上の I-beam カーソルが白く見えて視認しづらくなることがあります。その場合は `View Settings > 文書テーマ > エディタで矢印ポインターを使う` を有効にすると、本文上だけ矢印ポインターへ切り替えて回避できます
+- 一部のWindows環境では、DeepLなどの常駐アプリとの同時利用時に編集が著しく遅くなる場合があります。`表示設定 > Windows互換性 > Chromiumアクセシビリティを無効化する`を有効にしてNyozeを再起動すると改善する場合があります。スクリーンリーダーなどの支援技術を利用している場合は有効にしないでください
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
 - 数十万文字級でルビ等を多く含む文書では、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。発生のしやすさは、端末の性能や文書の内容・構造によって異なります
 - 重く感じたときは、まず長文編集モードまたはルビ表示をOFFにする、`Paragraph Plain`を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします

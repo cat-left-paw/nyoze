@@ -430,6 +430,22 @@ export const DEFAULT_CARET_COLOR_MODE = 'auto' as const
 export const EDITOR_ARROW_POINTER_STORAGE_KEY = 'nyoze.editorArrowPointer'
 export const DEFAULT_EDITOR_ARROW_POINTER = false
 
+/**
+ * WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows 限定の Chromium
+ * renderer accessibility 無効化 opt-in。**既定は必ず false。**
+ *
+ * 一部の Windows 環境で、常駐アプリ（DeepL など）と併用したときに長文編集が
+ * 著しく重くなる事例を確認しており、`--disable-renderer-accessibility` 起動で
+ * 解消することを実機で確認している。すべての Windows / DeepL 環境で起きる
+ * 一般的な事実とは断定しない。
+ *
+ * 支援技術（スクリーンリーダー等）との互換性を落とすため、明示 opt-in だけで
+ * 有効化し、反映は Nyoze の再起動後（自動再起動はしない）。
+ */
+export const DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS_STORAGE_KEY =
+  'nyoze.disableRendererAccessibilityOnWindows'
+export const DEFAULT_DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS = false
+
 /** Hidden settings.json: macOS Chromium の Arrow caret reveal 過大ジャンプ抑制 */
 export const DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED = true
 

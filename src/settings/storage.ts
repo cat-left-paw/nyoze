@@ -38,6 +38,8 @@ import {
   CARET_COLOR_MODE_STORAGE_KEY,
   CARET_COLOR_CUSTOM_STORAGE_KEY,
   DEFAULT_CARET_COLOR_MODE,
+  DEFAULT_DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS,
+  DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS_STORAGE_KEY,
   EDITOR_ARROW_POINTER_STORAGE_KEY,
   DEFAULT_EDITOR_ARROW_POINTER,
   REGISTERED_FONTS_STORAGE_KEY,
@@ -75,6 +77,7 @@ import type {
   WritingMode,
 } from './types'
 import { normalizeAppTitleCustomValue } from './appTitleCustom'
+import { normalizeDisableRendererAccessibilityOnWindows } from './rendererAccessibilitySettings'
 import {
   isCuratedDocThemePresetId,
   isCuratedUiThemePresetId,
@@ -935,6 +938,39 @@ export function saveUseEditorArrowPointer(value: boolean): void {
   }
 }
 
+/**
+ * WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: localStorage ミラー（settings.json が正本）。
+ * 値が無い / 不正なときは既定 false。
+ */
+export function loadDisableRendererAccessibilityOnWindows(): boolean {
+  try {
+    return (
+      window.localStorage.getItem(
+        DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS_STORAGE_KEY,
+      ) === '1'
+    )
+  } catch {
+    return DEFAULT_DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS
+  }
+}
+
+export function saveDisableRendererAccessibilityOnWindows(value: boolean): void {
+  try {
+    if (value) {
+      window.localStorage.setItem(
+        DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS_STORAGE_KEY,
+        '1',
+      )
+    } else {
+      window.localStorage.removeItem(
+        DISABLE_RENDERER_ACCESSIBILITY_ON_WINDOWS_STORAGE_KEY,
+      )
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /** Phase5-H Slice 3: settings.json persistence via IPC */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1033,6 +1069,11 @@ export async function saveSettingsJson(settings: SettingsJson): Promise<void> {
     if (settings.caretColorMode !== undefined) saveCaretColorMode(normalizeCaretColorMode(settings.caretColorMode))
     if (settings.caretColorCustom !== undefined) saveCaretColorCustom(settings.caretColorCustom ?? null)
     if (settings.useEditorArrowPointer !== undefined) saveUseEditorArrowPointer(settings.useEditorArrowPointer)
+    if (settings.disableRendererAccessibilityOnWindows !== undefined) {
+      saveDisableRendererAccessibilityOnWindows(
+        normalizeDisableRendererAccessibilityOnWindows(settings.disableRendererAccessibilityOnWindows),
+      )
+    }
   } catch {
     // ignore localStorage errors
   }

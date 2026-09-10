@@ -81,6 +81,10 @@ import {
 } from "../../settings/visualFocusSettings";
 import { normalizeMacosArrowScrollClampEnabled } from "../../settings/macosArrowScrollClampSettings";
 import {
+  normalizeDisableRendererAccessibilityOnWindows,
+  resolveDisableRendererAccessibilityHydration,
+} from "../../settings/rendererAccessibilitySettings";
+import {
   normalizePseudoCaretBlinkEnabled,
   normalizePseudoCaretEnabled,
   normalizePseudoCaretThickness,
@@ -107,9 +111,11 @@ import {
   loadDocumentTheme,
   loadCaretColorMode,
   loadCaretColorCustom,
+  loadDisableRendererAccessibilityOnWindows,
   loadUseEditorArrowPointer,
   saveCaretColorMode,
   saveCaretColorCustom,
+  saveDisableRendererAccessibilityOnWindows,
   saveUseEditorArrowPointer,
   loadRegisteredFonts,
   loadRubyVisibility,
@@ -838,6 +844,12 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   const [useEditorArrowPointer, _setUseEditorArrowPointer] = useState<boolean>(() =>
     loadUseEditorArrowPointer(),
   );
+  // WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows 限定 opt-in（既定 OFF）。
+  // 実効の switch 適用は main process の起動時だけで、runtime では何も切り替えない。
+  const [
+    disableRendererAccessibilityOnWindows,
+    _setDisableRendererAccessibilityOnWindows,
+  ] = useState<boolean>(() => loadDisableRendererAccessibilityOnWindows());
   const [paragraphPlainBehavior, _setParagraphPlainBehavior] =
     useState<ParagraphPlainBehavior>(DEFAULT_PARAGRAPH_PLAIN_BEHAVIOR);
 
@@ -1066,6 +1078,15 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       if (typeof settings.useEditorArrowPointer === "boolean") {
         _setUseEditorArrowPointer(settings.useEditorArrowPointer);
       }
+      // WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: field 欠損は「OFF」ではなく「未知」。
+      // localStorage 由来の値を維持し、下の persistence effect が settingsSyncReady
+      // 後に settings.json へ補完する。判定は pure helper 側が正本。
+      _setDisableRendererAccessibilityOnWindows((stored) =>
+        resolveDisableRendererAccessibilityHydration({
+          storedValue: stored,
+          settingsValue: settings.disableRendererAccessibilityOnWindows,
+        }).value,
+      );
       const nextParagraphPlainBehavior = normalizeParagraphPlainBehavior(
         settings.paragraphPlainBehavior,
       );
@@ -1519,6 +1540,15 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       void patchSettingsJson({ useEditorArrowPointer });
     }
   }, [useEditorArrowPointer, settingsSyncReady]);
+
+  useEffect(() => {
+    saveDisableRendererAccessibilityOnWindows(
+      disableRendererAccessibilityOnWindows,
+    );
+    if (settingsSyncReady) {
+      void patchSettingsJson({ disableRendererAccessibilityOnWindows });
+    }
+  }, [disableRendererAccessibilityOnWindows, settingsSyncReady]);
 
   useEffect(() => {
     setParagraphPlainFormalBehaviorRuntime(paragraphPlainBehavior);
@@ -2344,6 +2374,15 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     _setUseEditorArrowPointer(value === true);
   }, []);
 
+  const setDisableRendererAccessibilityOnWindows = useCallback(
+    (value: boolean) => {
+      _setDisableRendererAccessibilityOnWindows(
+        normalizeDisableRendererAccessibilityOnWindows(value),
+      );
+    },
+    [],
+  );
+
   const setTypewriterModeEnabled = useCallback((value: boolean) => {
     _setTypewriterModeEnabled(value === true);
   }, []);
@@ -2814,6 +2853,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
 
   return {
     platform,
+    settingsSyncReady,
     usesNativeWindowControls,
     initialLineBreakPolicy: initialLineBreakPolicy.current,
     activeTab,
@@ -2944,6 +2984,8 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setCaretColorCustom,
     useEditorArrowPointer,
     setUseEditorArrowPointer,
+    disableRendererAccessibilityOnWindows,
+    setDisableRendererAccessibilityOnWindows,
     paragraphPlainBehavior,
     setParagraphPlainBehavior,
     typewriterModeEnabled,

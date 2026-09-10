@@ -1,5 +1,5 @@
 import { Editor } from '@tiptap/core'
-import { EditorState, type Transaction } from '@tiptap/pm/state'
+import { EditorState, Selection, type Transaction } from '@tiptap/pm/state'
 import { parseMarkdown } from './io/parseMarkdown'
 import { exportAozoraTextFromDoc, type AozoraTextExportOptions } from './export/aozoraTextExport'
 import { exportLeMECompatibleMarkdownFromDoc, type LeMEMarkdownExportOptions } from './export/lemeMarkdownExport'
@@ -79,6 +79,7 @@ import {
   deleteHorizontalRuleWithKey,
   emitSearchCloseFocusTraceForTest,
   inspectPmCollapsedAfterSpecialInline,
+  isEditingFocusHandoffAllowed,
   moveListItemDown,
   moveListItemUp,
   MAX_DIFF_LOG_LENGTH,
@@ -93,6 +94,7 @@ import {
   recordSpecialInlinePointerSample,
   resolveParagraphElement,
   resolveParagraphNodeContext,
+  resolveEditingFocusRestore,
   resolveRubyEditContext,
   resolveSearchCloseFocusRestore,
   serializeParagraphNode,
@@ -1217,6 +1219,86 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
     focusEditor() {
       editor.commands.focus()
+    },
+
+    /**
+     * EDITOR-SURFACE-DOCUMENT-END-CARET1: 本文末尾以降の編集面余白 click 用の限定 API。
+     *
+     * 文書末尾は `Selection.atEnd(doc)` で **PM state から**求める（click 座標から
+     * 存在しない文字位置を推測しない）。selection だけを動かす transaction を 1 回
+     * 出し、`addToHistory: false` で Undo/Redo へ余計な履歴を積まない。本文・
+     * Markdown・frontmatter は書き換えないので docChanged は立たず dirty にもならない。
+     *
+     * fail-closed:
+     * - read-only / internal 文書（`editor.isEditable === false`）では何もしない。
+     * - composition 中（local session / host IME）は何もしない。
+     * 既に末尾なら transaction を出さず focus だけ戻す。
+     *
+     * 「今回の gesture が drag だったか」は selection の形では判定できない（Shift+Arrow や
+     * 過去の drag で残った range と区別が付かない）。その証明は click 境界側の
+     * pointerdown 起点が持ち、ここでは呼ばれたら文書末尾へ collapse する。
+     */
+    placeCaretAtDocumentEnd() {
+      if (!editor.isEditable) return false
+      if (isCompositionActive() || editor.view.composing) return false
+      try {
+        const end = Selection.atEnd(editor.state.doc)
+        if (!editor.state.selection.eq(end)) {
+          const tr = editor.state.tr.setSelection(end).scrollIntoView()
+          tr.setMeta('addToHistory', false)
+          editor.view.dispatch(tr)
+        }
+      } catch {
+        return false
+      }
+      editor.commands.focus()
+      return true
+    },
+
+    /**
+     * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 現在の正規 focus owner へ戻す限定 API。
+     * live state だけを読み token / epoch / timer は持たず、実 focus は host PM の
+     * `commands.focus()` か controller の `tryFocusLocalWindowRoot()`（identity /
+     * generation / 接続を再証明する）だけで行う。本文 / selection / dirty は変えない。
+     * 既に誰かが focus を持っていれば奪わず、active な Local Window session で local
+     * focus を証明できないときは host へ倒さず `'skipped'` で終える（fail-closed）。
+     */
+    focusCurrentEditingOwner(handoffFrom) {
+      const live = localImeIntegration.readSearchCloseFocusLive()
+      const ownerDocument = editor.view.dom.ownerDocument
+      const decision = resolveEditingFocusRestore({
+        focusVacant: isEditingFocusHandoffAllowed(
+          ownerDocument.activeElement,
+          handoffFrom ?? null,
+          // handoff 要求（文書 open）のときだけ OS focus を要求する。引数なしの
+          // 削除フロー復帰は FILE-EXPLORER-CREATE-DELETE-FOCUS1 の契約のまま
+          // （Windows の native 削除確認直後の復帰を hasFocus() で塞がない）。
+          handoffFrom === undefined ? true : ownerDocument.hasFocus(),
+        ),
+        hostRootConnected: editor.view.dom.isConnected === true,
+        hostComposing: editor.view.composing === true,
+        live: live
+          ? {
+              mode: live.mode,
+              documentIdentity: live.documentIdentity || null,
+              controllerGeneration: live.generation,
+              localRootConnected: live.localRootConnected,
+              compositionActive: live.compositionActive,
+            }
+          : null,
+      })
+      if (decision.target === 'skip') return 'skipped'
+      if (decision.target === 'local-window') {
+        if (!live) return 'skipped'
+        const focused = localImeIntegration.tryFocusLocalWindowRoot({
+          documentIdentity: live.documentIdentity,
+          controllerGeneration: live.generation,
+        })
+        // 再証明に失敗した active session を host へ渡さない（dirty draft 保全）。
+        return focused ? 'local-window' : 'skipped'
+      }
+      editor.commands.focus()
+      return 'host-editor'
     },
 
     captureSearchCloseFocusRestore() {

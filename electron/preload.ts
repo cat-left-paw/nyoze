@@ -196,6 +196,9 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
     node: process.versions.node,
   },
   platform: process.platform,
+  fileExplorer: process.platform === 'win32' ? {
+    confirmDelete: (name: string) => ipcRenderer.invoke('fileExplorer:confirmDelete', name) as Promise<boolean>,
+  } : undefined,
   windowControls: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     close: () => ipcRenderer.invoke('window:close'),
@@ -562,6 +565,18 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
         }
       }
     },
+  },
+  editorSession: {
+    restore: () =>
+      ipcRenderer.invoke('editorSession:restore') as Promise<
+        import('../src/session/editorSessionTypes').EditorSessionRestoreResult
+      >,
+    write: (
+      payload: import('../src/session/editorSessionTypes').EditorSessionPersistRequest,
+    ) =>
+      ipcRenderer.invoke('editorSession:write', payload) as Promise<
+        import('../src/session/editorSessionTypes').EditorSessionWriteResult
+      >,
   },
   settings: {
     read: () =>

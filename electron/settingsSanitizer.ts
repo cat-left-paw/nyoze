@@ -467,6 +467,12 @@ export function sanitizeSettingsJson(
   if (typeof raw.useEditorArrowPointer === "boolean")
     out.useEditorArrowPointer = raw.useEditorArrowPointer;
 
+  // WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: boolean 以外は保持しない（起動時の
+  // 判定も同じ sanitizer を通すので、第二 schema にならない）。
+  if (typeof raw.disableRendererAccessibilityOnWindows === "boolean")
+    out.disableRendererAccessibilityOnWindows =
+      raw.disableRendererAccessibilityOnWindows;
+
   if (raw.typewriterModeEnabled !== undefined) {
     out.typewriterModeEnabled = normalizeTypewriterModeEnabled(
       raw.typewriterModeEnabled,

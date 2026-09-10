@@ -2647,6 +2647,32 @@ export const UI_TEXT_REGISTRY = {
   'displaySettings.section.support': {
     label: { ja: 'サポート', en: 'Support' },
   },
+  // WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows でだけ表示する互換性 section。
+  'displaySettings.section.windowsCompatibility': {
+    label: { ja: 'Windows互換性', en: 'Windows compatibility' },
+  },
+  'displaySettings.windowsCompatibility.disableRendererAccessibility': {
+    label: {
+      ja: 'Chromiumアクセシビリティを無効化する',
+      en: 'Disable Chromium accessibility',
+    },
+    helper: {
+      ja: 'DeepLなど一部の常駐アプリと同時に使用した際、編集が著しく遅くなる場合に有効にしてください。',
+      en: 'May improve severe editing delays when Nyoze is used with some background apps such as DeepL.',
+    },
+  },
+  'displaySettings.windowsCompatibility.disableRendererAccessibilityWarning': {
+    label: {
+      ja: 'Chromiumのアクセシビリティ機能を無効にするため、スクリーンリーダーなどの支援技術を利用している場合は有効にしないでください。',
+      en: 'Do not enable this option if you use a screen reader or other assistive technology.',
+    },
+  },
+  'displaySettings.windowsCompatibility.restartRequired': {
+    label: {
+      ja: '変更はNyozeの再起動後に反映されます。',
+      en: 'Restart Nyoze to apply this change.',
+    },
+  },
   // PUBLIC-ENTRY1: Local Window Experimental product entry（既定 OFF）。
   'displaySettings.section.experimental': {
     label: { ja: '実験的機能', en: 'Experimental' },

@@ -583,6 +583,27 @@ export interface EditorCoreHandle {
   /** Focus the editor (BETA-A11Y1) */
   focusEditor(): void
   /**
+   * EDITOR-SURFACE-DOCUMENT-END-CARET1: 本文末尾以降の編集面余白 click から、
+   * PM state 由来の文書末尾へ collapsed caret を置き host editor へ focus する。
+   * selection だけを動かし（`addToHistory: false`）、本文 / dirty / disk は変えない。
+   * read-only・composition 中は `false`。drag は呼び出し側が pointerdown 起点で除外する。
+   */
+  placeCaretAtDocumentEnd(): boolean
+  /**
+   * FILE-EXPLORER-CREATE-DELETE-FOCUS1: 呼び出し時点の live state だけを根拠に、
+   * 正規 focus owner（active な Local Window root、なければ host PM）へ focus する。
+   * composition 中や host root 切断時は `'skipped'` で何もしない。
+   * token / epoch / timer を持たない限定 API で、search close 復帰とは別経路。
+   *
+   * FILE-EXPLORER-CREATE-OPEN-TAB1 review-fix: `handoffFrom` に「その文書 open を
+   * 始めた時点の focus owner」を渡すと、その owner が今も focus を持っている場合にも
+   * handoff する（File Explorer の行 button → editor）。省略時は従来どおり
+   * 「誰も focus を持っていないときだけ復帰する」契約のまま。
+   */
+  focusCurrentEditingOwner(
+    handoffFrom?: import('./features/editingFocusOwnerRestore').EditingFocusVacancyNode,
+  ): 'local-window' | 'host-editor' | 'skipped'
+  /**
    * 検索 close 後の focus 復帰。同一 identity / generation の active Local Window
    * があれば local root、なければ host editor。後着 epoch は古い request を skip する。
    */

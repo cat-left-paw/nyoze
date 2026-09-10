@@ -29,6 +29,10 @@ import { resolveVisibleOutlineItems } from "../utils/outlineVisibility";
 import { OutlineModeToggle, type OutlineMode } from "./OutlineModeToggle";
 import { FileExplorerPane } from "./FileExplorerPane";
 import type { LocalImeLocalEditingPresentationSource } from "../../editor-core/features/localImeLocalEditingPresentationStatus";
+import {
+  isEditorSurfaceWhitespaceClick,
+  isEditorSurfaceWhitespaceTarget,
+} from "../utils/editorSurfaceWhitespaceClick";
 import { FrontmatterView } from "./FrontmatterView";
 import type { ProjectDocumentStartDisplay } from "../../project/projectDocumentStartDisplay";
 import { ProjectDocumentStartViews } from "./ProjectDocumentStartViews";
@@ -158,7 +162,12 @@ type WorkspaceProps = {
   onRequestHeadingPreview: (pos: number) => string;
   onScrollToPos: (pos: number) => void;
   frontmatterFields: FrontmatterFields;
-  onEmptyUntitledSurfaceClick?: () => void;
+  /**
+   * EDITOR-SURFACE-DOCUMENT-END-CARET1: 本文末尾以降の編集面余白を bare primary
+   * click したときだけ呼ぶ。分類は `isEditorSurfaceWhitespaceClick()` が正本で、
+   * 実段落 / metadata / Local Window overlay / secondary / modifier は除外済み。
+   */
+  onEditorSurfaceWhitespaceClick?: () => void;
   /** BETA-DISP1: resolved caret color string for --editor-caret-color */
   caretColor: string;
   /** Task 2-4: hide the WYSIWYG native caret when the pseudo caret is enabled. */
@@ -263,7 +272,7 @@ export function Workspace({
   onRequestHeadingPreview,
   onScrollToPos,
   frontmatterFields,
-  onEmptyUntitledSurfaceClick,
+  onEditorSurfaceWhitespaceClick,
   caretColor,
   pseudoCaretEnabled,
   useEditorArrowPointer,
@@ -325,6 +334,11 @@ export function Workspace({
     useState<OutlinePreviewState | null>(null);
   // Outline 拡張: [現在の文書] / [Book全体] の表示切替。既定は現在の文書。
   const [outlineMode, setOutlineMode] = useState<OutlineMode>("document");
+  /**
+   * EDITOR-SURFACE-DOCUMENT-END-CARET1: 現在の click を開始した pointerdown が
+   * 編集面余白から始まったか。gesture 起点の最小限の証明で、click ごとに消費する。
+   */
+  const surfacePointerDownOnWhitespaceRef = useRef(false);
   const outlinePreviewRef = useRef<HTMLDivElement | null>(null);
   const hoverCloseTimerRef = useRef<number | null>(null);
 
@@ -599,13 +613,29 @@ export function Workspace({
           )}
           <div
             className={`editor-surface${fullPlainEditActive ? " is-hidden-for-plain" : ""}`}
+            onPointerDown={(e) => {
+              // この click を開始した pointerdown が余白から始まったかだけを控える。
+              // `click` の target は mousedown / mouseup の共通祖先になるため、これが
+              // 「本文から余白へ drag した」のか「余白で click した」のかを区別する
+              // 唯一の材料。timer / 距離しきい値 / synthetic event は持たない。
+              surfacePointerDownOnWhitespaceRef.current =
+                e.button === 0 && isEditorSurfaceWhitespaceTarget(e.target as Element);
+            }}
             onClick={(e) => {
-              const t = e.target as Element;
+              // 分類は pure helper が正本（本文 / metadata / Local Window overlay /
+              // secondary / modifier / drag 起点を除外）。ここでは座標を読まない。
+              const startedOnWhitespace = surfacePointerDownOnWhitespaceRef.current;
+              surfacePointerDownOnWhitespaceRef.current = false;
               if (
-                t.closest('.editor-core-host > .ProseMirror') ||
-                t.closest(".frontmatter-view")
-              ) return;
-              onEmptyUntitledSurfaceClick?.();
+                !isEditorSurfaceWhitespaceClick(
+                  e.nativeEvent,
+                  e.target as Element,
+                  startedOnWhitespace,
+                )
+              ) {
+                return;
+              }
+              onEditorSurfaceWhitespaceClick?.();
             }}
           >
             <ProjectDocumentStartViews

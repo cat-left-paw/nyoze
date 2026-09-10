@@ -204,6 +204,16 @@ export {
   resolveSearchCloseFocusRestore,
 } from './localImeSearchCloseFocusRestore'
 export type { SearchCloseFocusRestoreToken } from './localImeSearchCloseFocusRestore'
+export {
+  isEditingFocusHandoffAllowed,
+  isEditingFocusVacant,
+  resolveEditingFocusRestore,
+} from './editingFocusOwnerRestore'
+export type {
+  EditingFocusRestoreDecision,
+  EditingFocusRestoreLive,
+  EditingFocusVacancyNode,
+} from './editingFocusOwnerRestore'
 export { isProseMirrorHistoryTransaction } from './localImeHistoryTransaction'
 export { createLocalImeHostTransactionNotifier } from './localImeHostTransactionNotice'
 export { createLocalImeHostInputDomWiring } from './localImeHostInputDomWiring'

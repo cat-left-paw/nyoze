@@ -7,9 +7,9 @@ Official website: [Nyoze](https://cat-left-paw.github.io/nyoze/)
 Nyoze is an editor that lets you **write vertically as-is**.
 Published by Left Paw Studio.
 
-The current GitHub Latest release is `0.4.0-beta.1`. The Microsoft Store build will also be updated to app version `0.4.0-beta.1` with Store package version `1.2.2.0`. Until Store review is complete, app version `0.2.1-beta.1` / package version `1.2.1.0` may still be shown.
+The current GitHub Latest release is `0.4.0-beta.1`. The next release, `0.4.0-beta.2`, is being prepared, and the Microsoft Store build is planned to receive the same displayed app version. Store availability follows its own review process after the GitHub Release.
 
-The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable was fixed in `0.3.0-beta.2`. The fix is also included in `0.4.0-beta.1`.
+The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable was fixed in `0.3.0-beta.2`. Later versions include the same fix.
 
 - Write novels and essays directly in vertical writing
 - Save files in Markdown while keeping them usable as plain text
@@ -73,8 +73,9 @@ For detailed usage, see [MANUAL.md](./MANUAL.md).
 - Web Book (create either a reader-equipped single HTML file or a web-public package from the current document or an entire Book; for reading and simple print/PDF saving in Chrome or Edge — the only user-facing HTML export)
 - A separate read-only Page Viewer for the active document or an entire Book, with CSS Columns pagination, heading jumps from the TOC and outline, local images, and `:::page-break` / `:::blank-page-N` rendering
 - Chapter-edge overlays and `Option/Alt + wheel` navigation to the previous chapter end or next chapter start for Book body files
-- Open and edit multiple documents in tabs
+- Open and edit multiple documents in tabs, and restore saved-file tabs from the previous session at the next launch
 - Create / rename / duplicate / move / delete files to trash from File Explorer
+- A Windows compatibility setting for severe editing slowdown seen with some resident applications in some environments
 - Display-only automatic TCY in WYSIWYG (off by default, optional digit-only mode, saved content unchanged)
 - Explicit TCY with Nyoze notation
 - Aozora Bunko style ruby text and bouten
@@ -177,7 +178,7 @@ For supported keys, source-of-truth boundaries (standalone vs Project files), YA
 
 ## Supported Environments
 
-The official targets for `0.4.0-beta.1` are listed below.
+The planned official targets for `0.4.0-beta.2` are listed below.
 
 - macOS:
   - DMG for Apple Silicon (`arm64`)
@@ -188,7 +189,7 @@ The official targets for `0.4.0-beta.1` are listed below.
 - Linux: no official package in the current beta
 
 Windows is 64-bit (`x64`) only. 32-bit Windows is not supported in the current beta.
-On Windows, `0.4.0-beta.1` is available as a GitHub x64 zip, and the Microsoft Store build will be updated to the same app features and displayed version. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
+On Windows, `0.4.0-beta.2` is planned as a GitHub x64 zip, and the Microsoft Store build is planned to receive the same app features and displayed version. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
 
 macOS has two variants:
 
@@ -305,7 +306,7 @@ To build the Windows `x64` zip explicitly:
 npm run package:win:x64
 ```
 
-Packages are written to `release/<version>/`. The official scope for `0.4.0-beta.1` includes macOS DMGs, the Windows zip, and Microsoft Store; no official Linux package is provided. DMGs and the zip are GitHub Release assets, while the Store AppX is submitted separately through Partner Center. `npm run package` normally builds the package for the current environment. macOS DMGs include the architecture in the file name. Windows zip output includes a folder like `Nyoze-Windows-<version>-x64/` so extracted files stay organized.
+Packages are written to `release/<version>/`. The official scope for `0.4.0-beta.2` includes macOS DMGs, the Windows zip, and Microsoft Store; no official Linux package is provided. DMGs and the zip are GitHub Release assets, while the Store AppX is submitted separately through Partner Center. `npm run package` normally builds the package for the current environment. macOS DMGs include the architecture in the file name. Windows zip output includes a folder like `Nyoze-Windows-<version>-x64/` so extracted files stay organized.
 
 - `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - `Nyoze-Mac-<version>-x64-Installer.dmg`
@@ -329,6 +330,7 @@ Packages are written to `release/<version>/`. The official scope for `0.4.0-beta
 - If Long Document Editing cannot safely keep the localized editing surface active, it may enter a Recovery state while preserving uncommitted draft content. From this state, you can retry, copy the draft, or discard it after confirmation. This state could not be reproduced naturally on macOS or Windows hardware, so real-device behavior in the Recovery state remains unverified
 - When starting Japanese IME input immediately after ruby text or explicit TCY, some environments may rarely stall on the second typed character right after the first one goes through; pressing `Escape` discards the unfinished input and returns to normal editing
 - On some Windows environments using AMD GPUs with Chromium-based rendering, the I-beam cursor over the editor or `Source Mode` may appear white and hard to see. In that case, enable `View Settings > Document Theme > Use arrow pointer in editor` as a workaround for the editor area
+- In some Windows environments, editing may become severely slow while DeepL or another resident application is running. Enabling `Display Settings > Windows Compatibility > Disable Chromium accessibility` and restarting Nyoze may help. Do not enable it when using a screen reader or other assistive technology
 - Around 100,000 characters, some environments may become slow for input or rendering; vertical writing, visible ruby, search ON, and Japanese IME input make this more likely
 - With very large documents containing extensive ruby or similar rich inline content, a click or drag immediately after switching documents may take several seconds and the app may temporarily appear unresponsive. How easily this occurs depends on the computer's performance and the document's content and structure
 - If performance feels heavy, first try turning Long Editing Mode or ruby display OFF, using `Paragraph Plain`, or splitting the manuscript into separate files by chapter

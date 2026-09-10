@@ -232,6 +232,13 @@ export type SettingsJson = {
   /** Windows Chromium I-beam workaround: use arrow pointer inside editor surfaces */
   useEditorArrowPointer?: boolean
   /**
+   * WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows 限定 opt-in。
+   * `true` かつ Windows のときだけ、起動時に Chromium の
+   * `--disable-renderer-accessibility` switch を付ける。既定 false、
+   * 反映は再起動後（自動再起動はしない）。支援技術との互換性は保証しない。
+   */
+  disableRendererAccessibilityOnWindows?: boolean
+  /**
    * App-wide Paragraph Plain responsiveness vs following content visibility.
    * Legacy `settings.json` value `comfortable-no-scroll-reposition` is normalized to `comfortable` on read.
    * @see normalizeParagraphPlainBehavior

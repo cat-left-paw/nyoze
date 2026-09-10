@@ -3,6 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createFileExplorerDeleteConfirmation } from './fileExplorerDeleteConfirmation';
 import {
   validatePathArg,
   validateNameArg,
@@ -31,6 +32,23 @@ import {
 } from "./settingsSanitizer";
 import { atomicWriteFile, classifySaveError } from "./atomicSave";
 import type { SaveResult, SaveAsResult } from "./atomicSave";
+import {
+  EDITOR_SESSION_FILE_NAME,
+  MAX_EDITOR_SESSION_FILE_BYTES,
+  createRevisionedWriteQueue,
+  editorSessionPathKey,
+  isSameEditorSessionPath,
+  parseEditorSessionJson,
+  sanitizeEditorSessionState,
+  selectRestoredActiveIndex,
+  serializeEditorSessionState,
+  type EditorSessionPlatform,
+} from "./editorSessionState";
+import {
+  EDITOR_SESSION_SCHEMA_VERSION,
+  type EditorSessionRestoreResult,
+  type EditorSessionWriteResult,
+} from "../src/session/editorSessionTypes";
 import { writeAozoraTextExportFile } from "./aozoraTextExportWrite";
 import { writeLeMEMarkdownExportFile } from "./lemeMarkdownExportWrite";
 import { writeDendenMarkdownExportFile } from "./dendenMarkdownExportWrite";
@@ -116,6 +134,10 @@ import {
   type LibraryUnregisterResult,
 } from "../src/settings/libraryRegistry";
 import { resolveUserDataPathSpec } from "./resolveUserDataPath";
+import {
+  DISABLE_RENDERER_ACCESSIBILITY_SWITCH,
+  resolveStartupDisableRendererAccessibility,
+} from "./rendererAccessibilityStartup";
 import {
   WINDOW_STATE_FILE_NAME,
   buildWindowStateForPersist,
@@ -314,6 +336,24 @@ if (_userDataSpec.kind === "e2e") {
 }
 
 const userDataPath = app.getPath("userData");
+const settingsJsonPath = path.join(userDataPath, "settings.json");
+
+// --- WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1 ---
+// Windows 限定 opt-in（既定 OFF）。userData path の dev / E2E 切り替えを確定した
+// **直後**にそのprofileの settings.json を同期読みし、`app.whenReady()` より前・
+// renderer 生成より前に Chromium switch を適用する。判定は
+// `electron/rendererAccessibilityStartup.ts` の pure helper が正本で、schema は
+// 既存の `sanitizeSettingsJson()` を通す。設定 OFF のときは何も追加せず、利用者が
+// コマンドラインで明示した switch を削除もしない。runtime 中の解除・再適用や
+// `app.setAccessibilitySupportEnabled()` への置換は行わない。
+if (
+  resolveStartupDisableRendererAccessibility({
+    platform: process.platform,
+    settingsJsonPath,
+  })
+) {
+  app.commandLine.appendSwitch(DISABLE_RENDERER_ACCESSIBILITY_SWITCH);
+}
 
 // アプリ表示名を設定する (macOS メニューバー等に反映)。
 app.setName(APP_DISPLAY_NAME);
@@ -327,6 +367,12 @@ const MAX_BACKUP_GENERATIONS = 20;
 const BACKUP_TIMESTAMP_PATTERN = /^(\d{8}-\d{6}-\d{3})(?:-.+)?$/;
 const backupsRootPath = path.join(userDataPath, "backups");
 const workspaceStatePath = path.join(userDataPath, "workspace-state.json");
+const editorSessionStatePath = path.join(userDataPath, EDITOR_SESSION_FILE_NAME);
+const editorSessionPlatform: EditorSessionPlatform =
+  process.platform === "win32" || process.platform === "darwin"
+    ? process.platform
+    : "linux";
+const editorSessionWriteQueue = createRevisionedWriteQueue();
 
 // --- APP-WINDOW-BOUNDS-RESTORE1: main window bounds / maximized persistence ---
 // main process が唯一の authority。renderer の localStorage / React state は使わない。
@@ -714,6 +760,102 @@ async function readDocumentForEditor(filePath: string): Promise<DocumentReadIpcR
     errorKind: result.errorKind,
     errorMessage: formatDocumentReadErrorMessage(result.errorKind),
   };
+}
+
+let editorSessionRestoreInFlight: Promise<EditorSessionRestoreResult> | null = null;
+
+/**
+ * Coalesce only concurrent reads. A later renderer/window must read the current
+ * disk state again (not a process-lifetime snapshot), which matters when macOS
+ * recreates the main window without terminating the main process.
+ */
+function restoreEditorSession(): Promise<EditorSessionRestoreResult> {
+  if (editorSessionRestoreInFlight) return editorSessionRestoreInFlight;
+  const restorePromise = (async (): Promise<EditorSessionRestoreResult> => {
+    let raw: string;
+    try {
+      const stat = await fs.promises.stat(editorSessionStatePath);
+      if (!stat.isFile() || stat.size > MAX_EDITOR_SESSION_FILE_BYTES) {
+        return { revision: 0, tabs: [], activeIndex: 0, source: "invalid" };
+      }
+      raw = await fs.promises.readFile(editorSessionStatePath, "utf-8");
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      return {
+        revision: 0,
+        tabs: [],
+        activeIndex: 0,
+        source: code === "ENOENT" ? "empty" : "invalid",
+      };
+    }
+
+    const state = parseEditorSessionJson(raw, editorSessionPlatform);
+    if (!state) {
+      return { revision: 0, tabs: [], activeIndex: 0, source: "invalid" };
+    }
+    editorSessionWriteQueue.observeRevision(state.revision);
+
+    const restored: Array<{
+      filePath: string;
+      content: string;
+      savedStat: { mtimeMs: number; size: number };
+      originalIndex: number;
+    }> = [];
+    for (let originalIndex = 0; originalIndex < state.tabs.length; originalIndex += 1) {
+      const entry = state.tabs[originalIndex]!;
+      try {
+        const realPath = await realpathExisting(entry.filePath);
+        if (!realPath) continue;
+        const before = await fs.promises.stat(realPath);
+        if (!before.isFile()) continue;
+        const read = await readDocumentForEditor(realPath);
+        if (!read.ok) continue;
+        const after = await fs.promises.stat(realPath);
+        if (
+          !after.isFile() ||
+          before.mtimeMs !== after.mtimeMs ||
+          before.size !== after.size
+        ) {
+          continue;
+        }
+        allowedDocumentPaths.add(realPath);
+        restored.push({
+          filePath: realPath,
+          content: read.content,
+          savedStat: { mtimeMs: after.mtimeMs, size: after.size },
+          originalIndex,
+        });
+      } catch {
+        // Missing, unreadable, changing, or non-file entries are skipped.
+      }
+    }
+
+    const activeIndex = selectRestoredActiveIndex(state, restored, editorSessionPlatform);
+    return {
+      revision: state.revision,
+      tabs: restored.map(({ filePath, content, savedStat }) => ({
+        filePath,
+        content,
+        savedStat,
+      })),
+      activeIndex,
+      source: restored.length > 0 ? "restored" : "empty",
+    };
+  })();
+  editorSessionRestoreInFlight = restorePromise;
+  void restorePromise.then(
+    () => {
+      if (editorSessionRestoreInFlight === restorePromise) {
+        editorSessionRestoreInFlight = null;
+      }
+    },
+    () => {
+      if (editorSessionRestoreInFlight === restorePromise) {
+        editorSessionRestoreInFlight = null;
+      }
+    },
+  );
+  return restorePromise;
 }
 
 async function readSavedFileStatForConflictCheck(
@@ -2662,6 +2804,12 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle('fileExplorer:confirmDelete', createFileExplorerDeleteConfirmation({
+  platform: process.platform,
+  fromWebContents: (sender) => BrowserWindow.fromWebContents(sender),
+  showMessageBox: (parent, options) => dialog.showMessageBox(parent, options),
+}));
+
 ipcMain.handle(
   "shell:openExternal",
   async (_event, url: unknown): Promise<boolean> => {
@@ -3036,7 +3184,84 @@ ipcMain.handle(
 
 // --- Settings JSON persistence ---
 
-const settingsJsonPath = path.join(userDataPath, "settings.json");
+ipcMain.handle(
+  "editorSession:restore",
+  async (): Promise<EditorSessionRestoreResult> => restoreEditorSession(),
+);
+
+ipcMain.handle(
+  "editorSession:write",
+  async (_event, payload: unknown): Promise<EditorSessionWriteResult> => {
+    const requested = sanitizeEditorSessionState(payload, editorSessionPlatform);
+    if (!requested) {
+      return {
+        accepted: false,
+        persisted: false,
+        revision: editorSessionWriteQueue.latestRevision(),
+      };
+    }
+
+    const queued = editorSessionWriteQueue.enqueue(requested.revision, async () => {
+      const canonical: Array<{ filePath: string; originalIndex: number }> = [];
+      const seen = new Set<string>();
+      for (let originalIndex = 0; originalIndex < requested.tabs.length; originalIndex += 1) {
+        const checkedPath = await checkDocumentPath(requested.tabs[originalIndex]!.filePath);
+        if (!checkedPath) continue;
+        const key = editorSessionPathKey(checkedPath, editorSessionPlatform);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        canonical.push({ filePath: checkedPath, originalIndex });
+      }
+
+      const requestedActiveOriginalIndex = requested.activeFilePath
+        ? requested.tabs.findIndex((tab) =>
+            isSameEditorSessionPath(
+              tab.filePath,
+              requested.activeFilePath!,
+              editorSessionPlatform,
+            ),
+          )
+        : requested.activeIndex;
+      const activeIndex = selectRestoredActiveIndex(
+        {
+          ...requested,
+          activeFilePath: null,
+          activeIndex: Math.max(0, requestedActiveOriginalIndex),
+        },
+        canonical,
+        editorSessionPlatform,
+      );
+      const state = {
+        version: EDITOR_SESSION_SCHEMA_VERSION,
+        revision: requested.revision,
+        tabs: canonical.map(({ filePath }) => ({ filePath })),
+        activeFilePath: canonical[activeIndex]?.filePath ?? null,
+        activeIndex,
+      } as const;
+      try {
+        await atomicWriteFile(editorSessionStatePath, serializeEditorSessionState(state));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+
+    try {
+      const result = await queued;
+      return {
+        accepted: result.accepted,
+        persisted: result.value === true,
+        revision: requested.revision,
+      };
+    } catch {
+      return {
+        accepted: true,
+        persisted: false,
+        revision: requested.revision,
+      };
+    }
+  },
+);
 
 async function readSettingsJson(): Promise<Record<string, unknown> | null> {
   try {

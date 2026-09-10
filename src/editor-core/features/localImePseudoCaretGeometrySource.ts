@@ -75,6 +75,10 @@ export function proveLocalImeLocalEditorViewPseudoCaretIdentity(input: {
     !localRoot.isConnected ||
     !overlay.isConnected ||
     !overlay.contains(localRoot) ||
+    // activeElement が stale に local root を残していても、window / document 自体が
+    // focus を失っていれば text-input owner ではない。表示だけの pseudo caret が
+    // 入力可能に見える状態を作らない。
+    localRoot.ownerDocument.hasFocus() !== true ||
     !localView.hasFocus() ||
     localRoot.ownerDocument.activeElement !== localRoot
   ) {

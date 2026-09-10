@@ -37,6 +37,7 @@ import type { SavedFileStat } from "../utils/externalEditConflict";
 import { getPathBaseName } from "../utils/path";
 import type { ActiveTabLoadResult, TabAddResult } from "./useTabManager";
 import type { EditorTab } from "./useAppUiState";
+import type { EditorSessionHydrationStatus } from "./useEditorSession";
 import { getUiText } from "../i18n/uiText";
 import { getShortcutReferenceContent } from "../internalDocs/getShortcutReferenceContent";
 import { setChapterBoundaryHideDelayMsForE2e } from "../utils/editorChapterBoundaryVisibility";
@@ -48,6 +49,11 @@ import {
   snapshotSavedStatPatchHoldForE2e,
   snapshotTabLeaveSnapshotApplyHoldForE2e,
 } from "../utils/savedStatPatchLatchForE2e";
+import {
+  armExplorerTrashHoldForE2e,
+  releaseExplorerTrashHoldForE2e,
+  snapshotExplorerTrashHoldForE2e,
+} from "../utils/fileExplorerTrashLatchForE2e";
 
 /**
  * LOCAL-WINDOW-RECOVERY-RESTART1: 通常のE2Eで共有OS clipboardを変更しないための
@@ -135,6 +141,7 @@ type UseE2eBridgeOptions = {
     add: () => Promise<TabAddResult>;
     close: (tabId: string) => Promise<void>;
   };
+  getEditorSessionStatusForE2e?: () => EditorSessionHydrationStatus;
 };
 
 export function useE2eBridge({
@@ -162,6 +169,7 @@ export function useE2eBridge({
   setPseudoCaretThicknessForE2e,
   setPseudoCaretBlinkEnabledForE2e,
   injectLocalImeLocalWindowRestartStartFailureForE2e,
+  getEditorSessionStatusForE2e,
 }: UseE2eBridgeOptions) {
   useEffect(() => {
     const bridge = window.nyozeBridge?.e2e;
@@ -265,6 +273,11 @@ export function useE2eBridge({
         arm: () => armSavedStatPatchHoldForE2e(),
         release: () => releaseSavedStatPatchHoldForE2e(),
         snapshot: () => snapshotSavedStatPatchHoldForE2e(),
+      },
+      explorerTrashHold: {
+        arm: () => armExplorerTrashHoldForE2e(),
+        release: () => releaseExplorerTrashHoldForE2e(),
+        snapshot: () => snapshotExplorerTrashHoldForE2e(),
       },
       tabLeaveSnapshotApplyHold: {
         arm: () => armTabLeaveSnapshotApplyHoldForE2e(),
@@ -373,6 +386,15 @@ export function useE2eBridge({
           notifyLocalImeDraftDirty({ dirty: false, documentIdentity });
         },
       },
+      editorSession: {
+        snapshot: () =>
+          getEditorSessionStatusForE2e?.() ?? {
+            hydrated: false,
+            source: "pending",
+            restoredTabCount: 0,
+            lastPersistedRevision: 0,
+          },
+      },
       // Slice 0: baseline / 将来 PoC 共通の IME composition latency probe。
       // 起動されるまで listener / PerformanceObserver / rAF / timer を作らない。
       imeLatencyProbe: {
@@ -450,5 +472,6 @@ export function useE2eBridge({
     setPseudoCaretThicknessForE2e,
     setPseudoCaretBlinkEnabledForE2e,
     showTabLimitNotice,
+    getEditorSessionStatusForE2e,
   ]);
 }
