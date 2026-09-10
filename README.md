@@ -7,7 +7,7 @@
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
-現行の GitHub Latest は `0.4.0-beta.1` です。次期版 `0.4.0-beta.2` は公開準備中で、Microsoft Store版も同じアプリ表示versionへ更新する予定です。Storeへの反映はGitHub Releaseとは別に審査完了後となります。
+現行の GitHub Latest は `0.4.0-beta.2` です。Microsoft Store版も同じアプリ表示versionへ更新する予定です。Storeへの反映はGitHub Releaseとは別に審査完了後となります。
 
 `0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。以後の版にもこの修正が含まれています。
 
@@ -180,7 +180,7 @@ author: 著者名
 
 ## 対応環境
 
-`0.4.0-beta.2`の公式配布予定対象は次の環境です。
+`0.4.0-beta.2`の公式配布対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
@@ -191,7 +191,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windowsでは、`0.4.0-beta.2`をGitHub x64 zipで公開し、Microsoft Store版も同じアプリ機能・表示versionへ更新する予定です。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
+Windowsでは、`0.4.0-beta.2`をGitHub x64 zipで公開しています。Microsoft Store版も同じアプリ機能・表示versionへ更新する予定です。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
 
 macOS 版は 2 種類あります。
 

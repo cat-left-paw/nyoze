@@ -1,12 +1,12 @@
 # Nyoze Beta Release Notes
 
 Nyoze は、縦書き日本語執筆を主目的とした Markdown デスクトップエディタの beta 版です。
-この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行の GitHub Latest は `0.4.0-beta.1` です。次期版 `0.4.0-beta.2` は公開準備中です。
+この文書を、beta テスター向けの既知制限・配布上の注意・報告時の注意の正本として扱います。現行の GitHub Latest は `0.4.0-beta.2` です。
 
 `0.4.0-beta.2` の配布方針:
 
-- GitHub Releases ではPre-releaseフラグを付けず、公開後はLatestとします。
-- macOSはApple Silicon / Intel向けDMG、Windowsはx64 zipを配布します。
+- GitHub ReleasesではPre-releaseフラグを付けず、Latestとして公開しています。
+- macOSはApple Silicon / Intel向けDMG、Windowsはx64 zipを配布しています。
 - Microsoft Storeも同じアプリ表示version `0.4.0-beta.2`へ更新します。Store package versionは`1.2.4.0`です。
 - Linux向け公式package、macOSの署名・notarization、Windows zipのコード署名は今回の対象外です。
 - LeME / でんでんコンバーター向け出力の名称・説明・利用方法は、変更する可能性があります。
@@ -22,9 +22,9 @@ Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Releas
 - 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)
 
-## 0.4.0-beta.2（公開準備中）
+## 0.4.0-beta.2
 
-`0.4.0-beta.2`は、File Explorer、文書を開いた直後の入力、タブ復元、Windowsでの常駐アプリとの互換性を中心に改善するbeta更新版です。
+`0.4.0-beta.2`は、File Explorer、文書を開いた直後の入力、タブ復元、Windowsでの常駐アプリとの互換性を中心に改善したbeta更新版です。
 
 ### 主な追加・改善
 

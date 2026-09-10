@@ -13,7 +13,7 @@
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
-現在のGitHub Latestは`0.4.0-beta.1`です。次期版`0.4.0-beta.2`は公開準備中で、Microsoft Store版も同じアプリ表示versionへ更新する予定です。Storeへの反映はGitHub Releaseとは別に審査完了後となります。
+現在のGitHub Latestは`0.4.0-beta.2`です。Microsoft Store版も同じアプリ表示versionへ更新する予定です。Storeへの反映はGitHub Releaseとは別に審査完了後となります。
 
 ## macOS
 

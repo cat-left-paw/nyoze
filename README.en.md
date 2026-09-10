@@ -7,7 +7,7 @@ Official website: [Nyoze](https://cat-left-paw.github.io/nyoze/)
 Nyoze is an editor that lets you **write vertically as-is**.
 Published by Left Paw Studio.
 
-The current GitHub Latest release is `0.4.0-beta.1`. The next release, `0.4.0-beta.2`, is being prepared, and the Microsoft Store build is planned to receive the same displayed app version. Store availability follows its own review process after the GitHub Release.
+The current GitHub Latest release is `0.4.0-beta.2`. The Microsoft Store build is also planned to receive the same displayed app version. Store availability follows its own review process after the GitHub Release.
 
 The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable was fixed in `0.3.0-beta.2`. Later versions include the same fix.
 
@@ -178,7 +178,7 @@ For supported keys, source-of-truth boundaries (standalone vs Project files), YA
 
 ## Supported Environments
 
-The planned official targets for `0.4.0-beta.2` are listed below.
+The official distribution targets for `0.4.0-beta.2` are listed below.
 
 - macOS:
   - DMG for Apple Silicon (`arm64`)
@@ -189,7 +189,7 @@ The planned official targets for `0.4.0-beta.2` are listed below.
 - Linux: no official package in the current beta
 
 Windows is 64-bit (`x64`) only. 32-bit Windows is not supported in the current beta.
-On Windows, `0.4.0-beta.2` is planned as a GitHub x64 zip, and the Microsoft Store build is planned to receive the same app features and displayed version. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
+On Windows, `0.4.0-beta.2` is available as a GitHub x64 zip. The Microsoft Store build is also planned to receive the same app features and displayed version. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
 
 macOS has two variants:
 
