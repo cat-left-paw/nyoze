@@ -7,7 +7,7 @@ Nyoze は、縦書き日本語執筆を主目的とした Markdown デスクト�
 
 - GitHub ReleasesではPre-releaseフラグを付けず、Latestとして公開しています。
 - macOSはApple Silicon / Intel向けDMG、Windowsはx64 zipを配布しています。
-- Microsoft Storeも同じアプリ表示version `0.4.0-beta.2`へ更新します。Store package versionは`1.2.4.0`です。
+- Microsoft Store版も、アプリ表示version `0.4.0-beta.2` / Store package version `1.2.4.0`として公開済みです。
 - Linux向け公式package、macOSの署名・notarization、Windows zipのコード署名は今回の対象外です。
 - LeME / でんでんコンバーター向け出力の名称・説明・利用方法は、変更する可能性があります。
 
@@ -17,7 +17,7 @@ GitHub Releaseのasset:
 - `Nyoze-Mac-0.4.0-beta.2-x64-Installer.dmg`
 - `Nyoze-Windows-0.4.0-beta.2-x64.zip`
 
-Microsoft Store向けx64 AppXはPartner Centerへ別途提出し、GitHub Release assetには含めません。
+Microsoft Store向けx64 AppXはPartner Centerへ別途提出・公開済みで、GitHub Release assetには含めていません。
 
 - 累積の更新履歴: [CHANGELOG.md](./CHANGELOG.md)
 - インストールと初回起動: [INSTALL.md](./INSTALL.md)

@@ -3,7 +3,7 @@
 公開版として配布した変更履歴を、この文書に積み上げていきます。  
 現行 beta の既知制限や注意事項は [RELEASE_NOTES.md](./RELEASE_NOTES.md)、導入手順は [INSTALL.md](./INSTALL.md) を参照してください。
 
-現行の GitHub Latest は `0.4.0-beta.2` です。Microsoft Store版も同じアプリ表示versionへ更新予定で、Store package versionは`1.2.4.0`を使用します。Storeへの反映は審査完了後になります。
+現行の GitHub Latest と Microsoft Store版は、いずれも `0.4.0-beta.2` です。Microsoft Store package versionは`1.2.4.0`です。
 
 ## 0.4.0-beta.2
 
