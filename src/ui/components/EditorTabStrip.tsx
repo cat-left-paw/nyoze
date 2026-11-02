@@ -7,6 +7,7 @@ import { useLocalImeDraftDirtyTabId } from "../hooks/useLocalImeDraftDirty";
 import { resolveLocalImeEffectiveTabDirty } from "../../editor-core/features/localImeDraftDirtyState";
 
 export type EditorTabStripProps = {
+  paragraphPlainDraftDirtyTabId?: string | null;
   tabs: EditorTab[];
   /**
    * `filePath -> FileExplorerRole` の display-only map（`.nyoze/books.json` v3 正本）。
@@ -28,6 +29,7 @@ export type EditorTabStripProps = {
 
 /** 中央エディタ上部のタブ列（開いているタブ一覧 + タブ追加 + 右端の editor tab actions）。 */
 export function EditorTabStrip({
+  paragraphPlainDraftDirtyTabId,
   tabs,
   tabRoles,
   activeTabId,
@@ -50,7 +52,7 @@ export function EditorTabStrip({
             ? tabRoles?.get(normalizeForCompare(tab.filePath))
             : undefined;
           const effectiveDirty = resolveLocalImeEffectiveTabDirty({
-            canonicalHostDirty: tab.dirty,
+            canonicalHostDirty: tab.dirty || tab.id === paragraphPlainDraftDirtyTabId,
             tabId: tab.id,
             draftDirtyTabId,
           });

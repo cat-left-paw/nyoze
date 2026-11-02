@@ -1,3 +1,4 @@
+import { getInputSurfacePromptMouseDownHandler } from '../../editor-core/features/inputSurface/focusOwner'
 import {
   IconAlignCenter,
   IconAlignRight,
@@ -752,6 +753,7 @@ export function UnifiedHeader({
         <button
           className={`pane-toggle has-tooltip${leftPaneOpen ? ' active' : ''}`}
           onClick={onToggleLeftPane}
+          data-pane-toggle='left'
           data-tooltip={leftPaneOpen ? t('header.closeLeftPane') : t('header.openLeftPane')}
           aria-label={leftPaneOpen ? t('header.closeLeftPane') : t('header.openLeftPane')}
           type='button'
@@ -1235,6 +1237,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onSetOrUnsetLink)}
+          onMouseDown={getInputSurfacePromptMouseDownHandler()}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.link')}
@@ -1245,6 +1248,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onInsertImage)}
+          onMouseDown={getInputSurfacePromptMouseDownHandler()}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.image')}
@@ -1255,6 +1259,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onInsertRubyBouten)}
+          onMouseDown={getInputSurfacePromptMouseDownHandler()}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.insertRuby')}
@@ -1275,6 +1280,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onAddNoteAnchor)}
+          onMouseDown={getInputSurfacePromptMouseDownHandler()}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.noteAnchor')}
@@ -1306,6 +1312,7 @@ export function UnifiedHeader({
         <button
           className={`pane-toggle has-tooltip${rightPaneOpen ? ' active' : ''}`}
           onClick={onToggleRightPane}
+          data-pane-toggle='right'
           data-tooltip={rightPaneOpen ? t('header.closeRightPane') : t('header.openRightPane')}
           aria-label={rightPaneOpen ? t('header.closeRightPane') : t('header.openRightPane')}
           type='button'

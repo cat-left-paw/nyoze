@@ -2,7 +2,7 @@
  * 色 (--bg-surface / --text-primary / --text-heading とその派生) と
  * 本文フォント/文字サイズ/行間 (--pv-font-family / --pv-font-size /
  * --pv-line-height)、見出し / ルビの appearance parity (--pv-heading-font-family /
- * --pv-heading-margin-after / --pv-heading-divider-h1..h6 / --pv-heading-align-h /
+ * --pv-heading-margin-after / --pv-heading-scale / --pv-heading-divider-h1..h6 / --pv-heading-align-h /
  * --pv-heading-align-v / --pv-ruby-size) は `PageViewerWindowRoot.tsx` の
  * `buildPageViewerStyleVars()` が payload の表示設定 snapshot から
  * `.page-viewer-window` ルートへ inline style として注入する
@@ -1360,12 +1360,13 @@
   text-align: var(--pv-heading-align-v, start);
 }
 
-.page-viewer-window__heading--level-1 { font-size: 1.55em; border-block-end-width: calc(var(--pv-heading-divider-h1, 0) * 1px); }
-.page-viewer-window__heading--level-2 { font-size: 1.35em; border-block-end-width: calc(var(--pv-heading-divider-h2, 0) * 1px); }
-.page-viewer-window__heading--level-3 { font-size: 1.2em; border-block-end-width: calc(var(--pv-heading-divider-h3, 0) * 1px); }
-.page-viewer-window__heading--level-4 { font-size: 1.1em; border-block-end-width: calc(var(--pv-heading-divider-h4, 0) * 1px); }
-.page-viewer-window__heading--level-5 { font-size: 1.05em; border-block-end-width: calc(var(--pv-heading-divider-h5, 0) * 1px); }
-.page-viewer-window__heading--level-6 { font-size: 1em; border-block-end-width: calc(var(--pv-heading-divider-h6, 0) * 1px); }
+/* EDITOR-HEADING-FONT-SCALE1: 段ごとの em 値に設定の倍率 (--pv-heading-scale、既定 1) を掛ける。 */
+.page-viewer-window__heading--level-1 { font-size: calc(1.55em * var(--pv-heading-scale, 1)); border-block-end-width: calc(var(--pv-heading-divider-h1, 0) * 1px); }
+.page-viewer-window__heading--level-2 { font-size: calc(1.35em * var(--pv-heading-scale, 1)); border-block-end-width: calc(var(--pv-heading-divider-h2, 0) * 1px); }
+.page-viewer-window__heading--level-3 { font-size: calc(1.2em * var(--pv-heading-scale, 1)); border-block-end-width: calc(var(--pv-heading-divider-h3, 0) * 1px); }
+.page-viewer-window__heading--level-4 { font-size: calc(1.1em * var(--pv-heading-scale, 1)); border-block-end-width: calc(var(--pv-heading-divider-h4, 0) * 1px); }
+.page-viewer-window__heading--level-5 { font-size: calc(1.05em * var(--pv-heading-scale, 1)); border-block-end-width: calc(var(--pv-heading-divider-h5, 0) * 1px); }
+.page-viewer-window__heading--level-6 { font-size: calc(1em * var(--pv-heading-scale, 1)); border-block-end-width: calc(var(--pv-heading-divider-h6, 0) * 1px); }
 
 .page-viewer-window__list {
   margin: 0;

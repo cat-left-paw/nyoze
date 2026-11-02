@@ -1,3 +1,4 @@
+import { indexDocumentHeadings } from '../features/documentNodeIndex'
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { TextSelection } from '@tiptap/pm/state'
@@ -34,6 +35,19 @@ export const headingFoldPluginKey = new PluginKey<HeadingFoldPluginState>(
  * before the next sibling heading of the same or higher level, or at the
  * end of the document.
  */
+const topHeadingCache = new WeakMap<PMNode, { node: PMNode; pos: number }[]>()
+function topLevelHeadings(doc: PMNode) {
+  let headings = topHeadingCache.get(doc)
+  if (!headings) {
+    headings = []
+    doc.forEach((node, pos) => {
+      if (node.type.name === 'heading') headings!.push({ node, pos })
+    })
+    topHeadingCache.set(doc, headings)
+  }
+  return headings
+}
+
 export function resolveFoldRange(
   doc: PMNode,
   headingPos: number,
@@ -52,20 +66,9 @@ export function resolveFoldRange(
 
   if (foldFrom >= doc.content.size) return null
 
-  let foldTo = doc.content.size
-  let offset = 0
-  for (let i = 0; i < doc.childCount; i++) {
-    const child = doc.child(i)
-    if (
-      offset > headingPos &&
-      child.type.name === 'heading' &&
-      ((child.attrs.level as number) ?? 1) <= headingLevel
-    ) {
-      foldTo = offset
-      break
-    }
-    offset += child.nodeSize
-  }
+  const foldTo = topLevelHeadings(doc).find(({ node, pos }) =>
+    pos > headingPos && ((node.attrs.level as number) ?? 1) <= headingLevel,
+  )?.pos ?? doc.content.size
 
   return foldTo > foldFrom ? { from: foldFrom, to: foldTo } : null
 }
@@ -196,10 +199,21 @@ function createEllipsisWidget(headingPos: number, preview: string): HTMLSpanElem
 // Decoration builder
 // ---------------------------------------------------------------------------
 
-function buildDecorations(
-  state: EditorState,
-  folded: number[],
-): DecorationSet {
+const decorationCache = new WeakMap<PMNode, WeakMap<number[], DecorationSet>>()
+function buildDecorations(state: EditorState, folded: number[]): DecorationSet {
+  let byFold = decorationCache.get(state.doc)
+  if (!byFold) {
+    byFold = new WeakMap()
+    decorationCache.set(state.doc, byFold)
+  }
+  const cached = byFold.get(folded)
+  if (cached) return cached
+  const result = computeDecorations(state, folded)
+  byFold.set(folded, result)
+  return result
+}
+
+function computeDecorations(state: EditorState, folded: number[]): DecorationSet {
   const doc = state.doc
   const decorations: Decoration[] = []
   const foldedSet = new Set(folded)
@@ -208,7 +222,7 @@ function buildDecorations(
   const foldRanges: { from: number; to: number }[] = []
 
   // Iterate all headings for toggle widgets + fold decorations
-  doc.descendants((node, pos) => {
+  indexDocumentHeadings(doc).forEach(({ node, pos }) => {
     if (node.type.name !== 'heading') return true
 
     const range = resolveFoldRange(doc, pos)

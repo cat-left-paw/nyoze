@@ -236,6 +236,7 @@ interface Window {
           headingAlignHorizontal: 'start' | 'center' | 'end'
           headingAlignVertical: 'start' | 'center' | 'end'
           headingMarginAfter: number
+          headingFontScale: number
           headingDividerLevels: {
             h1: boolean
             h2: boolean
@@ -317,6 +318,7 @@ interface Window {
             headingAlignHorizontal: 'start' | 'center' | 'end'
             headingAlignVertical: 'start' | 'center' | 'end'
             headingMarginAfter: number
+            headingFontScale: number
             headingDividerLevels: {
               h1: boolean
               h2: boolean
@@ -460,6 +462,14 @@ interface Window {
         filePath: string,
         request: import('../src/project/provisionalNoteCleanup').ProvisionalNoteCleanupRequest,
       ) => Promise<import('../src/project/projectIpcTypes').ProjectDiscardProvisionalNotesResult>
+      /**
+       * STICKY-NOTE-LIFECYCLE1: 保存の後に、追跡中の付箋の status を本文の anchor の有無へ合わせる。
+       * project root は main が document path から再解決し、notes lock の中で read → 再証明 → write する。
+       */
+      reconcileTrackedNotes: (
+        filePath: string,
+        request: import('../src/project/noteLifecycleTracking').TrackedNoteReconciliationRequest,
+      ) => Promise<import('../src/project/projectIpcTypes').ProjectReconcileTrackedNotesResult>
       /** bounded file path または context write anchor だけを渡し、main 側で project root を解決して title を更新する。 */
       updateTitle: (
         filePathOrAnchor:
@@ -508,6 +518,7 @@ interface Window {
     document: {
       /** SEC-5: Notify main of the active file path before each document load. */
       setActiveFilePath(filePath: string | null): void
+      setOpenDocumentPaths(paths: string[]): void
     }
     pageViewer: {
       /** Hand a serializable Markdown snapshot to main; opens an independent read-only viewer window. */
@@ -581,16 +592,17 @@ interface Window {
       available: true
     }
     /**
-     * LOCAL-WINDOW-PUBLIC-ENTRY1: 対応platformのread-only製品capability。
+     * PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値。mainが正本（`electron/inputStrategyGate.ts`）。
      *
-     * mainのLocal Window platform authorityが対応を認め、作者pilotが非availableのときだけ
-     * preloadがexposeする。
-     * **`capable` は「設定 UI を出してよい」だけで、有効化ではない。** 実効有効化は
-     * settings.jsonの`experimentalLocalImeEnabled`（既定false）が
-     * 正本で、この bridge には preference も session 操作も diagnostics も載せない。
+     * `productStrategy`は製品の入口（「長文編集モード（実験的）」の設定）が選ぶ方式で、
+     * **有効化ではない**。実効の方式はsettings.jsonの`experimentalLocalImeEnabled`（既定false）と
+     * rendererのpureな決定関数が決める。`forced`は非packagedの開発用の強制ON（設定へ保存しない）。
+     * 設定・session操作・診断は載せない。
      */
-    localImeExperimentalPreview?: {
-      capable: true
+    inputStrategy?: {
+      readonly productStrategy: 'input-surface' | 'local-window' | 'none'
+      readonly authorPilot: boolean
+      readonly forced: boolean
     }
   }
   __NYOZE_E2E__?: {
@@ -619,6 +631,14 @@ interface Window {
       | import('../src/editor-core/features/localImeEditMenuCommandState').LocalImeEditMenuCommandResult
       | null;
     runEditorUndoRedo?: (operation: 'undo' | 'redo') => boolean;
+    /** PIS-S10-ENTRY1a: 入力の方式の読み取り（試験専用）。 */
+    inputPath?: {
+      capability: () => { productStrategy: 'input-surface' | 'local-window' | 'none'; authorPilot: boolean; forced: boolean };
+      current: () => 'input-surface' | 'host';
+      documentActionParticipants: () => string[];
+      diagnostics: () => import('../src/editor-core/features/inputSurface/inputPathRuntime').InputPathDiagnostics;
+      hostPendingInput: () => boolean;
+    };
     localImeLocalWindow?: {
       snapshot: () =>
         | import('../src/editor-core/features/localImeLocalWindowController').LocalImeLocalWindowSnapshot
@@ -706,6 +726,8 @@ interface Window {
     documentLeaveTabs?: {
       snapshot: () => readonly {
         id: string
+        documentInstanceId: string
+        cleanMarkdownSnapshot: string
         title: string
         dirty: boolean
         filePath: string | null
@@ -721,6 +743,12 @@ interface Window {
     }
     editorSession?: {
       snapshot: () => import('../src/ui/hooks/useEditorSession').EditorSessionHydrationStatus
+    }
+    /** EDITOR-TAB-HISTORY1: capsule の診断（試験専用）。 */
+    documentState?: {
+      snapshot: () => import('../src/editor-core/features/documentStateCapsule').DocumentStateDiagnostics | null
+      injectRestoreFailure: (kind: 'post-check' | null) => void
+      armRestoreTabFailure: () => boolean
     }
     macosArrowScrollClampE2eEvaluate?: (payload: {
       gate: import('../src/editor-core/features/macosArrowScrollClamp').MacosArrowScrollClampGateInput
@@ -763,6 +791,8 @@ interface Window {
      * NYOZE_E2E: fetchAndPatchSavedStat の patchTab 直前で 1 回だけ止まる latch。
      * production は arm しない。
      */
+    saveCompletionHold?: { arm: () => boolean; release: () => boolean; snapshot: () => { armed: boolean; waiting: boolean };
+      measureNextMarkdown: () => void; markdownMeasurement: () => { milliseconds: number; characters: number } | null };
     savedStatPatchHold?: {
       arm: () => boolean
       release: () => boolean

@@ -1,3 +1,4 @@
+import { indexDocumentHeadings } from './documentNodeIndex'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { HeadingInfo, HeadingUiSnapshot } from '../types'
 
@@ -37,7 +38,7 @@ export function collectHeadingUiState({
   const headings: HeadingInfo[] = []
   let activeHeadingIndex = -1
 
-  doc.descendants((node, pos) => {
+  indexDocumentHeadings(doc).forEach(({ node, pos }) => {
     if (node.type.name !== 'heading') return true
     const level = (node.attrs.level as number) ?? 1
     headings.push({ level, text: node.textContent, pos })

@@ -9,6 +9,7 @@ export type SaveDocumentEol = "lf" | "crlf";
  */
 export type SaveDocumentTarget = {
   id: string;
+  documentInstanceId?: string;
   title: string;
   filePath: string | null;
   savedStat: SavedFileStat;
@@ -17,6 +18,7 @@ export type SaveDocumentTarget = {
 
 export type SaveDocumentTabRow = {
   id: string;
+  documentInstanceId?: string;
   savedStat: SavedFileStat;
   eol?: SaveDocumentEol;
   cleanMarkdownSnapshot?: string;
@@ -29,6 +31,7 @@ export function captureSaveDocumentTarget(
 ): SaveDocumentTarget {
   return override ?? {
     id: active.id,
+    documentInstanceId: active.documentInstanceId,
     title: active.title,
     filePath: active.filePath,
     savedStat: active.savedStat,
@@ -85,6 +88,7 @@ export function beginSaveDocumentFirstWins(
   override: SaveDocumentTarget | undefined,
   activeTabId: string,
   activeTab: {
+    documentInstanceId?: string;
     title: string;
     filePath: string | null;
     savedStat: SavedFileStat;
@@ -104,6 +108,7 @@ export function beginSaveDocumentFirstWins(
 } {
   const active: SaveDocumentTarget = {
     id: activeTabId,
+    documentInstanceId: activeTab.documentInstanceId,
     title: activeTab.title,
     filePath: activeTab.filePath,
     savedStat: activeTab.savedStat,

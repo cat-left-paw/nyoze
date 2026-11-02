@@ -3,7 +3,9 @@ import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { parseMarkdown } from '../io/parseMarkdown'
 import type { LineBreakPolicy, MarkdownDocumentOptions } from '../types'
+import { isNyozeClipboardHtml } from './clipboardInternalMark'
 import { isTrivialClipboardHtml } from './clipboardPasteHtmlTriviality'
+import { buildLiteralPlainPasteTransaction, isLiteralPlainPasteData } from './literalPlainPaste'
 
 type LogPush = (event: string, detail: string) => void
 
@@ -86,10 +88,31 @@ export function createEditorPropsPasteHandler({
     const clipboardData = event.clipboardData
     if (!clipboardData) return false
 
+    // CLIPBOARD-INTERNAL-PASTE2: 右クリックの「プレーンテキストとして貼り付け」が、Nyoze の中で
+    // コピーした内容だと確かめて足した指示。`text/plain` を Markdown として読み直さず、
+    // 標準のプレーンテキストの貼り付けと同じ形（行ごとの段落）で、文字のまま入れる。
+    if (isLiteralPlainPasteData(clipboardData)) {
+      const literalText = clipboardData.getData('text/plain')
+      const literalTr = buildLiteralPlainPasteTransaction(view.state, literalText)
+      if (literalTr) {
+        event.preventDefault()
+        view.dispatch(literalTr.scrollIntoView())
+        pushLog('paste', `literalPlain chars=${literalText.length}`)
+        return true
+      }
+    }
+
     const plainText = clipboardData.getData('text/plain')
     if (!plainText) return false
 
     const htmlText = clipboardData.getData('text/html')
+    // CLIPBOARD-INTERNAL-PASTE1: Nyoze の中でコピーした内容は ProseMirror の標準の貼り付け
+    // （`data-pm-slice` からコピーした slice をそのまま組み立て直す）に任せる。
+    // `text/plain` を Markdown として読み直すと、文字の記号が見出し・強調などになる。
+    if (isNyozeClipboardHtml(htmlText)) {
+      pushLog('paste', `nyozeInternal chars=${plainText.length}`)
+      return false
+    }
     if (htmlText.trim().length > 0 && !isTrivialClipboardHtml(htmlText)) {
       return false
     }

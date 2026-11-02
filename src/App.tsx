@@ -1,3 +1,11 @@
+import { useParagraphPlainCloseGuard } from "./ui/hooks/useParagraphPlainCloseGuard";
+import { hasDocumentCloseChanges, withParagraphPlainCloseContribution } from "./ui/utils/documentCloseGuard";
+import { useSourceModeDraftGuard } from "./ui/hooks/useSourceModeDraftGuard";
+import { useSaveTargetIdentity } from "./ui/hooks/useSaveTargetIdentity";
+import { canFinalizeDocumentSave, type DocumentIdentity, type SaveIdentityRefusal } from "./ui/utils/saveTargetIdentity";
+import { isSameCommandAvailability } from "./ui/utils/commandAvailabilityEqual";
+import { useDeferredUiSyncBoundary } from "./ui/hooks/useDeferredUiSyncBoundary";
+import { reconcileDeferredUiCloseTabs } from "./ui/hooks/deferredUiCloseSnapshot";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type {
@@ -45,6 +53,7 @@ import {
   DEFAULT_MACOS_ARROW_SCROLL_CLAMP_ENABLED,
   DEFAULT_PSEUDO_CARET_BLINK_ENABLED,
   DEFAULT_PSEUDO_CARET_ENABLED,
+  DEFAULT_EXPERIMENTAL_INPUT_SURFACE_PREEDIT_DISPLAY,
   DEFAULT_PSEUDO_CARET_THICKNESS,
   DOCUMENT_THEME_COLOR_PRESETS,
   UI_THEME_DOC_COLOR_PRESETS,
@@ -102,7 +111,6 @@ import { useImePhaseAUpdateGate } from "./ui/hooks/useImePhaseAUpdateGate";
 import { useImePhaseBRubySuspend } from "./ui/hooks/useImePhaseBRubySuspend";
 import { isLocalImeDocumentActionAllowed, isLocalImeDocumentActionPending, requestLocalImeDocumentAction } from "./editor-core/features/localImeDocumentActionBarrier";
 import { getLocalImeDraftDirtyNotice } from "./editor-core/features/localImePilotRuntime";
-import { toggleHeadingFoldViaDocumentAction } from "./ui/utils/localImeHeadingFoldCommand";
 import { useLocalImeDraftDirtyTabId } from "./ui/hooks/useLocalImeDraftDirty";
 import { runLocalImeUiTransitionCommand } from "./ui/utils/localImeUiTransitionPreflight";
 import { runLocalImeHostCommand } from "./ui/utils/localImeHostCommandPreflight";
@@ -113,9 +121,6 @@ import {
 } from "./ui/hooks/imeProfilerJsonLog";
 import { useTabManager, MAX_OPEN_TABS } from "./ui/hooks/useTabManager";
 import { useEditorSession } from "./ui/hooks/useEditorSession";
-import {
-  guardSourceModeDraft as guardSourceModeDraftImpl,
-} from "./ui/hooks/sourceModeDraftGuard";
 import { applySuccessfulSaveToCloseTab, prepareSaveBeforeCloseTabsSnapshot, saveAllDirtyTabsBeforeCloseDetailed, saveTabWithSaveAsDetailed } from "./ui/hooks/saveBeforeClose";
 import type { ActiveTabSaveOutcome } from "./ui/hooks/saveBeforeClose";
 import {
@@ -130,6 +135,8 @@ import {
   pasteFromClipboard,
   pasteFromClipboardPlainOnly,
 } from "./ui/utils/nativeEditCommands";
+import { prepareInputSurfaceContextMenuClipboard } from "./editor-core/features/inputSurface/focusOwner";
+import { isInputSurfaceCapable } from "./editor-core/features/inputSurface/inputSurfaceGate";
 import { clampCommandAvailabilityForInternalDoc } from "./ui/utils/clampCommandAvailabilityForInternalDoc";
 import { getPathBaseName } from "./ui/utils/path";
 import {
@@ -182,7 +189,7 @@ import { resolvePlainModeKind } from "./ui/utils/plainModeCommandGate";
 import { countBodyCharacters as countDocumentBodyCharacters } from "./ui/utils/countBodyCharacters";
 // BETA-SP11: EOL fidelity — 保存時に元の改行種別へ戻す
 import { applyEol } from "./editor-core/io/eolHelper";
-import { awaitSavedStatPatchHoldForE2e } from "./ui/utils/savedStatPatchLatchForE2e";
+import { awaitSaveCompletionHoldForE2e, awaitSavedStatPatchHoldForE2e } from "./ui/utils/savedStatPatchLatchForE2e";
 import { beginSaveDocumentFirstWins, buildExpectedDiskMarkdown, type SaveDocumentTarget } from "./ui/utils/saveDocumentFirstWins";
 import { shouldEnableAutoTcyDisplay } from "./editor-core/features/autoTcy";
 import { isEditingFocusVacant } from "./editor-core/features/editingFocusOwnerRestore";
@@ -223,6 +230,8 @@ import { DocumentNotesPanel } from "./ui/components/DocumentNotesPanel";
 import { MissingFileNotesSection } from "./ui/components/MissingFileNotesSection";
 import { useMissingFileNotes } from "./ui/hooks/useMissingFileNotes";
 import { useNoteFileRelocation } from "./ui/hooks/useNoteFileRelocation";
+import { useNoteAnchorProtectionNotice } from "./ui/hooks/useNoteAnchorProtectionNotice";
+import { noteAnchorIdsRemoved } from "./project/noteLifecycleTracking";
 import { useExplorerMetadataBridge } from "./ui/hooks/useExplorerMetadataBridge";
 import { useActiveFileProjectMembership } from "./ui/hooks/useActiveFileProjectMembership";
 import { useFileMetadataPanelGlue } from "./ui/hooks/useFileMetadataPanelGlue";
@@ -237,6 +246,9 @@ import { LocalImePilotHud } from "./ui/components/LocalImePilotHud";
 import { useLocalImePilot } from "./ui/hooks/useLocalImePilot";
 import { useLocalImeExperimentalPreview } from "./ui/hooks/useLocalImeExperimentalPreview";
 import { LocalImeExperimentalPreviewNotice } from "./ui/components/LocalImeExperimentalPreviewNotice";
+import { InputSurfaceDocumentActionNotice } from "./ui/components/InputSurfaceDocumentActionNotice";
+import { useInputSurfaceDocumentShortcuts } from "./ui/hooks/useInputSurfaceDocumentShortcuts";
+import { allowInputSurfaceDocumentMutation, isInputSurfacePayloadBearing } from "./editor-core/features/inputSurface/documentAction";
 import { createUiTextGetter, getUiText } from "./ui/i18n/uiText";
 import { getShortcutReferenceContent } from "./ui/internalDocs/getShortcutReferenceContent";
 
@@ -290,6 +302,7 @@ type SaveDocumentDetail = {
   canceled?: boolean;
   errorKind?: SaveErrorKind;
   errorMessage?: string;
+  identityRefusal?: SaveIdentityRefusal;
 };
 
 const DOC_INFO_DATE_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
@@ -373,50 +386,6 @@ function isSystemDocPreset(preset: {
 }
 
 
-const COMMAND_AVAILABILITY_KEYS: Array<keyof CommandAvailability> = [
-  "hasSelection",
-  "canBold",
-  "canItalic",
-  "canStrike",
-  "canHighlight",
-  "canUnderline",
-  "canInlineCode",
-  "canClearFormat",
-  "canBlockTransforms",
-  "canUndo",
-  "canRedo",
-  "canInsertRuby",
-  "canParagraphPlain",
-  "canToggleTcy",
-  "canCopy",
-  "canCut",
-  "canPaste",
-  "canSelectAll",
-  "canMoveListUp",
-  "canMoveListDown",
-  "isHeading",
-  "isBold",
-  "isItalic",
-  "isStrike",
-  "isHighlight",
-  "isUnderline",
-  "isInlineCode",
-  "isBulletList",
-  "isOrderedList",
-  "isChecklist",
-  "isBlockquote",
-  "isCodeBlock",
-  "canBlockDirective",
-  "blockDirectiveToken",
-];
-
-function isSameCommandAvailability(
-  a: CommandAvailability,
-  b: CommandAvailability,
-): boolean {
-  return COMMAND_AVAILABILITY_KEYS.every((key) => a[key] === b[key]);
-}
-
 function App() {
   const coreRef = useRef<EditorCoreHandle | null>(null);
   const [editorCoreReady, setEditorCoreReady] = useState(false);
@@ -447,6 +416,7 @@ function App() {
   const sourceModeController = useSourceModeController();
   const [commandAvailability, setCommandAvailability] =
     useState<CommandAvailability>(EMPTY_COMMAND_AVAILABILITY);
+  const commandAvailabilityRef = useRef(commandAvailability);
 
   const {
     workspaceRef,
@@ -459,7 +429,10 @@ function App() {
     handleDividerMouseDown,
   } = usePaneLayout();
 
-  const ui = useAppUiState({ coreRef });
+  const uiSyncBoundary = useDeferredUiSyncBoundary();
+  const ui = useAppUiState({ coreRef, flushDeferredCoreUiSync: uiSyncBoundary.flush, invalidateDeferredCoreUiSnapshot: uiSyncBoundary.invalidateSnapshot });
+  const { readTabs, readActiveTabId, documentIdentity } = ui;
+  const paragraphPlainClose = useParagraphPlainCloseGuard(coreRef, readActiveTabId, (message) => ui.showLineBreakPolicyNotice(message, false));
 
   typewriterRuntimeRef.current = {
     enabled: ui.typewriterModeEnabled,
@@ -538,6 +511,8 @@ function App() {
   const localImeExperimentalPreview = useLocalImeExperimentalPreview({
     preferenceEnabled: ui.experimentalLocalImeEnabled,
     setPreferenceEnabled: ui.setExperimentalLocalImeEnabled,
+    preeditDisplay: ui.experimentalInputSurfacePreeditDisplay, setPreeditDisplay: ui.setExperimentalInputSurfacePreeditDisplay,
+    uiLanguageMode: ui.uiLanguageMode,
   });
 
   const {
@@ -649,16 +624,13 @@ function App() {
   // 明示的な破棄時の cleanup。判定と handshake 応答は hook 側が持つ。
   const showNoteAnchorNoticeRef = useRef<((message: string) => void) | null>(null);
   const {
-    trackInsertedNote,
-    hasProvisionalNotesForDocument,
-    resolveDurableNotesAfterSave,
-    discardProvisionalNotesForLeave,
+    trackInsertedNote, trackDeletedNote, markNoteAnchorsDetachedByEdit, refreshProvisionalNoteFingerprint,
+    hasProvisionalNotesForDocument, hiddenNoteIds, reconcileNotesAfterSave, discardProvisionalNotesForLeave,
   } = useProvisionalNotes({
+    tabs: ui.tabs, activeDocument: { tabId: ui.activeTabId, filePath: ui.activeTab.filePath },
+    recalcDirtyFromCore: ui.recalcDirtyFromCore, discardParagraphPlain: () => coreRef.current?.discardParagraphPlainIfActive(),
     showNotice: (message) => showNoteAnchorNoticeRef.current?.(message),
-    refreshNoteViews: () => {
-      void refreshNoteAnchorPreviews();
-      void refreshDocumentNotes();
-    },
+    refreshNoteViews: () => { void refreshNoteAnchorPreviews(); void refreshDocumentNotes(); },
   });
 
   // 付箋追加 (Task 3A-3): flow は useNoteAnchorInsert / controller 側に分離
@@ -779,11 +751,13 @@ function App() {
     // （barrier → toggleParagraphPlainMode）をそのまま対象固定する。既存の
     // paragraph-plain-toggle barrier 自体は変更しない。
     if (!isLocalImeDocumentActionAllowed("paragraph-plain-toggle")) return;
+    uiSyncBoundary.flush("paragraph-plain-toggle");
     const core = coreRef.current;
     if (!core) return;
     const next = core.toggleParagraphPlainMode();
+    uiSyncBoundary.flush("paragraph-plain-committed");
     ui.setParagraphPlainModeActive(next);
-  }, [ui]);
+  }, [ui, uiSyncBoundary]);
 
   // P2-G2b: armed 局所 IME slot 中の window shortcut 由来 pane toggle は、既存
   // document-action barrier を通してから 1 回だけ切り替える（composing / busy /
@@ -798,10 +772,13 @@ function App() {
       setRightPaneOpen((v) => !v);
     });
   }, [setRightPaneOpen]);
+  const handleInputSurfaceDisplayChanged = useCallback(() => {
+    coreRef.current?.scheduleVisualFocusCurrentLineUpdate(); coreRef.current?.refreshInputSurfaceDisplay();
+  }, []);
   const handlePaneGeometryCommitted = useCallback(() => {
     coreRef.current?.schedulePseudoCaretUpdate();
-  }, []);
-
+    handleInputSurfaceDisplayChanged();
+  }, [handleInputSurfaceDisplayChanged]);
   const handleCtxHeading = useCallback(
     (level: number) => {
       if (ui.activeTab.internalDocId) return;
@@ -821,19 +798,6 @@ function App() {
     coreRef.current?.moveListItemDown();
   }, [ui.activeTab.internalDocId]);
 
-  const handleToggleHeadingFold = useCallback(
-    (pos: number) => {
-      const core = coreRef.current;
-      if (!core || !toggleHeadingFoldViaDocumentAction(core, pos)) return;
-      ui.setFoldedHeadingPositions(core.getFoldedHeadingPositions());
-    },
-    [ui],
-  );
-
-  const handleRequestHeadingPreview = useCallback((pos: number): string => {
-    return coreRef.current?.getHeadingPreview(pos) ?? "";
-  }, []);
-
   const refreshActiveDocumentCharacterCount = useCallback(() => {
     const core = coreRef.current;
     if (!core) {
@@ -845,10 +809,12 @@ function App() {
   }, []);
 
   const refreshActiveDocumentStat = useCallback(
-    async (pathOverride?: string | null) => {
+    async (pathOverride?: string | null, identity?: DocumentIdentity) => {
+      const started = identity ?? documentIdentity.readEditor();
+      if (identity && !canFinalizeDocumentSave(identity, readTabs().find(tab => tab.id === readActiveTabId()))) return;
       const requestId = ++activeDocumentStatRequestSeqRef.current;
       const targetPath =
-        pathOverride === undefined ? ui.activeTab.filePath : pathOverride;
+        pathOverride === undefined ? readTabs().find(tab => tab.id === readActiveTabId())?.filePath : pathOverride;
       if (!targetPath) {
         setActiveDocumentStat(null);
         return;
@@ -859,10 +825,10 @@ function App() {
         return;
       }
       const stat = await getFileStat(targetPath).catch(() => null);
-      if (requestId !== activeDocumentStatRequestSeqRef.current) return;
+      if (requestId !== activeDocumentStatRequestSeqRef.current || !canFinalizeDocumentSave(started, readTabs().find(tab => tab.id === readActiveTabId()))) return;
       setActiveDocumentStat(stat);
     },
-    [ui.activeTab.filePath],
+    [readTabs, readActiveTabId, documentIdentity],
   );
 
   const onCoreLog = ui.onCoreLog;
@@ -874,9 +840,9 @@ function App() {
   const syncCommandAvailability = useCallback(() => {
     const next =
       coreRef.current?.getCommandAvailability() ?? EMPTY_COMMAND_AVAILABILITY;
-    setCommandAvailability((prev) =>
-      isSameCommandAvailability(prev, next) ? prev : next,
-    );
+    if (isSameCommandAvailability(commandAvailabilityRef.current, next)) return;
+    commandAvailabilityRef.current = next;
+    setCommandAvailability(next);
   }, []);
 
   // P3-A1-PERF1: timelineがactiveな局所IME確定dispatch中だけ、既知UI同期を
@@ -888,24 +854,28 @@ function App() {
 
   const performFullCoreUiSync = useCallback(() => {
     const currentMarkdown = runLocalImePerfSpan("markdown-serialize", () => coreRef.current?.peekMarkdown());
-    runLocalImePerfSpan("app-derived-ui", () => {
-      onCoreUpdate(currentMarkdown);
+    return runLocalImePerfSpan("app-derived-ui", () => {
+      const synchronized = onCoreUpdate(currentMarkdown);
+      if (synchronized && currentMarkdown !== undefined) uiSyncBoundary.publishSnapshot(ui.activeTab, currentMarkdown);
       syncCommandAvailability();
       if (currentMarkdown === undefined) {
         setActiveDocumentCharacterCount(0);
-        return;
+        return 0;
       }
-      setActiveDocumentCharacterCount(countDocumentBodyCharacters(currentMarkdown));
+      const count = countDocumentBodyCharacters(currentMarkdown);
+      setActiveDocumentCharacterCount(count);
+      return count;
     });
   }, [
     coreRef,
     onCoreUpdate,
+    ui.activeTab, uiSyncBoundary,
     runLocalImePerfSpan,
     syncCommandAvailability,
   ]);
 
   const performLightCoreUiSync = useCallback(() => {
-    onCoreUpdateLight();
+    return onCoreUpdateLight();
     // syncCommandAvailability intentionally omitted during light sync (IME composition).
     // Toolbar state is not needed while composing; it is flushed on compositionend via full sync.
   }, [onCoreUpdateLight]);
@@ -913,12 +883,15 @@ function App() {
     handleCoreLog: handleImePhaseALog,
     handleCoreUpdate: handleImePhaseAUpdate,
     flushDeferredSync: flushImeDeferredUiSync,
+    hasPendingDeferredSync,
+    fullSyncRevision,
     isComposingRef: imeComposingRef,
   } = useImePhaseAUpdateGate({
     enabled: ui.imePhaseAEnabled,
     minSyncIntervalMs: ui.imePhaseAMinSyncIntervalMs,
     onFullSync: performFullCoreUiSync,
     onLightSync: performLightCoreUiSync,
+    onDeferredSyncStart: () => { window.nyozeBridge?.appState?.setDocumentDirty(true).catch(() => {}); },
   });
 
   const {
@@ -931,11 +904,14 @@ function App() {
 
   const flushImeCompositionSideEffects = useCallback(
     (reason: string) => {
-      flushImeDeferredUiSync(reason);
+      const count = flushImeDeferredUiSync(reason);
       forceResumeImeRuby(reason);
+      return count;
     },
     [flushImeDeferredUiSync, forceResumeImeRuby],
   );
+
+  uiSyncBoundary.bind(flushImeCompositionSideEffects);
 
   const handleCoreLog = useCallback(
     (entry: LogEntry) => {
@@ -975,15 +951,17 @@ function App() {
     });
   }, [imeComposingRef, onCoreSelectionUpdate, runLocalImePerfSpan, syncCommandAvailability]);
 
-  const handleCoreUpdate = useCallback(() => {
+  const handleCoreUpdate = useCallback((docChanged?: boolean) => {
+    uiSyncBoundary.invalidateSnapshot();
     runLocalImePerfSpan("app-derived-ui", () => {
       handleImeProfilerUpdate();
-      handleImePhaseAUpdate();
+      handleImePhaseAUpdate(docChanged);
       syncAnchoredNoteIds();
     });
   }, [
     handleImePhaseAUpdate,
     handleImeProfilerUpdate,
+    uiSyncBoundary,
     runLocalImePerfSpan,
     syncAnchoredNoteIds,
   ]);
@@ -1182,6 +1160,7 @@ function App() {
     onLog: handleCoreLog,
     onSelectionUpdate: handleCoreSelectionUpdate,
     onParagraphPlainModeChange: ui.onCoreParagraphPlainModeChange,
+    onParagraphPlainPendingChanges: paragraphPlainClose.onPendingChanges,
     onLineBreakPolicyChange: ui.onCoreLineBreakPolicyChange,
     onUpdate: handleCoreUpdate,
     onFoldChange: ui.onCoreFoldChange,
@@ -1252,8 +1231,6 @@ function App() {
   );
 
   useEffect(() => {
-    if (!ui.imePhaseAEnabled && !ui.imePhaseBRubySuspendEnabled) return;
-
     const onWindowBlur = () => {
       flushImeCompositionSideEffects("window-blur");
     };
@@ -1328,12 +1305,13 @@ function App() {
 
   // Hard ruby OFF: sync rubyVisible → core.setEnableRuby with save→reload cycle
   const rubyToggleInProgressRef = useRef(false);
-  const { rubyVisible, fullPlainEditActive, setSuppressNextDirty } = ui;
+  const { rubyVisible, fullPlainEditActive, setSuppressNextDirty, refreshHeadings } = ui;
   rubyVisibleRef.current = rubyVisible;
   useEffect(() => {
     const core = coreRef.current;
     if (!core) return;
     if (core.isRubyEnabled() === rubyVisible) return;
+    if (!readTabs().some(tab => tab.id === readActiveTabId())) return;
     if (fullPlainEditActive) {
       // Defer reload until fullPlain exits; do NOT set the flag here so the
       // mismatch persists and triggers a reload when fullPlainEditActive becomes false.
@@ -1342,6 +1320,7 @@ function App() {
     // 局所 IME slot session barrier。ruby 切替は saveMarkdown() → loadMarkdown() で
     // forceReset まで進むため、未確定 payload があるときに通すと原稿が消える。
     // fullPlain と同じく flag を立てずに戻り、mismatch を残したまま再適用を保留する。
+    if (isInputSurfacePayloadBearing()) return;
     if (!isLocalImeDocumentActionAllowed("ruby-visibility-reload")) return;
     flushImeCompositionSideEffects("ruby-toggle");
     const md = core.saveMarkdown();
@@ -1349,12 +1328,16 @@ function App() {
     core.setEnableRuby(rubyVisible);
     setSuppressNextDirty(true);
     rubyToggleInProgressRef.current = true;
+    const previousEditorDocument = documentIdentity.beginLoad();
     if (!core.loadMarkdown(md)) {
+      documentIdentity.loadRefused(previousEditorDocument);
       core.setEnableRuby(previousRubyEnabled);
       setSuppressNextDirty(false);
       rubyToggleInProgressRef.current = false;
       return;
     }
+    documentIdentity.finishSameDocumentReload(previousEditorDocument);
+    refreshHeadings();
     rubyToggleInProgressRef.current = false;
     syncCommandAvailability();
   }, [
@@ -1362,7 +1345,8 @@ function App() {
     fullPlainEditActive,
     rubyVisible,
     setSuppressNextDirty,
-    syncCommandAvailability,
+    refreshHeadings,
+    syncCommandAvailability, readTabs, readActiveTabId, documentIdentity,
   ]);
 
   // BETA-IO1: External edit conflict modal handlers
@@ -1445,26 +1429,32 @@ function App() {
   // Uses patchTab(tabId, ...) to avoid race when the active tab changes during
   // the async getFileStat call.
   const fetchAndPatchSavedStat = useCallback(
-    async (tabId: string, filePath: string) => {
+    async (tabId: string, filePath: string, identity?: DocumentIdentity) => {
+      const started = identity ?? { tabId, documentInstanceId: readTabs().find(tab => tab.id === tabId)?.documentInstanceId ?? "" };
+      if (!canFinalizeDocumentSave(started, readTabs().find(tab => tab.id === tabId))) return;
       const stat = await window.nyozeBridge?.fs?.getFileStat?.(filePath).catch(() => null);
       await awaitSavedStatPatchHoldForE2e();
       const saved: SavedFileStat = stat
         ? { mtimeMs: stat.mtimeMs, size: stat.size }
         : null;
-      ui.patchTab(tabId, { savedStat: saved });
+      if (canFinalizeDocumentSave(started, readTabs().find(tab => tab.id === tabId))) ui.patchTab(tabId, { savedStat: saved });
     },
-    [ui],
+    [ui, readTabs],
   );
 
+  const saveIdentity = useSaveTargetIdentity(ui, coreRef, sourceModeController, detail => { saveDocumentDetailRef.current = detail; });
   const saveDocument = useCallback(
     async (
       forceSaveAs: boolean, targetTabOverride?: SaveDocumentTarget, localImeDocumentActionPrepared = false, proveBeforeDiskWrite?: () => boolean,
     ): Promise<boolean> => {
       saveDocumentDetailRef.current = null;
+      const active = saveIdentity.active();
+      if (!active) return saveIdentity.refuse('target-missing');
       const {
         capturedTarget, targetTabId, currentFilePath, currentTabTitle, currentSavedStat,
         lastKnownSavedMarkdown, tabEol, isInternalDoc,
-      } = beginSaveDocumentFirstWins(targetTabOverride, ui.activeTabId, ui.activeTab, ui.tabs);
+      } = beginSaveDocumentFirstWins(targetTabOverride, readActiveTabId(), active, readTabs());
+      const targetIdentity: DocumentIdentity = { tabId: targetTabId, documentInstanceId: capturedTarget.documentInstanceId ?? saveIdentity.row(targetTabId)?.documentInstanceId ?? "" };
       if (!localImeDocumentActionPrepared && !isLocalImeDocumentActionAllowed("save-document", () => {
         void deferredSaveDocumentRef.current?.(forceSaveAs, capturedTarget, true, proveBeforeDiskWrite);
       })) {
@@ -1477,11 +1467,18 @@ function App() {
       if (isInternalDoc) return true;
       // BETA-Q1: If Full Plain edit is active, apply the draft to core first.
       // core.saveMarkdown() would return stale content otherwise.
-      if (ui.fullPlainEditActive) {
-        const draftMarkdown =
-          sourceModeController.getValue() ?? ui.fullPlainEditValue;
+      const contentDecision = saveIdentity.decision(targetIdentity);
+      if (contentDecision.kind === "refused") return saveIdentity.refuse(contentDecision.reason);
+      if (contentDecision.kind === "draft") {
+        const draftMarkdown = sourceModeController.getValue()!;
         try {
-          if (!core.loadMarkdown(draftMarkdown)) return false;
+          ui.invalidateOutlineTargets();
+          const anchorsBeforeDraft = core.getNoteAnchorIdsInDoc(); // REVIEWFIX2 R3: Source Mode の適用で消えた anchor
+          const previousEditorDocument = documentIdentity.beginLoad();
+          if (!core.loadMarkdown(draftMarkdown)) { documentIdentity.loadRefused(previousEditorDocument); ui.refreshHeadings(); return false; }
+          documentIdentity.finishSameDocumentReload(previousEditorDocument);
+          ui.refreshHeadings();
+          markNoteAnchorsDetachedByEdit(noteAnchorIdsRemoved(anchorsBeforeDraft, core.getNoteAnchorIdsInDoc())); syncAnchoredNoteIds();
           const normalizedMarkdown = core.saveMarkdown();
           const { frontmatterPrefix } =
             splitLeadingFrontmatter(normalizedMarkdown);
@@ -1500,6 +1497,7 @@ function App() {
           });
           ui.setFullPlainEditError("");
         } catch {
+          ui.refreshHeadings();
           ui.setFullPlainEditError(
             "Markdown適用に失敗しました。保存を中断します。",
           );
@@ -1517,21 +1515,18 @@ function App() {
       const mdToWrite = applyEol(md, tabEol);
       const expectedDiskMarkdown = buildExpectedDiskMarkdown(lastKnownSavedMarkdown, tabEol);
       const bridge = window.nyozeBridge?.fs;
-      const authorizeDiskWrite = () => !proveBeforeDiskWrite || proveBeforeDiskWrite();
+      const authorizeDiskWrite = () => saveIdentity.authorizeWrite(targetIdentity) && (!proveBeforeDiskWrite || proveBeforeDiskWrite());
       if (bridge?.writeFile && bridge?.saveAs) {
         const finalizeSuccessfulSave = async (
           savedFilePath: string,
           backupWarning?: string,
         ): Promise<true> => {
-          // STICKY-NOTE-DISCARD-CONSISTENCY1: disk write が成功し、保存本文に anchor が
-          // 実在する付箋だけを durable にして provisional 追跡を解除する。
-          resolveDurableNotesAfterSave({
-            tabId: targetTabId,
-            filePath: savedFilePath,
-            markdown: mdToWrite,
-          });
-          ui.markDirtyFalseForTab(targetTabId, md);
-          await Promise.all([refreshActiveDocumentStat(savedFilePath), fetchAndPatchSavedStat(targetTabId, savedFilePath)]);
+          // STICKY-NOTE-DISCARD-CONSISTENCY1 / LIFECYCLE1: disk write 成功後、保存本文の anchor の有無で
+          // provisional を durable に、仮の削除を deleted / open に確定する。
+          await awaitSaveCompletionHoldForE2e();
+          await reconcileNotesAfterSave({ tabId: targetTabId, filePath: savedFilePath, markdown: mdToWrite });
+          saveIdentity.complete(targetIdentity, md);
+          await Promise.all([refreshActiveDocumentStat(savedFilePath, targetIdentity), fetchAndPatchSavedStat(targetTabId, savedFilePath, targetIdentity)]);
           showBackupWarningIfPresent(backupWarning);
           saveDocumentDetailRef.current = { backupWarning, savedFilePath };
           return true;
@@ -1550,7 +1545,7 @@ function App() {
           if (!authorizeDiskWrite()) return false;
           const saveAsResult = await bridge.saveAs(mdToWrite, defaultPath);
           if (saveAsResult?.saved && saveAsResult.filePath) {
-            ui.patchTab(targetTabId, {
+            saveIdentity.patch(targetIdentity, {
               title: getPathBaseName(saveAsResult.filePath),
               filePath: saveAsResult.filePath,
             });
@@ -1750,25 +1745,26 @@ function App() {
       if (!authorizeDiskWrite()) return false;
       a.click();
       URL.revokeObjectURL(url);
-      ui.markDirtyFalseForTab(targetTabId, md);
+      saveIdentity.complete(targetIdentity, md);
       return true;
     },
     [
-      fetchAndPatchSavedStat,
+      fetchAndPatchSavedStat, saveIdentity, documentIdentity, readActiveTabId, readTabs,
       flushImeCompositionSideEffects,
+      markNoteAnchorsDetachedByEdit, syncAnchoredNoteIds,
       notifyFileExplorerFileSaved,
       refreshActiveDocumentStat,
       requestConflictAction,
       hasProvisionalNotesForDocument,
       requestSaveFailureAction,
-      resolveDurableNotesAfterSave,
+      reconcileNotesAfterSave,
       showBackupWarningIfPresent,
       sourceModeController,
       ui,
     ],
   );
   deferredSaveDocumentRef.current = saveDocument;
-
+  useInputSurfaceDocumentShortcuts(saveDocument);
   // Shared options confirm UI (pageBreak / pageBreakBeforeHeading /
   // pageBreakBeforeHeadingMaxLevel, plus Book-only insertPageBreakBetweenChapters)
   // for both active document export and Book export. One prompt/modal instance;
@@ -1826,6 +1822,7 @@ function App() {
     });
   const { openPageViewer } = usePageViewerLauncher({
     coreRef,
+    flushDeferredUiSync: flushImeCompositionSideEffects,
     activeTab: ui.activeTab,
     internalDocActive: Boolean(ui.activeTab.internalDocId),
     writingMode: ui.writingMode,
@@ -1888,7 +1885,9 @@ function App() {
   const saveActiveTabForClose = useCallback(
     async (): Promise<ActiveTabSaveOutcome> => {
       saveDocumentDetailRef.current = null;
+      const savingDocument = documentIdentity.readEditor();
       const ok = await saveDocument(false);
+      if (ok && (!canFinalizeDocumentSave(savingDocument, saveIdentity.row(savingDocument?.tabId ?? "")) || !saveIdentity.isClean(savingDocument?.tabId ?? ""))) return { ok: false, reason: { kind: "canceled" } };
       const detail = saveDocumentDetailRef.current as SaveDocumentDetail | null;
       saveDocumentDetailRef.current = null;
       if (ok) {
@@ -1910,7 +1909,7 @@ function App() {
         },
       };
     },
-    [saveDocument],
+    [saveDocument, documentIdentity, saveIdentity],
   );
 
   const requestUnsavedContinueAction = useCallback(
@@ -1949,26 +1948,30 @@ function App() {
       saveTargetTab?: SaveDocumentTarget;
       localImeDocumentActionPrepared?: boolean; proveBeforeDiskWrite?: () => boolean;
     }): Promise<boolean> => {
-      if (!options?.forcePrompt && !ui.activeTab.dirty) return true;
+      flushImeCompositionSideEffects("confirm-document-leave");
+      const target = options?.saveTargetTab ?? saveIdentity.active();
+      if (!target) return saveIdentity.refuse('target-missing');
+      const expected = { tabId: target.id, documentInstanceId: saveIdentity.row(target.id)?.documentInstanceId ?? "" };
+      if (!options?.forcePrompt && saveIdentity.isClean(target.id)) return true;
       const action = await requestUnsavedContinueAction();
-      if (action === "cancel") return false;
+      if (action === "cancel" || !canFinalizeDocumentSave(expected, saveIdentity.row(target.id))) return false;
       if (action === "discard") {
         // STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄なので、この document の
         // 未保存 anchor に対応する provisional note だけを取り除いてから離脱する。
         // cleanup が失敗したら fail-closed（離脱を成功扱いにしない）。
-        const target = options?.saveTargetTab ?? ui.activeTab;
         return await discardProvisionalNotesForLeave({
           tabId: target.id,
           filePath: target.filePath,
         });
       }
-      return saveDocument(false, options?.saveTargetTab, options?.localImeDocumentActionPrepared, options?.proveBeforeDiskWrite);
+      const saved = await deferredSaveDocumentRef.current?.(false, { ...target, documentInstanceId: expected.documentInstanceId }, options?.localImeDocumentActionPrepared, options?.proveBeforeDiskWrite);
+      return saved === true && canFinalizeDocumentSave(expected, saveIdentity.row(target.id)) && saveIdentity.isClean(target.id);
     },
     [
       discardProvisionalNotesForLeave,
       requestUnsavedContinueAction,
-      saveDocument,
-      ui.activeTab,
+      saveIdentity,
+      flushImeCompositionSideEffects,
     ],
   );
 
@@ -2035,43 +2038,13 @@ function App() {
     });
   }, [applyEditorScroll]);
 
-  // BETA-SP1: Source Mode ドラフト消失防止ガード
-  // closeFullPlainEdit は後方で定義されるため、ref 経由で遅延参照する。
-  const guardSourceModeDraftDepsRef = useRef({
-    fullPlainEditActive: ui.fullPlainEditActive,
-    sourceModeController,
-    saveDocument,
-    closeFullPlainEdit: (() => {}) as () => void,
-    requestUnsavedContinueAction,
-  });
-  // 最新 deps を毎レンダーで同期（closeFullPlainEdit は後で上書き）
-  guardSourceModeDraftDepsRef.current.fullPlainEditActive =
-    ui.fullPlainEditActive;
-  guardSourceModeDraftDepsRef.current.sourceModeController =
-    sourceModeController;
-  guardSourceModeDraftDepsRef.current.saveDocument = saveDocument;
-  guardSourceModeDraftDepsRef.current.requestUnsavedContinueAction =
-    requestUnsavedContinueAction;
-
-  const guardSourceModeDraftFn = useCallback(
-    (options?: { localImeDocumentActionPrepared?: boolean; proveBeforeDiskWrite?: () => boolean }) => {
-      const r = guardSourceModeDraftDepsRef.current;
-      return guardSourceModeDraftImpl({
-        fullPlainEditActive: r.fullPlainEditActive,
-        getSourceModeDraft: () => r.sourceModeController.getValue(),
-        getCoreMarkdown: () => coreRef.current?.peekMarkdown() ?? null,
-        saveDocument: () => r.saveDocument(false, undefined, options?.localImeDocumentActionPrepared, options?.proveBeforeDiskWrite),
-        closeFullPlainEdit: () => r.closeFullPlainEdit(),
-        requestUnsavedContinueAction: () =>
-          r.requestUnsavedContinueAction(),
-      });
-    },
-    [],
-  );
+  const sourceDraftGuard = useSourceModeDraftGuard(ui, sourceModeController, saveDocument,
+    requestUnsavedContinueAction, () => coreRef.current?.peekMarkdown() ?? null);
+  const guardSourceModeDraftFn = sourceDraftGuard.guard;
 
   const localImeDraftDirtyTabId = useLocalImeDraftDirtyTabId(ui.activeTabId); const tabManager = useTabManager({
-    coreRef,
-    tabs: ui.tabs,
+    coreRef, documentIdentity, readActiveTabId,
+    tabs: ui.tabs, readSynchronizedTabs: () => uiSyncBoundary.readTabs(readTabs(), readActiveTabId()),
     activeTabId: ui.activeTabId,
     activeTab: ui.activeTab,
     setActiveTabId: ui.setActiveTabId,
@@ -2096,14 +2069,14 @@ function App() {
     defaultWritingMode: ui.defaultWritingMode, effectiveWritingMode: ui.writingMode,
     defaultLineBreakPolicy: ui.defaultLineBreakPolicy,
     guardSourceModeDraft: guardSourceModeDraftFn,
-    localImeDraftDirtyOwnerTabId: localImeDraftDirtyTabId, hasActiveDocumentUncommittedDraft, readLocalImeDraftDirtyNotice: getLocalImeDraftDirtyNotice, prepareLocalImeDocumentAction: (reason) => requestLocalImeDocumentAction(reason), isLocalImeDocumentActionPending,
+    localImeDraftDirtyOwnerTabId: localImeDraftDirtyTabId, hasActiveDocumentUncommittedDraft, readLocalImeDraftDirtyNotice: getLocalImeDraftDirtyNotice, flushDeferredUiSync: flushImeCompositionSideEffects, prepareLocalImeDocumentAction: (reason) => requestLocalImeDocumentAction(reason), isLocalImeDocumentActionPending,
   });
 
   const {
     flush: flushEditorSession,
     getStatusForE2e: getEditorSessionStatusForE2e,
   } = useEditorSession({
-    coreReady: editorCoreReady,
+    documentIdentity, coreReady: editorCoreReady,
     settingsReady: ui.settingsSyncReady,
     coreRef,
     tabs: ui.tabs,
@@ -2217,7 +2190,6 @@ function App() {
     isDirty: ui.activeTab.dirty,
     saveDocument,
   });
-
   const projectDocumentStartKey = useMemo(() => {
     if (!documentStartMasterVisible || projectDocumentStartInfo.kind === "none") {
       return null;
@@ -2238,6 +2210,7 @@ function App() {
       // `schedulePseudoCaretUpdate()` を再利用するだけで、第二 scheduler / timer / polling は
       // 足さない。selection・本文・dirty は触らない（表示座標の再読み取りだけ）。
       core.schedulePseudoCaretUpdate();
+      core.refreshInputSurfaceDisplay();
     });
     return () => window.cancelAnimationFrame(raf);
   }, [
@@ -2320,6 +2293,8 @@ function App() {
     openOrFocusShortcutReferenceTab: tabManager.openOrFocusShortcutReferenceTab,
     documentLeaveTabsForE2e: { tabs: ui.tabs, activeTabId: ui.activeTabId, switchTo: tabManager.switchTab, add: tabManager.addNewTab, close: tabManager.closeTab },
     getEditorSessionStatusForE2e,
+    readDocumentStateDiagnosticsForE2e: () => coreRef.current?.readDocumentStateDiagnosticsForE2e() ?? null,
+    injectDocumentStateRestoreFailureForE2e: (kind) => coreRef.current?.injectDocumentStateRestoreFailureForE2e(kind),
     setPseudoCaretEnabledForE2e: ui.setPseudoCaretEnabled,
     setPseudoCaretThicknessForE2e: ui.setPseudoCaretThickness,
     setPseudoCaretBlinkEnabledForE2e: ui.setPseudoCaretBlinkEnabled,
@@ -2437,14 +2412,14 @@ function App() {
     showTabLimitNotice,
   ]);
 
-  const anyTabDirty = ui.tabs.some((t) => t.dirty || t.id === localImeDraftDirtyTabId);
+  const anyTabDirty = hasDocumentCloseChanges({ tabDirty: ui.tabs.some(t => t.dirty), paragraphPlainPending: paragraphPlainClose.dirtyTabId !== null, localImeDraft: localImeDraftDirtyTabId !== null, deferredSync: false });
   useEffect(() => {
     const setDirty = window.nyozeBridge?.appState?.setDocumentDirty;
     if (typeof setDirty !== "function") return;
-    setDirty(anyTabDirty).catch(() => {
+    setDirty(anyTabDirty || hasPendingDeferredSync()).catch(() => {
       // ignore
     });
-  }, [anyTabDirty]);
+  }, [anyTabDirty, hasPendingDeferredSync, fullSyncRevision]);
 
   useEffect(() => {
     void refreshActiveDocumentStat(ui.activeTab.filePath ?? null);
@@ -2480,8 +2455,9 @@ function App() {
       return;
     }
     return appState.onRequestSaveBeforeClose((requestId) => {
+      const hadDeferredSync = hasPendingDeferredSync();
       // SAVE-BEFORE-CLOSE1: barrier前のdraft owner / identityをready後snapshotへ同期継承する。
-      const preparedSnapshot = prepareSaveBeforeCloseTabsSnapshot({ activeTabId: ui.activeTabId, localImeDraftDirtyOwnerTabId: localImeDraftDirtyTabId, readLocalImeDraftDirtyNotice: getLocalImeDraftDirtyNotice, prepareLocalImeDocumentAction: () => requestLocalImeDocumentAction("save-before-close"), readTabsAfterBarrier: () => ui.tabs, readActiveTabIdAfterBarrier: () => ui.activeTabId, readLocalImeDraftDirtyOwnerTabIdAfterBarrier: () => localImeDraftDirtyTabId, isLocalImeDocumentActionPending });
+      const preparedSnapshot = prepareSaveBeforeCloseTabsSnapshot({ activeTabId: ui.activeTabId, localImeDraftDirtyOwnerTabId: localImeDraftDirtyTabId, readLocalImeDraftDirtyNotice: getLocalImeDraftDirtyNotice, prepareLocalImeDocumentAction: () => requestLocalImeDocumentAction("save-before-close"), readTabsAfterBarrier: () => { flushImeCompositionSideEffects("save-before-close"); return hadDeferredSync ? reconcileDeferredUiCloseTabs(ui.tabs, ui.activeTabId, coreRef.current?.peekMarkdown()) : ui.tabs; }, readActiveTabIdAfterBarrier: () => ui.activeTabId, readLocalImeDraftDirtyOwnerTabIdAfterBarrier: () => localImeDraftDirtyTabId, isLocalImeDocumentActionPending });
       if (!preparedSnapshot.ok) { appState.reportSaveBeforeClose(requestId, false); return; }
       const closeBridge = {
         writeFile: bridge.writeFile,
@@ -2491,18 +2467,16 @@ function App() {
       // P2 fix: local mutable tabs snapshot.
       // React state updates (patchTab/markDirtyFalseForTab) are async,
       // so re-runs of runOnce() must use a synchronously updated copy.
-      const closeTabs = preparedSnapshot.tabs;
+      const closeTabs = withParagraphPlainCloseContribution(preparedSnapshot.tabs, readActiveTabId(), coreRef.current?.hasParagraphPlainPendingOverlayChanges() ?? false);
+      const closeSave = saveIdentity.forSnapshot(readTabs());
 
+      // STICKY-NOTE-LIFECYCLE1: 仮の削除の確定（notes.json）は close 成功の報告の前に待つ。
+      const pendingNoteReconciliations: Promise<boolean>[] = [];
       const localMarkTabClean = (tabId: string, md: string) => {
-        // STICKY-NOTE-DISCARD-CONSISTENCY1: non-active tab の disk write 成功も
-        // durable save authority なので、同じ判定で provisional 追跡を解除する。
+        // STICKY-NOTE-DISCARD-CONSISTENCY1 / LIFECYCLE1: non-active tab の disk write 成功も
+        // durable save authority。同じ判定で provisional と仮の削除を確定する。
         const savedTab = closeTabs.find((t) => t.id === tabId);
-        resolveDurableNotesAfterSave({
-          tabId,
-          filePath: savedTab?.filePath ?? null,
-          markdown: md,
-        });
-        ui.markDirtyFalseForTab(tabId, md);
+        pendingNoteReconciliations.push(reconcileNotesAfterSave({ tabId, filePath: savedTab?.filePath ?? null, markdown: md }).then(ok => { closeSave.complete(tabId, md); return ok; }));
         const idx = closeTabs.findIndex((t) => t.id === tabId);
         if (idx !== -1) {
           closeTabs[idx] = { ...closeTabs[idx], dirty: false, markdownSnapshot: md };
@@ -2513,7 +2487,7 @@ function App() {
         tabId: string,
         patch: { title?: string; filePath?: string | null },
       ) => {
-        ui.patchTab(tabId, patch);
+        closeSave.patch(tabId, patch);
         const idx = closeTabs.findIndex((t) => t.id === tabId);
         if (idx !== -1) {
           closeTabs[idx] = { ...closeTabs[idx], ...patch };
@@ -2522,7 +2496,7 @@ function App() {
 
       const closeDeps = {
         markTabClean: localMarkTabClean,
-        fetchAndPatchSavedStat,
+        fetchAndPatchSavedStat: (id: string, path: string) => fetchAndPatchSavedStat(id, path, closeSave.identity(id)),
         patchTab: localPatchTab,
       };
 
@@ -2659,7 +2633,10 @@ function App() {
       };
 
       void attempt()
-        .then(async (ok) => {
+        .then(async (saved) => {
+          // STICKY-NOTE-LIFECYCLE1: 本文は保存済みでも、付箋の確定（notes.json）に失敗したら
+          // close を完了せず window を保つ（record は残り、次の保存で改めて確定する）。
+          const ok = saved && (await Promise.all(pendingNoteReconciliations)).every(Boolean) && closeSave.allClean();
           if (ok) {
             // Save As may have changed a path inside this close handshake before
             // React can commit another topology effect. Session failure is best-
@@ -2672,7 +2649,7 @@ function App() {
     });
   }, [
     saveDocument,
-    saveActiveTabForClose,
+    saveActiveTabForClose, saveIdentity, readTabs, readActiveTabId,
     ui.tabs,
     ui.activeTabId,
     localImeDraftDirtyTabId,
@@ -2683,8 +2660,10 @@ function App() {
     requestSaveFailureAction,
     notifyFileExplorerFileSaved,
     hasProvisionalNotesForDocument,
-    resolveDurableNotesAfterSave,
+    reconcileNotesAfterSave,
     flushEditorSession,
+    flushImeCompositionSideEffects,
+    hasPendingDeferredSync,
   ]);
 
   // BETA-C1: Centralized Undo/Redo routing — toolbar, shortcuts, and availability
@@ -2950,19 +2929,18 @@ function App() {
   }, [ui.activeTab.internalDocId]);
 
   const handleCut = useCallback(() => {
-    if (coreRef.current?.getCommandAvailability().touchesNoteAnchor) return;
+    if (coreRef.current?.getCommandAvailability().touchesNoteAnchor || prepareInputSurfaceContextMenuClipboard(editorDivRef.current) === 'blocked') return;
     cutSelection();
   }, []);
 
-  const handleCopy = useCallback(() => {
-    copySelection();
-  }, []);
+  const handleCopy = useCallback(() => { if (prepareInputSurfaceContextMenuClipboard(editorDivRef.current) !== 'blocked') copySelection(); }, []);
 
   const handlePaste = useCallback(async () => {
-    await pasteFromClipboard();
+    if (prepareInputSurfaceContextMenuClipboard(editorDivRef.current) !== 'blocked') await pasteFromClipboard();
   }, []);
 
   const handlePastePlain = useCallback(async () => {
+    if (prepareInputSurfaceContextMenuClipboard(editorDivRef.current) === 'blocked') return;
     const r = await pasteFromClipboardPlainOnly();
     if (r.ok) return;
     if (r.reason === "clipboard_unavailable") {
@@ -3144,6 +3122,8 @@ function App() {
     getBridge: () => window.nyozeBridge?.project ?? null,
     getUiLanguageMode: () => ui.uiLanguageMode,
     onSaved: refreshAllNotePanels,
+    onNoteEntrySaved: refreshProvisionalNoteFingerprint, // LIFECYCLE1: record の fingerprint を更新
+
   });
 
   const missingFileDeleteDeps = useMemo(
@@ -3311,6 +3291,8 @@ function App() {
         return;
       }
 
+      // STICKY-NOTE-LIFECYCLE1: 仮の削除（notes.json は保存で確定する）。
+      trackDeletedNote({ id: result.id, ...result.tracking }, { tabId: ui.activeTabId, filePath: ui.activeTab.filePath });
       syncAnchoredNoteIds();
       void refreshNoteAnchorPreviews();
       void refreshDocumentNotes();
@@ -3322,6 +3304,7 @@ function App() {
       refreshMissingFileNotes,
       refreshNoteAnchorPreviews,
       syncAnchoredNoteIds,
+      trackDeletedNote,
       ui,
     ],
   );
@@ -3333,6 +3316,7 @@ function App() {
       core?.setOnNoteAnchorReveal(null);
     };
   }, [handleRevealNoteInPanel]);
+  useNoteAnchorProtectionNotice({ coreRef, coreReady: editorCoreReady, uiLanguageMode: ui.uiLanguageMode, showEditorInlineHint: ui.showEditorInlineHint, onNoteAnchorsDetachedByEdit: markNoteAnchorsDetachedByEdit });
 
   useEffect(() => {
     syncAnchoredNoteIds();
@@ -3348,12 +3332,11 @@ function App() {
     noteAnchorContextMenuId,
     documentNotesState,
   );
-
-  const [pendingDocumentSettingsChange, setPendingDocumentSettingsChange] =
-    useState<PendingDocumentSettingsChange | null>(null);
-
+  const [pendingDocumentSettingsChange, setPendingDocumentSettingsChange] = useState<PendingDocumentSettingsChange | null>(null);
   const applyDocumentSettingsChange = useCallback(
     (pendingChange: PendingDocumentSettingsChange) => {
+      if (!allowInputSurfaceDocumentMutation('document-settings-change')) return;
+      flushImeCompositionSideEffects("document-settings-apply");
       const core = coreRef.current;
       if (!core) return;
 
@@ -3420,16 +3403,17 @@ function App() {
 
       ui.clearLineBreakPolicyNotice();
     },
-    [ui],
+    [ui, flushImeCompositionSideEffects],
   );
 
   const handleConfirmLineBreakPolicyChange = useCallback(() => {
+    const count = flushImeCompositionSideEffects("line-break-policy-confirm") ?? activeDocumentCharacterCount;
     // BETA-SP9: commonmark-strict 確認後も大文書 guard を適用
     if (pendingDocumentSettingsChange) {
       const change = pendingDocumentSettingsChange;
       setPendingDocumentSettingsChange(null);
       largeDocGuard.requestGuardedAction(
-        activeDocumentCharacterCount,
+        count,
         "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
         () => applyDocumentSettingsChange(change),
       );
@@ -3437,11 +3421,11 @@ function App() {
     }
     // useAppUiState 経由の requestLineBreakPolicyChange → confirmLineBreakPolicyChange
     largeDocGuard.requestGuardedAction(
-      activeDocumentCharacterCount,
+      count,
       "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
       () => ui.confirmLineBreakPolicyChange(),
     );
-  }, [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, pendingDocumentSettingsChange, ui]);
+  }, [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, pendingDocumentSettingsChange, flushImeCompositionSideEffects, ui]);
 
   const handleCancelLineBreakPolicyChange = useCallback(() => {
     setPendingDocumentSettingsChange(null);
@@ -3477,6 +3461,7 @@ function App() {
       const core = coreRef.current;
       if (!core) return;
 
+      const count = flushImeCompositionSideEffects("document-settings") ?? activeDocumentCharacterCount;
       const currentMarkdown = core.peekMarkdown();
       const split = splitLeadingFrontmatter(currentMarkdown);
       const hasMalformedLeadingFence =
@@ -3559,7 +3544,7 @@ function App() {
       // BETA-SP9: 文書全体の再解釈が必要な変更では大文書 guard をかける
       if (requiresImmediateNormalization) {
         largeDocGuard.requestGuardedAction(
-          activeDocumentCharacterCount,
+          count,
           "この変更は、大きな文書では全文の再解釈を伴うため数秒かかる場合があります。続行しますか。",
           () => applyDocumentSettingsChange(pendingChange),
         );
@@ -3568,15 +3553,16 @@ function App() {
 
       applyDocumentSettingsChange(pendingChange);
     },
-    [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, ui],
+    [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, flushImeCompositionSideEffects, ui],
   );
   const handleDocumentWritingModeChange = useDocumentWritingModeChange(coreRef, ui);
 
   const openFullPlainEdit = useCallback(() => {
-    if (ui.activeTab.internalDocId) return;
+    if (!saveIdentity.canOpenSource() || saveIdentity.active()?.internalDocId) return;
     // 局所 IME slot session barrier: Source Mode 開始は saveMarkdown() を正本に
     // するため、未確定 payload があるうちは開かない。
     if (!isLocalImeDocumentActionAllowed("source-mode-open")) return;
+    flushImeCompositionSideEffects("source-mode-open");
     const core = coreRef.current;
     if (!core) return;
     core.setParagraphPlainMode(false);
@@ -3614,7 +3600,7 @@ function App() {
     ui.setFullPlainEditValue(markdown);
     ui.setFullPlainEditError("");
     ui.setFullPlainEditActive(true);
-  }, [captureEditorScroll, ui]);
+  }, [captureEditorScroll, flushImeCompositionSideEffects, saveIdentity, ui]);
 
   const applyFullPlainEdit = useCallback((): boolean => {
     const core = coreRef.current;
@@ -3622,7 +3608,14 @@ function App() {
     const draftMarkdown =
       sourceModeController.getValue() ?? ui.fullPlainEditValue;
     try {
-      if (!core.loadMarkdown(draftMarkdown)) return false;
+      ui.invalidateOutlineTargets();
+      const anchorsBeforeDraft = core.getNoteAnchorIdsInDoc(); // REVIEWFIX2 R3: Source Mode の適用で消えた anchor
+      const previousEditorDocument = documentIdentity.beginLoad();
+      if (!core.loadMarkdown(draftMarkdown)) { documentIdentity.loadRefused(previousEditorDocument); ui.refreshHeadings(); return false; }
+      documentIdentity.finishSameDocumentReload(previousEditorDocument);
+      ui.refreshHeadings();
+      markNoteAnchorsDetachedByEdit(noteAnchorIdsRemoved(anchorsBeforeDraft, core.getNoteAnchorIdsInDoc())); syncAnchoredNoteIds();
+      flushImeCompositionSideEffects("source-mode-applied");
       const normalizedMarkdown = core.saveMarkdown();
       syncActiveTabFrontmatter(normalizedMarkdown);
       ui.setFullPlainEditValue(normalizedMarkdown);
@@ -3632,14 +3625,16 @@ function App() {
       ui.setFullPlainEditError("");
       return true;
     } catch {
+      ui.refreshHeadings();
       ui.setFullPlainEditError(
         "Markdown適用に失敗しました。入力内容を確認してください。",
       );
       return false;
     }
-  }, [sourceModeController, syncActiveTabFrontmatter, ui]);
+  }, [sourceModeController, syncActiveTabFrontmatter, flushImeCompositionSideEffects, markNoteAnchorsDetachedByEdit, syncAnchoredNoteIds, documentIdentity, ui]);
 
   const closeFullPlainEdit = useCallback(() => {
+    flushImeCompositionSideEffects("source-mode-close");
     // While Source Mode is active, WYSIWYG .editor-surface には is-hidden-for-plain
     // で display:none が付いている。非表示のまま scroll を書いても 0 丸めされ得るため、
     // 可視化してから (rAF×2) で復元する。
@@ -3697,9 +3692,9 @@ function App() {
         applyEditorScroll({ scrollTop, scrollLeft });
       });
     });
-  }, [applyEditorScroll, sourceModeController, ui]);
+  }, [applyEditorScroll, sourceModeController, flushImeCompositionSideEffects, ui]);
   // BETA-SP1: guardSourceModeDraft の遅延参照用 ref に closeFullPlainEdit を登録
-  guardSourceModeDraftDepsRef.current.closeFullPlainEdit = closeFullPlainEdit;
+  sourceDraftGuard.bindClose(closeFullPlainEdit);
 
   // BETA-SP9: Source Mode apply を guard でラップ
   const guardedApplyAndCloseFullPlainEdit = useCallback(() => {
@@ -3712,6 +3707,7 @@ function App() {
     // 局所 IME slot session barrier: writing-mode 切替は slot の前提（vertical-rl）
     // と layout を同時に変えるため、未確定 payload があるうちは通さない。
     if (!isLocalImeDocumentActionAllowed("writing-mode-toggle")) return;
+    flushImeCompositionSideEffects("writing-mode-toggle");
     // Writing-mode toggle flips the scroll axis and changes layout entirely,
     // so raw scrollTop/scrollLeft restore lands on the wrong spot (usually
     // snapped to 0). Use a layout-independent PM viewport anchor instead:
@@ -3743,12 +3739,13 @@ function App() {
         }
       });
     });
-  }, [applyEditorScroll, captureEditorScroll, ui]);
+  }, [applyEditorScroll, captureEditorScroll, flushImeCompositionSideEffects, ui]);
 
   const toggleFullPlainEdit = useCallback(() => {
+    const count = flushImeCompositionSideEffects("source-mode-toggle") ?? activeDocumentCharacterCount;
     if (ui.fullPlainEditActive) {
       largeDocGuard.requestGuardedAction(
-        activeDocumentCharacterCount,
+        count,
         "Source Mode から通常表示へ戻るときは、大きな文書では数秒かかる場合があります。続行しますか。",
         guardedApplyAndCloseFullPlainEdit,
       );
@@ -3757,6 +3754,7 @@ function App() {
     openFullPlainEdit();
   }, [
     activeDocumentCharacterCount,
+    flushImeCompositionSideEffects,
     guardedApplyAndCloseFullPlainEdit,
     largeDocGuard,
     openFullPlainEdit,
@@ -3807,6 +3805,7 @@ function App() {
     search,
     largeDocGuard,
     localImeExperimentalPreview, activeDocumentCharacterCount,
+    flushCoreUiSync: flushImeCompositionSideEffects,
     toggleParagraphPlainMode,
     toggleFullPlainEdit,
     handleToggleWritingMode,
@@ -3878,6 +3877,7 @@ function App() {
       />
 
       <Workspace
+        paragraphPlainDraftDirtyTabId={paragraphPlainClose.dirtyTabId}
         editorTabActionsSlot={editorTabActionsSlot}
         workspaceRef={workspaceRef}
         editorDivRef={editorDivRef}
@@ -3888,6 +3888,7 @@ function App() {
         rightPaneOpen={rightPaneOpen}
         rightWidth={rightWidth}
         onPaneGeometryCommitted={handlePaneGeometryCommitted}
+        onInputSurfaceDisplayChanged={isInputSurfaceCapable() ? handleInputSurfaceDisplayChanged : undefined}
         fileExplorerDir={fileExplorerDir}
         fileExplorerLeftPaneTab={fileExplorerLeftPaneTab} fileExplorerProjectsPaneView={fileExplorerProjectsPaneView}
         onFileExplorerSelectLibraryTab={handleFileExplorerSelectLibraryTab} onFileExplorerShowProjectList={handleFileExplorerShowProjectList}
@@ -3903,7 +3904,8 @@ function App() {
         activeDocumentInfo={activeDocumentInfo}
         localImeStatusPresentation={{
           settingVisible: localImeExperimentalPreview.settingVisible,
-          preferenceEnabled: localImeExperimentalPreview.preferenceEnabled,
+          // 状態iconは、設定の値ではなく実際の方式から出す（止められた切り替えの後も食い違わない）。
+          preferenceEnabled: localImeExperimentalPreview.effectiveEnabled,
           needsAttention: localImeExperimentalPreview.productStatus === "attention",
         }}
         canFileExplorerPaste={canFileExplorerPaste}
@@ -3933,7 +3935,7 @@ function App() {
         selectedFont={ui.selectedFont}
         rightPaneTab={ui.rightPaneTab}
         headings={ui.headings}
-        activeHeadingIndex={ui.activeHeadingIndex}
+        activeHeadingStore={ui.activeHeadingStore}
         foldedHeadingPositions={ui.foldedHeadingPositions}
         onDividerMouseDown={handleDividerMouseDown}
         onFileExplorerCreateNote={handleCreateNote}
@@ -3966,16 +3968,18 @@ function App() {
         onFullPlainEditChange={ui.handleFullPlainEditChange}
         onApplyFullPlainEdit={() => {
           largeDocGuard.requestGuardedAction(
-            activeDocumentCharacterCount,
+            flushImeCompositionSideEffects("source-mode-apply") ?? activeDocumentCharacterCount,
             "Source Mode から通常表示へ戻るときは、大きな文書では数秒かかる場合があります。続行しますか。",
             guardedApplyAndCloseFullPlainEdit,
           );
         }}
         onCloseFullPlainEdit={closeFullPlainEdit}
         onSetRightPaneTab={ui.setRightPaneTab}
-        onToggleHeadingFold={handleToggleHeadingFold}
-        onRequestHeadingPreview={handleRequestHeadingPreview}
-        onScrollToPos={(pos) => coreRef.current?.scrollToPos(pos)}
+        onToggleHeadingFold={ui.toggleOutlineHeadingFold}
+        onRequestHeadingPreview={ui.requestOutlineHeadingPreview}
+        onScrollToOutlineHeading={ui.scrollToOutlineHeading}
+        getActiveOutlineTarget={ui.getActiveOutlineTarget}
+        onWatchOutlinePreview={ui.watchOutlinePreview}
         caretColor={resolvedCaretColor}
         pseudoCaretEnabled={ui.pseudoCaretEnabled}
         useEditorArrowPointer={ui.useEditorArrowPointer}
@@ -4059,6 +4063,7 @@ function App() {
                 state={documentNotesState}
                 uiLanguageMode={ui.uiLanguageMode}
                 anchoredNoteIds={anchoredNoteIds}
+                hiddenNoteIds={hiddenNoteIds}
                 focusedNoteId={focusedDocumentNoteId}
                 focusedNoteEventKey={focusedDocumentNoteSerial}
                 orphanDeleteEnabled={
@@ -4115,7 +4120,7 @@ function App() {
             getActiveFilePath={() => ui.activeTab.filePath} isInternalDoc={() => Boolean(ui.activeTab.internalDocId)}
             uiLanguageMode={ui.uiLanguageMode} loadIntoActiveTab={tabManager.loadIntoActiveTab} openFileInTab={tabManager.openFileInTab}
             flushImeCompositionSideEffects={flushImeCompositionSideEffects} onTabLimit={showTabLimitNotice}
-            getDocumentHeadings={() => coreRef.current?.getHeadings() ?? []} activeHeadingIndex={ui.activeHeadingIndex}
+            getDocumentHeadings={() => coreRef.current?.getHeadings() ?? []} activeHeadingStore={ui.activeHeadingStore}
             scrollToPos={(pos) => coreRef.current?.scrollToPos(pos)}
             navigationDisabled={ui.fullPlainEditActive || ui.paragraphPlainModeActive}
             projectRefreshNonce={projectRefreshNonce}
@@ -4271,10 +4276,8 @@ function App() {
         onDismiss={dismissBackupWarning}
       />
 
-      <LocalImeExperimentalPreviewNotice
-        preview={localImeExperimentalPreview}
-        uiLanguageMode={ui.uiLanguageMode}
-      />
+      <LocalImeExperimentalPreviewNotice preview={localImeExperimentalPreview} uiLanguageMode={ui.uiLanguageMode} />
+      <InputSurfaceDocumentActionNotice uiLanguageMode={ui.uiLanguageMode} />
 
       <LibraryManagerModal
         open={libraryManagerOpen} t={createUiTextGetter(ui.uiLanguageMode)}
@@ -4355,6 +4358,7 @@ function App() {
           ui.setPseudoCaretThickness(DEFAULT_PSEUDO_CARET_THICKNESS);
           ui.setPseudoCaretBlinkEnabled(DEFAULT_PSEUDO_CARET_BLINK_ENABLED);
           localImeExperimentalPreview.onChangeEnabled(false);
+          ui.setExperimentalInputSurfacePreeditDisplay(DEFAULT_EXPERIMENTAL_INPUT_SURFACE_PREEDIT_DISPLAY);
           ui.setParagraphPlainBehavior("fast");
           ui.setTypewriterModeEnabled(DEFAULT_TYPEWRITER_MODE_ENABLED);
           ui.setTypewriterOffsetRatio(DEFAULT_TYPEWRITER_OFFSET_RATIO);

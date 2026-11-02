@@ -1,3 +1,4 @@
+import { resolveCaretRectAtDomPoint } from './caretDomGeometry'
 import type { EditorState } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import {
@@ -11,6 +12,7 @@ import {
   type LineRect,
 } from './visualFocusCurrentLineGeometry'
 import { mountVisualFocusCurrentLineOverlay } from './visualFocusCurrentLineOverlay'
+import { isInputSurfacePathActive } from './inputSurface/inputSurfaceGate'
 
 export type VisualFocusCurrentLineControllerOptions = {
   view: EditorView
@@ -30,6 +32,26 @@ export type VisualFocusCurrentLineControllerOptions = {
    * geometry 実装自体は変更しない。
    */
   getIsLocalImeEditingActive?: () => boolean
+}
+
+/**
+ * PIS-S10-CURRENT-LINE2 (a): 入力面で変換中の文字のcaretのDOMの位置。入力面が変換中で、文字があり、DOMの選択が
+ * 入力面の中にあるときだけ返る。返ったときだけ、帯はその位置（利用者に見えている字とcaret）から、Hostと同じ読み取りで読む。
+ * 変換中はPMのselectionが動かないので、これがないと、帯は変換を始めた行に残る。
+ */
+export type CompositionCaretDomPoint = { root: HTMLElement; node: Node; offset: number }
+export type CompositionCaretSource = () => CompositionCaretDomPoint | null
+
+export type VisualFocusCurrentLineControllerHandle = {
+  scheduleUpdate: () => void
+  /** 入力面の生成のときに1回渡す（破棄でnull）。帯のcontrollerは、入力面をselectorで探さない。 */
+  setCompositionCaretSource: (source: CompositionCaretSource | null) => void
+  /**
+   * 入力面の表示の変化（変換中の文字・caretの変化）の通知。現在行の表示がONで、変換中のときだけ、
+   * 既存の1つのrAFで帯を更新する。OFFのとき・変換中でないときは、何もしない。
+   */
+  noteInputSurfaceDisplayChange: () => void
+  destroy: () => void
 }
 
 function headInCodeBlock(state: EditorState): boolean {
@@ -235,7 +257,25 @@ function resolveVerticalCollapsedAdjacentGlyphCenterX(
   if (!selection?.isCollapsed) {
     return null
   }
-  const anchorNode = selection.anchorNode
+  return resolveVerticalAdjacentGlyphCenterXFromDomPoint(
+    pmRoot,
+    selection.anchorNode,
+    selection.anchorOffset,
+    caretY,
+  )
+}
+
+/**
+ * The adjacent-glyph read itself, for a DOM point (node, offset). The Host passes the DOM selection's
+ * anchor; the input surface (PIS) passes the DOM point PM would write for its selection
+ * (`resolveSelectionDomPointFromDocumentPosition`), so both go through the same computation.
+ */
+function resolveVerticalAdjacentGlyphCenterXFromDomPoint(
+  pmRoot: HTMLElement,
+  anchorNode: Node | null,
+  anchorOffset: number,
+  caretY: number,
+): number | null {
   if (!(anchorNode instanceof Text) || !pmRoot.contains(anchorNode)) {
     return null
   }
@@ -243,7 +283,7 @@ function resolveVerticalCollapsedAdjacentGlyphCenterX(
   if (textLength <= 0) {
     return null
   }
-  const offset = selection.anchorOffset
+  const offset = anchorOffset
   let start: number
   let end: number
   if (offset >= textLength) {
@@ -264,6 +304,101 @@ function resolveVerticalCollapsedAdjacentGlyphCenterX(
     range.setStart(anchorNode, start)
     range.setEnd(anchorNode, end)
     return resolveRangeCenterXClosestToCaretY(range, caretY)
+  } catch {
+    return null
+  }
+}
+
+/** `text`が、textblockの中の`contenteditable="false"`の要素（Rubyの読み・縦中横・付箋・画像など）の中にあるか。 */
+function isInsideNonEditableInline(text: Text, textblock: HTMLElement): boolean {
+  for (let el = text.parentElement; el && el !== textblock; el = el.parentElement) {
+    if (el.getAttribute('contenteditable') === 'false') {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * PIS-S10-CURRENT-LINE2 (c): DOMの位置から「caretの隣の文字」（上の読み取り）が得られないときの、caretの列の中心。
+ *
+ * textblockの先頭・末尾や、隣り合う2つの間で、`contenteditable="false"`のinline（Ruby・縦中横・付箋・画像など）の隣に
+ * caretがあると、DOMの位置はText nodeではなくtextblockの要素になる。そのとき、PMの位置からの予備
+ * （`resolveVerticalAdjacentGlyphCenterXFromDocumentPosition`）は、Rubyの読みやmarkerの矩形を読むか、何も読めない。
+ *
+ * ここでは、同じtextblockの中で、DOMの順で隣の**本文の字**（`contenteditable="false"`の外のText nodeの、大きさのある字。
+ * 位置より後ろの最初の字、次に、位置より前の最後の字）のうち、caretと同じ列にあるものの中心を返す。
+ * nodeの種類の名前は見ない。得られなければnull（呼ぶ側は既存の予備へ進む）。読むだけで、DOM・Selectionは変えない。
+ * HostはDOMの選択のanchor、入力面（PIS）はPMの位置から求めたDOMの位置を渡す（同じ関数）。
+ */
+function resolveVerticalNeighborBodyGlyphCenterX(
+  textblock: HTMLElement,
+  node: Node | null,
+  offset: number,
+  caretCenterX: number,
+  fontSizePx: number,
+): number | null {
+  if (!node || !textblock.contains(node)) {
+    return null
+  }
+  try {
+    const doc = textblock.ownerDocument
+    // 新しいRangeは潰れている。始点を置くと、終点も同じ位置になる。
+    const point = doc.createRange()
+    point.setStart(node, offset)
+    // 本文のText node（文書の順）。`split`以降が位置より後ろ（位置を含むnodeは`split`で、`splitOffset`で分ける）。
+    const texts: Text[] = []
+    let split = -1
+    let splitOffset = 0
+    const walker = doc.createTreeWalker(textblock, NodeFilter.SHOW_TEXT)
+    for (let text = walker.nextNode() as Text | null; text; text = walker.nextNode() as Text | null) {
+      if (text.data.length === 0 || isInsideNonEditableInline(text, textblock)) {
+        continue
+      }
+      if (split < 0) {
+        if (text === node) {
+          split = texts.length
+          splitOffset = Math.max(0, Math.min(offset, text.data.length))
+        } else if (point.comparePoint(text, 0) > 0) {
+          split = texts.length
+        }
+      }
+      texts.push(text)
+    }
+    if (split < 0) {
+      split = texts.length
+    }
+    const glyph = doc.createRange()
+    const sizedRect = (text: Text, index: number): DOMRect | null => {
+      glyph.setStart(text, index)
+      glyph.setEnd(text, index + 1)
+      const rect = glyph.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0 ? rect : null
+    }
+    // 列の中心とcaretの細い矩形の中心の差は、行の送りと字の大きさの差の半分まで。隣の列の字は、字の大きさより遠い。
+    const sameColumn = (rect: DOMRect): boolean =>
+      Math.abs(rect.left + rect.width / 2 - caretCenterX) <= fontSizePx * 0.75
+    let after: DOMRect | null = null
+    for (let i = split; i < texts.length && !after; i += 1) {
+      const text = texts[i]!
+      for (let index = i === split ? splitOffset : 0; index < text.data.length && !after; index += 1) {
+        after = sizedRect(text, index)
+      }
+    }
+    if (after && sameColumn(after)) {
+      return after.left + after.width / 2
+    }
+    let before: DOMRect | null = null
+    for (let i = Math.min(split, texts.length - 1); i >= 0 && !before; i -= 1) {
+      const text = texts[i]!
+      for (let index = (i === split ? splitOffset : text.data.length) - 1; index >= 0 && !before; index -= 1) {
+        before = sizedRect(text, index)
+      }
+    }
+    if (before && sameColumn(before)) {
+      return before.left + before.width / 2
+    }
+    return null
   } catch {
     return null
   }
@@ -305,9 +440,56 @@ function resolveVerticalAdjacentGlyphCenterXFromDocumentPosition(
   return null
 }
 
+/**
+ * PMのheadから、PMの`selectionToDOM`が書くDOMの位置（node・offset）を求める（端点の側: textblockの先頭だけ+1、それ以外は-1）。
+ * HostのDOMの選択のanchorの代わりに、PIS（DOMの選択がHostの外）が、Hostと同じ読み取りへ渡す。DOMの選択・focusには触れない。
+ */
+function resolveSelectionDomPointFromDocumentPosition(
+  view: EditorView,
+  head: number,
+): { node: Node; offset: number } | null {
+  try {
+    const $head = view.state.doc.resolve(head)
+    return view.domAtPos(head, $head.parentOffset ? -1 : 1)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * PIS（入力面がfocusを持ち、DOMの選択がHostの外にあるとき）の読み取り。HostのDOMの選択の代わりに、PMの位置
+ * （`view.state.selection`のhead）から、切り離したcollapsedなRangeのrectを読む。PMの`selectionToDOM`と同じ端点の側
+ * （textblockの先頭だけ+1、それ以外は-1）を使うので、HostのDOMの選択のRangeと同じrectになる。
+ * HostのDOMの選択・focus・transactionには触れない。
+ */
+function resolveHorizontalCollapsedRectsFromDocumentPosition(
+  view: EditorView,
+  head: number,
+): ReturnType<typeof collectValidLineRectsFromDomRectList> {
+  const at = resolveSelectionDomPointFromDocumentPosition(view, head)
+  return at ? resolveCollapsedRectsAtDomPoint(view.dom.ownerDocument, at.node, at.offset) : []
+}
+
+/** DOMの位置（node・offset）の、切り離したcollapsedなRangeのrect。DOMの選択・focusには触れない。 */
+function resolveCollapsedRectsAtDomPoint(
+  doc: Document,
+  node: Node,
+  offset: number,
+): ReturnType<typeof collectValidLineRectsFromDomRectList> {
+  try {
+    const range = doc.createRange()
+    range.setStart(node, offset)
+    range.collapse(true)
+    return collectValidLineRectsFromDomRectList(range.getClientRects())
+  } catch {
+    return []
+  }
+}
+
+
 export function createVisualFocusCurrentLineController(
   options: VisualFocusCurrentLineControllerOptions,
-): { scheduleUpdate: () => void; destroy: () => void } {
+): VisualFocusCurrentLineControllerHandle {
   const { view, editorSurface } = options
   const pmRoot = view.dom as HTMLElement
   const surfaceResolved =
@@ -326,6 +508,7 @@ export function createVisualFocusCurrentLineController(
   let lastVerticalAnchor:
     | { textblockFrom: number; writingMode: 'vertical-rl' | 'vertical-lr'; x: number }
     | null = null
+  let compositionCaretSource: CompositionCaretSource | null = null
 
   const commit = () => {
     pending = false
@@ -351,7 +534,19 @@ export function createVisualFocusCurrentLineController(
       overlay.setHidden(true)
       return
     }
+    // PIS-S10-CURRENT-LINE2: 入力の方式がPISで、PMの選択が範囲・AllSelectionのとき（入力面の変換は、選んだ文字へ重ねて
+    // 表示される）は、変換中でも帯を出さない。HostのDOMで変換している間（PISの例外の経路）は、従来どおり。
+    if (!state.selection.empty && isInputSurfacePathActive() && !view.composing) {
+      overlay.setHidden(true)
+      return
+    }
     if (headInCodeBlock(state)) {
+      overlay.setHidden(true)
+      return
+    }
+    // PIS-S10-CURRENT-LINE1 REVIEWFIX1: headがinline contentの外（GapCursorなど）のとき、行の帯にならない。
+    // HostもPISも意味のない小さな矩形を出していたので、NodeSelection・範囲と同じく帯を出さない。PMのstateだけで判定し、DOMを読む前に戻る。
+    if (!state.selection.$head.parent.inlineContent) {
       overlay.setHidden(true)
       return
     }
@@ -368,9 +563,17 @@ export function createVisualFocusCurrentLineController(
       proseMirrorComputedWritingMode: win?.getComputedStyle(pmRoot).writingMode ?? 'horizontal-tb',
       editorSurfaceComputedWritingMode: win?.getComputedStyle(surfaceResolved).writingMode ?? 'horizontal-tb',
     })
+    const vertical = writingMode === 'vertical-rl' || writingMode === 'vertical-lr'
+    // PIS-S10-CURRENT-LINE2 (a): 入力面で変換中は、変換中の文字のcaret（利用者に見えている字）の位置から読む。
+    // caretの細い矩形が得られないときは、PMの位置（変換を始めた行）のまま。
+    const compositionPoint = isInputSurfacePathActive() ? compositionCaretSource?.() ?? null : null
+    const compositionCoords = compositionPoint
+      ? resolveCaretRectAtDomPoint(compositionPoint.node, compositionPoint.offset, vertical)
+      : null
+    const compositionCaret = compositionCoords ? compositionPoint : null
     let coords: { left: number; top: number; right: number; bottom: number } | null = null
     try {
-      coords = view.coordsAtPos(head)
+      coords = compositionCoords ?? view.coordsAtPos(head)
     } catch {
       overlay.setHidden(true)
       return
@@ -386,16 +589,33 @@ export function createVisualFocusCurrentLineController(
       return
     }
 
+    // textblockの要素と、その場所のfont size（読むだけ）。下の読み取り（caretの隣の本文の字）と、帯の幅の両方で使う。
+    const blockResolved = resolveViewportTextblockLineRect(view, head)
+    const fontSizePx = resolveLocalEffectiveFontSizePx(
+      win,
+      blockResolved?.el ?? null,
+      pmRoot,
+    )
+    // PIS-S10-CURRENT-LINE2 (c): DOMの位置がText nodeの中の字を指さないとき（textblockの端や、隣り合う2つの間で、
+    // Ruby・縦中横・付箋・画像などの隣にcaretがある）の、同じtextblockの隣の本文の字の列の中心。
+    // 「caretの隣の文字」の次・PMの位置からの予備の前に使う。HostもPISも、この同じ読み取りを通る。
+    const caretStripCenterX = (coords.left + coords.right) / 2
+    const neighborGlyphCenterX = (node: Node | null, offset: number): number | null =>
+      blockResolved
+        ? resolveVerticalNeighborBodyGlyphCenterX(blockResolved.el, node, offset, caretStripCenterX, fontSizePx)
+        : null
+
     let clientRects: ReturnType<typeof collectValidLineRectsFromDomRectList> = []
     let adjacentGlyphCenterX: number | null = null
     try {
       const doc = pmRoot.ownerDocument ?? document
       const sel = doc.getSelection?.()
+      const domSelectionInHost = Boolean(
+        sel && sel.rangeCount > 0 && sel.anchorNode && pmRoot.contains(sel.anchorNode),
+      )
       if (
         sel &&
-        sel.rangeCount > 0 &&
-        sel.anchorNode &&
-        pmRoot.contains(sel.anchorNode) &&
+        domSelectionInHost &&
         (sel.isCollapsed || composingNow)
       ) {
         const range = sel.getRangeAt(0)
@@ -407,11 +627,46 @@ export function createVisualFocusCurrentLineController(
           const caretY = (coords.top + coords.bottom) / 2
           adjacentGlyphCenterX =
             resolveVerticalCollapsedAdjacentGlyphCenterX(pmRoot, sel, caretY) ??
+            (sel.isCollapsed ? neighborGlyphCenterX(sel.anchorNode, sel.anchorOffset) : null) ??
             (!textblockMeta?.isEmpty
               ? resolveVerticalAdjacentGlyphCenterXFromDocumentPosition(view, head, caretY)
               : null)
         } else {
           clientRects = collectValidLineRectsFromDomRectList(range.getClientRects())
+        }
+      } else if (!domSelectionInHost && isInputSurfacePathActive()) {
+        // PIS-S10-CURRENT-LINE1: 入力の方式がPISのとき、DOMの選択は入力面にある（Hostの外）。上の読み取りを通らず、
+        // 帯が細いcaretの中心へ落ちて列の中心から外れ（B074・B075）、列の中心が無いので安定化の処理が旧文書の位置へ
+        // 固定していた（B076）。PMの位置から同じ値を読む。focusの持ち主は問わない（toolbarのbuttonへfocusが移っても、
+        // HostはDOMの選択がHostに残るので同じ読み取りになる）。DOMの選択・focusは動かさず、transactionも出さない。
+        // 方式がPISでない起動（従来の入力）はこの枝に入らず、帯の読み取りは変わらない。
+        if (compositionCaret) {
+          // CURRENT-LINE2 (a): 変換中。入力面のcaretの位置を、Hostと同じ読み取りへ渡す（縦書きは「caretの隣の文字」、
+          // 横書きはその位置のcollapsedなRange）。PISのための別の計算は持たない。
+          if (vertical) {
+            const caretY = (coords.top + coords.bottom) / 2
+            adjacentGlyphCenterX = resolveVerticalAdjacentGlyphCenterXFromDomPoint(compositionCaret.root, compositionCaret.node, compositionCaret.offset, caretY)
+          } else {
+            clientRects = resolveCollapsedRectsAtDomPoint(doc, compositionCaret.node, compositionCaret.offset)
+          }
+        } else if (writingMode === 'vertical-rl' || writingMode === 'vertical-lr') {
+          // Hostと同じ順・同じ計算: 先に「caretの隣の文字」（DOMの位置から。Rubyの親文字の末尾でも親文字の中の文字を読む）、
+          // 次に同じtextblockの隣の本文の字（CURRENT-LINE2 (c)）、得られないときだけPMの位置からの予備。
+          // PIS専用の別の計算は持たない（REVIEWFIX2）。
+          const caretY = (coords.top + coords.bottom) / 2
+          const domPoint = state.selection.empty
+            ? resolveSelectionDomPointFromDocumentPosition(view, head)
+            : null
+          adjacentGlyphCenterX =
+            (domPoint
+              ? resolveVerticalAdjacentGlyphCenterXFromDomPoint(pmRoot, domPoint.node, domPoint.offset, caretY)
+              : null) ??
+            (domPoint ? neighborGlyphCenterX(domPoint.node, domPoint.offset) : null) ??
+            (!textblockMeta?.isEmpty
+              ? resolveVerticalAdjacentGlyphCenterXFromDocumentPosition(view, head, caretY)
+              : null)
+        } else {
+          clientRects = resolveHorizontalCollapsedRectsFromDocumentPosition(view, head)
         }
       }
     } catch {
@@ -431,12 +686,6 @@ export function createVisualFocusCurrentLineController(
       return
     }
 
-    const blockResolved = resolveViewportTextblockLineRect(view, head)
-    const fontSizePx = resolveLocalEffectiveFontSizePx(
-      win,
-      blockResolved?.el ?? null,
-      pmRoot,
-    )
     const blockRect =
       blockResolved?.rect ??
       (writingMode === 'vertical-rl' || writingMode === 'vertical-lr'
@@ -557,8 +806,17 @@ export function createVisualFocusCurrentLineController(
 
   return {
     scheduleUpdate,
+    setCompositionCaretSource(source) {
+      compositionCaretSource = source
+    },
+    noteInputSurfaceDisplayChange() {
+      if (options.getEnabled() && options.getIsComposing()) {
+        scheduleUpdate()
+      }
+    },
     destroy() {
       destroyed = true
+      compositionCaretSource = null
       if (raf) {
         window.cancelAnimationFrame(raf)
         raf = 0

@@ -25,6 +25,7 @@
 import { prepareLocalImeForDocumentAction } from '../../editor-core/features/localImeDocumentActionBarrier'
 import type { LocalImeDocumentActionPreparation } from '../../editor-core/features/localImeInputSessionState'
 import { isProseMirrorFocused } from './selectAllShortcutRouting'
+import { isInputSurfaceFocusOwner } from '../../editor-core/features/inputSurface/focusOwner'
 
 export type LocalImeHostCommandReason =
   | 'host-command-heading'
@@ -51,7 +52,7 @@ export function isLocalImeHostBlockStructureShortcutFocusOwner(
   target: Element | null,
 ): boolean {
   if (!target) return false
-  return isProseMirrorFocused(target)
+  return isProseMirrorFocused(target) || isInputSurfaceFocusOwner(target)
 }
 
 /**

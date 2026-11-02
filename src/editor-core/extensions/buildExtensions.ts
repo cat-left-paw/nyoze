@@ -20,17 +20,15 @@ import { NyozeImage } from '../schema/nyozeImage'
 import { AutoTcyDecoration } from './autoTcyDecoration'
 import { HeadingFold } from './headingFold'
 import { SearchHighlight } from './searchHighlight'
-import {
-  RubyPunctuationNowrap,
-  type RubyPunctuationDomSyncDiagnostics,
-  type RubyPunctuationNowrapApplyDiagnostics,
-} from './rubyPunctuationNowrap'
 import { SpecialInlineBoundarySentinel } from './specialInlineBoundarySentinel'
 import { NoteAnchorProtection } from './noteAnchorProtection'
 import { LocalImeLocalWindowReservation } from './localImeLocalWindowReservationDecoration'
+import { ViewDescIdentity } from './viewDescIdentity'
 import { VisualFocusBlockDecoration } from './visualFocusBlockDecoration'
 import type { VisualFocusBlockDecorationOptions } from './visualFocusBlockDecoration'
 import { buildInlineMarkInputRulesForMark } from '../features/inlineMarkInputRules'
+import { isInputSurfaceCapable } from '../features/inputSurface/inputSurfaceGate'
+import { InputSurfaceFocus } from '../features/inputSurface/focusCommand'
 
 export const DEFAULT_EDITOR_CONTENT = `
   <p></p>
@@ -43,16 +41,13 @@ export type BuildExtensionsOptions = {
     getNumbersOnly?: () => boolean
     beginPerfSpan?: () => (() => void) | null
   }
-  rubyPunctuation?: {
-    beginPerfSpan?: () => (() => void) | null
-    beginApplyDiagnostics?: () => RubyPunctuationNowrapApplyDiagnostics | null
-    domSyncDiagnostics?: RubyPunctuationDomSyncDiagnostics
-  }
   visualFocus?: VisualFocusBlockDecorationOptions
 }
 
 export function buildExtensions(options?: BuildExtensionsOptions) {
   return [
+    // commandの差し替えはeditorの生成時にしか登録できない。portがない・ineligibleなら元のfocusへ委譲する。
+    ...(isInputSurfaceCapable() ? [InputSurfaceFocus] : []),
     StarterKit.configure({
       bold: false,
       italic: false,
@@ -155,12 +150,12 @@ export function buildExtensions(options?: BuildExtensionsOptions) {
     AozoraRuby,
     AozoraTcy,
     SpecialInlineBoundarySentinel,
-    options?.rubyPunctuation
-      ? RubyPunctuationNowrap.configure(options.rubyPunctuation)
-      : RubyPunctuationNowrap,
     options?.autoTcy ? AutoTcyDecoration.configure(options.autoTcy) : AutoTcyDecoration,
     HeadingFold,
     SearchHighlight,
+    // EDITOR-VIEWDESC-IDENTITY-PERF1: view の更新の後に、block の desc の node を文書の node と
+    // 同じ object に保つ（state・props・decoration を持たない）。
+    ViewDescIdentity,
     ...(options?.visualFocus
       ? [VisualFocusBlockDecoration.configure(options.visualFocus)]
       : []),

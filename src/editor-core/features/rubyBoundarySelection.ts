@@ -45,7 +45,7 @@ function closestElement(node: Node | null): Element | null {
     : node.parentElement
 }
 
-function resolveRubyAncestorRangeAtPos(
+export function resolveRubyAncestorRangeAtPos(
   state: EditorState,
   pos: number,
 ): RubyBoundaryDeleteRange | null {
@@ -61,7 +61,7 @@ function resolveRubyAncestorRangeAtPos(
   return null
 }
 
-function resolveRubyRangeNearPos(
+export function resolveRubyRangeNearPos(
   state: EditorState,
   pos: number,
 ): RubyBoundaryDeleteRange | null {
@@ -304,10 +304,21 @@ function resolveRubyBaseDomTarget(
     nextSibling.getAttribute('data-nyoze-special-inline-boundary') === 'after' &&
     nextSibling.getAttribute('data-nyoze-special-inline-node') === 'aozoraRuby'
   ) {
-    const insertPos = Number(nextSibling.dataset.nyozeSpecialInlineBoundaryPos)
-    if (Number.isInteger(insertPos)) {
+    // sentinel の position は DOM 属性ではなく、その時点の view から求める（widget desc は size 0 なので
+    // `posAtDOM(sentinel, 0)` が境界 position を返す）。古い値で別の Ruby の range を掴まないため。
+    let insertPos: number | null = null
+    try {
+      insertPos = view.posAtDOM(nextSibling, 0)
+    } catch {
+      insertPos = null
+    }
+    if (insertPos !== null && Number.isInteger(insertPos)) {
       const range = resolveRubyRangeNearPos(view.state, insertPos)
-      if (range && view.state.doc.nodeAt(range.from)?.type.name === 'aozoraRuby') {
+      if (
+        range &&
+        range.to === insertPos &&
+        view.state.doc.nodeAt(range.from)?.type.name === 'aozoraRuby'
+      ) {
         return { pos: insertPos, range }
       }
     }

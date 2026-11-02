@@ -31,8 +31,14 @@ export const LOCAL_IME_LOCAL_WINDOW_TYPOGRAPHY_PROPERTIES = [
   'font-family',
   'font-size',
   'font-weight',
+  'font-style',
+  'font-stretch',
+  'font-variant',
+  'font-variant-east-asian',
+  'font-feature-settings',
   'line-height',
   'letter-spacing',
+  'word-spacing',
   'white-space',
   'line-break',
   'word-break',
@@ -42,6 +48,8 @@ export const LOCAL_IME_LOCAL_WINDOW_TYPOGRAPHY_PROPERTIES = [
   'text-align',
   'text-align-last',
   'text-justify',
+  'text-spacing-trim',
+  'text-transform',
 ] as const
 
 export type LocalImeLocalWindowTypographyProperty =

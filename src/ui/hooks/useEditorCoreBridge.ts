@@ -6,6 +6,7 @@ import type {
   LineBreakPolicy,
   LogEntry,
   OpenExternalUrl,
+  UpdateListener,
 } from '../../editor-core/types'
 import type { TypewriterRuntimeRef } from './typewriterRuntimeRef'
 
@@ -17,9 +18,10 @@ type UseEditorCoreBridgeOptions = {
   typewriterRuntimeRef?: TypewriterRuntimeRef
   onLog: (entry: LogEntry) => void
   onSelectionUpdate: (snapshot: string) => void
+  onParagraphPlainPendingChanges?: (pending: boolean) => void
   onParagraphPlainModeChange: (active: boolean) => void
   onLineBreakPolicyChange: (policy: LineBreakPolicy) => void
-  onUpdate: () => void
+  onUpdate: UpdateListener
   onFoldChange: () => void
   openExternalUrl?: OpenExternalUrl
   onReady?: (core: EditorCoreHandle) => void
@@ -28,9 +30,10 @@ type UseEditorCoreBridgeOptions = {
 type BridgeCallbacks = {
   onLog: (entry: LogEntry) => void
   onSelectionUpdate: (snapshot: string) => void
+  onParagraphPlainPendingChanges?: (pending: boolean) => void
   onParagraphPlainModeChange: (active: boolean) => void
   onLineBreakPolicyChange: (policy: LineBreakPolicy) => void
-  onUpdate: () => void
+  onUpdate: UpdateListener
   onFoldChange: () => void
   openExternalUrl?: OpenExternalUrl
   onReady?: (core: EditorCoreHandle) => void
@@ -104,6 +107,9 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
     onParagraphPlainModeChange(core.isParagraphPlainModeActive())
   })
 
+  const unsubPendingChanges = callbacks.onParagraphPlainPendingChanges
+    ? core.onParagraphPlainPendingChanges(callbacks.onParagraphPlainPendingChanges) : undefined
+
   const unsubParagraphPlain = core.onParagraphPlainModeChange((active) => {
     onParagraphPlainModeChange(active)
   })
@@ -112,8 +118,8 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
     onLineBreakPolicyChange(policy)
   })
 
-  const unsubUpdate = core.onUpdate(() => {
-    onUpdate()
+  const unsubUpdate = core.onUpdate((docChanged) => {
+    onUpdate(docChanged)
   })
 
   const unsubFoldChange = core.onFoldChange(() => {
@@ -128,6 +134,7 @@ export function connectEditorCoreBridge(options: ConnectEditorCoreBridgeOptions)
     unsubLog()
     unsubSel()
     unsubParagraphPlain()
+    unsubPendingChanges?.()
     unsubLineBreakPolicy()
     unsubUpdate()
     unsubFoldChange()
@@ -142,6 +149,7 @@ export function useEditorCoreBridge({
   typewriterRuntimeRef,
   onLog,
   onSelectionUpdate,
+  onParagraphPlainPendingChanges,
   onParagraphPlainModeChange,
   onLineBreakPolicyChange,
   onUpdate,
@@ -158,6 +166,7 @@ export function useEditorCoreBridge({
   const callbacksRef = useRef<BridgeCallbacks>({
     onLog,
     onSelectionUpdate,
+    onParagraphPlainPendingChanges,
     onParagraphPlainModeChange,
     onLineBreakPolicyChange,
     onUpdate,
@@ -168,6 +177,7 @@ export function useEditorCoreBridge({
   callbacksRef.current = {
     onLog,
     onSelectionUpdate,
+    onParagraphPlainPendingChanges,
     onParagraphPlainModeChange,
     onLineBreakPolicyChange,
     onUpdate,
@@ -188,9 +198,10 @@ export function useEditorCoreBridge({
       callbacks: {
         onLog: (entry) => callbacksRef.current.onLog(entry),
         onSelectionUpdate: (snapshot) => callbacksRef.current.onSelectionUpdate(snapshot),
+        onParagraphPlainPendingChanges: (pending) => callbacksRef.current.onParagraphPlainPendingChanges?.(pending),
         onParagraphPlainModeChange: (active) => callbacksRef.current.onParagraphPlainModeChange(active),
         onLineBreakPolicyChange: (policy) => callbacksRef.current.onLineBreakPolicyChange(policy),
-        onUpdate: () => callbacksRef.current.onUpdate(),
+        onUpdate: (docChanged) => callbacksRef.current.onUpdate(docChanged),
         onFoldChange: () => callbacksRef.current.onFoldChange(),
         openExternalUrl: (url) => callbacksRef.current.openExternalUrl?.(url) ?? Promise.resolve(false),
         onReady: (core) => callbacksRef.current.onReady?.(core),

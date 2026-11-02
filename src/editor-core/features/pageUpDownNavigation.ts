@@ -1,4 +1,4 @@
-import { Selection, type Transaction } from '@tiptap/pm/state'
+import { Selection, TextSelection, type Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 
@@ -53,6 +53,8 @@ type HandlePageUpDownKeyOptions = {
   pushLog: LogPush
   /** test / typed handoff用。production既定は常に `view.dispatch()`。 */
   dispatchTransaction?: (transaction: Transaction) => void
+  /** Focusless caller's explicit caret and extent; absent means the unchanged Host contract. */
+  origin?: { head: number; anchor?: number; scrollOnly?: boolean }
 }
 
 function isBarePageKey(event: KeyboardEvent): boolean {
@@ -218,7 +220,8 @@ export function runPageUpDownNavigationCommand(
   if (!direction) return { handled: false }
   if (!isBarePageKey(event)) return { handled: false }
   if (getIsComposing() || event.isComposing) return { handled: false }
-  if (!view.state.selection.empty) return { handled: false }
+  if (!view.state.selection.empty && !options.origin) return { handled: false }
+  if (options.origin && (!Number.isInteger(options.origin.head) || options.origin.head < 0 || options.origin.head > view.state.doc.content.size)) return { handled: false }
 
   const scrollHost = resolveScrollHost(view)
   if (!scrollHost) return { handled: false }
@@ -232,7 +235,8 @@ export function runPageUpDownNavigationCommand(
     scrollTop: scrollHost.scrollTop,
     scrollLeft: scrollHost.scrollLeft,
   }
-  if (plan.delta === 0) {
+  if (plan.delta === 0 || options.origin?.scrollOnly) {
+    if (options.origin?.scrollOnly) writeScrollOffset(scrollHost, plan.axis, plan.targetOffset)
     event.preventDefault()
     pushLog('pageNav', `${direction} boundary offset=${plan.currentOffset}`)
     return {
@@ -240,13 +244,13 @@ export function runPageUpDownNavigationCommand(
       expectedDoc,
       expectedSelection: initialSelection,
       expectedTransactionCount: 0,
-      expectedScrollOffset: initialScrollOffset,
+      expectedScrollOffset: options.origin?.scrollOnly ? { scrollTop: scrollHost.scrollTop, scrollLeft: scrollHost.scrollLeft } : initialScrollOffset,
       moved: false,
-      boundaryNoop: true,
+      boundaryNoop: plan.delta === 0,
     }
   }
 
-  const caretPoint = resolveCaretAnchorPoint(view, view.state.selection.from)
+  const caretPoint = resolveCaretAnchorPoint(view, options.origin?.head ?? view.state.selection.from)
   if (!caretPoint) return { handled: false }
 
   const surfaceRect = scrollHost.getBoundingClientRect()
@@ -255,11 +259,13 @@ export function runPageUpDownNavigationCommand(
 
   try {
     writeScrollOffset(scrollHost, plan.axis, plan.targetOffset)
-    const nextSelection = resolveSelectionForPoint(view, targetPoints, direction)
-    if (!nextSelection) {
+    const targetSelection = resolveSelectionForPoint(view, targetPoints, direction)
+    if (!targetSelection) {
       writeScrollOffset(scrollHost, plan.axis, originalOffset)
       return { handled: false }
     }
+    const nextSelection = options.origin?.anchor === undefined ? targetSelection
+      : TextSelection.create(view.state.doc, options.origin.anchor, targetSelection.head)
 
     const moved = !nextSelection.eq(initialSelection)
     event.preventDefault()

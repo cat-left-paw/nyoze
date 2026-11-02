@@ -31,11 +31,13 @@ import {
 } from "./projectStore";
 import {
   discardProvisionalNotesInProject,
+  reconcileTrackedNotesInProject,
   readNotesStore,
   writeNotesStore,
 } from "./noteStore";
 import { isValidNoteAnchorId } from "../src/editor-core/io/noteAnchor";
 import type { ProvisionalNoteCleanupEntry } from "../src/project/provisionalNoteCleanup";
+import type { TrackedNoteReconciliationEntry } from "../src/project/noteLifecycleTracking";
 import { readChapterOutline } from "./bookFullOutlineStore";
 import {
   BOOK_MANIFEST_FILENAME,
@@ -94,6 +96,7 @@ import type {
   ProjectWriteNotesResult,
   ProjectMissingFileNotesResult,
   ProjectDiscardProvisionalNotesResult,
+  ProjectReconcileTrackedNotesResult,
   BookFullOutlineResult,
   ChapterNeighborsResult,
   BookExportTargetResult,
@@ -123,7 +126,7 @@ export type ProjectIpcBoundary = {
 
 /**
  * renderer 申告の document path を realpath 解決し、document 境界
- * (workspace root 配下 or allowedDocumentPaths) 内のものだけ返す。
+ * (workspace root 配下 or mainで明示許可 / open-tab pin) 内のものだけ返す。
  * main.ts の checkDocumentPath と同じ規則の同期版。
  */
 function resolveBoundedDocumentPath(
@@ -134,7 +137,7 @@ function resolveBoundedDocumentPath(
   if (!validPath) return null;
   let realPath: string;
   try {
-    realPath = fs.realpathSync(path.resolve(validPath));
+    realPath = fs.realpathSync.native(path.resolve(validPath));
   } catch {
     return null;
   }
@@ -1399,6 +1402,62 @@ function normalizeProvisionalNoteCleanupRequest(raw: unknown): {
     entries.push({ id, file, fingerprint });
   }
   return { projectRoot, entries };
+}
+
+function normalizeTrackedNoteReconciliationRequest(raw: unknown): {
+  projectRoot: string;
+  entries: TrackedNoteReconciliationEntry[];
+} | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const request = raw as Record<string, unknown>;
+  const projectRoot = request.projectRoot;
+  if (typeof projectRoot !== "string" || projectRoot.length === 0) return null;
+  const rawEntries = request.entries;
+  if (!Array.isArray(rawEntries)) return null;
+  if (rawEntries.length > PROVISIONAL_NOTE_CLEANUP_MAX_ENTRIES) return null;
+
+  const entries: TrackedNoteReconciliationEntry[] = [];
+  const seen = new Set<string>();
+  for (const rawEntry of rawEntries) {
+    if (rawEntry === null || typeof rawEntry !== "object" || Array.isArray(rawEntry)) return null;
+    const entry = rawEntry as Record<string, unknown>;
+    const { id, file, action, fingerprint } = entry;
+    if (typeof id !== "string" || !isValidNoteAnchorId(id)) return null;
+    if (typeof file !== "string" || !isProjectRelativeFilePath(file)) return null;
+    if (action !== "delete" && action !== "reopen") return null;
+    if (fingerprint !== undefined && (typeof fingerprint !== "string" || fingerprint.length === 0)) return null;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    entries.push(fingerprint === undefined ? { id, file, action } : { id, file, action, fingerprint });
+  }
+  return { projectRoot, entries };
+}
+
+/**
+ * `project:reconcileTrackedNotes`
+ *
+ * STICKY-NOTE-LIFECYCLE1: 追跡中の付箋の status を保存した本文の anchor の有無へ合わせる。
+ * project root は renderer 申告値を信用せず document path から再解決し、一致しなければ書かない。
+ * read → 再証明 → write は project 単位 notes lock 内で不可分に行う。
+ */
+export async function reconcileTrackedNotesIpc(
+  boundary: ProjectIpcBoundary,
+  rawFilePath: unknown,
+  rawRequest: unknown,
+): Promise<ProjectReconcileTrackedNotesResult> {
+  const realPath = resolveBoundedDocumentPath(boundary, rawFilePath);
+  if (!realPath) return { ok: false, reason: "invalid-path" };
+  const resolved = resolveProjectRootWithFs(realPath, boundary.getWorkspaceRoot());
+  if (!resolved) return { ok: false, reason: "not-in-project" };
+
+  const request = normalizeTrackedNoteReconciliationRequest(rawRequest);
+  if (request === null) return { ok: false, reason: "invalid-request" };
+  if (request.projectRoot !== resolved.projectRoot) return { ok: false, reason: "project-mismatch" };
+  if (request.entries.length === 0) return { ok: true, deletedIds: [], reopenedIds: [], skipped: [] };
+
+  const result = await reconcileTrackedNotesInProject(resolved.projectRoot, request.entries);
+  if (result.ok) return result;
+  return { ok: false, reason: result.reason === "not-a-project" ? "not-in-project" : result.reason };
 }
 
 /**

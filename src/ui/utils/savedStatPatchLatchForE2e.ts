@@ -98,3 +98,66 @@ export function clearTabLeaveSnapshotApplyHoldForE2e(): void {
   applyWaiting = false
   pendingApply = null
 }
+
+/**
+ * EDITOR-TAB-HISTORY1 E2E only: 次の `restoreTab` を、副作用の前に 1 回だけ失敗させる（離脱の取り消し）。
+ * 離れる側の capsule が残る場面を作るための test-only latch。production は常に false。
+ */
+let restoreTabFailureArmed = false
+
+export function armRestoreTabFailureForE2e(): boolean {
+  if (restoreTabFailureArmed) return false
+  restoreTabFailureArmed = true
+  return true
+}
+
+/** armed なら消費して true（`restoreTab` が失敗を返す）。 */
+export function consumeRestoreTabFailureForE2e(): boolean {
+  if (!restoreTabFailureArmed) return false
+  restoreTabFailureArmed = false
+  return true
+}
+
+// SAVE-TARGET-IDENTITY1: disk write succeeded, UI finalization has not run yet.
+let completionResolve: (() => void) | null = null
+let completionPromise: Promise<void> | null = null
+let completionWaiting = false
+export function armSaveCompletionHoldForE2e(): boolean {
+  if (completionPromise) return false
+  completionPromise = new Promise<void>(resolve => { completionResolve = resolve })
+  return true
+}
+export async function awaitSaveCompletionHoldForE2e(): Promise<void> {
+  if (!completionPromise) return
+  completionWaiting = true
+  await completionPromise
+}
+export function releaseSaveCompletionHoldForE2e(): boolean {
+  if (!completionPromise) return false
+  completionResolve?.()
+  completionResolve = null
+  completionPromise = null
+  completionWaiting = false
+  return true
+}
+export function snapshotSaveCompletionHoldForE2e(): SavedStatPatchHoldSnapshot {
+  return { armed: completionPromise !== null, waiting: completionWaiting }
+}
+
+// One explicitly armed sample of the additional D2 serialization. No timer,
+// identity decision or product port depends on this measurement.
+let measureNextMarkdown = false
+let markdownMeasurement: { milliseconds: number; characters: number } | null = null
+export function armSaveCompletionMarkdownMeasurementForE2e(): void {
+  measureNextMarkdown = true
+  markdownMeasurement = null
+}
+export function readSaveCompletionMarkdownForE2e(read: () => string | undefined): string | undefined {
+  if (!measureNextMarkdown) return read()
+  measureNextMarkdown = false
+  const started = performance.now()
+  const markdown = read()
+  markdownMeasurement = { milliseconds: performance.now() - started, characters: markdown?.length ?? 0 }
+  return markdown
+}
+export function snapshotSaveCompletionMarkdownMeasurementForE2e() { return markdownMeasurement }

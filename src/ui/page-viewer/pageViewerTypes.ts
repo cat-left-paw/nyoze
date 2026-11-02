@@ -12,6 +12,7 @@
  * `URLSearchParams` のみ使用、main / preload / renderer のどこからでも import 可能)。
  */
 
+import { isHeadingFontScaleInRange } from '../../settings/headingFontScale'
 import type { HeadingAlign, HeadingDividerLevels, WritingMode } from '../../settings/types'
 import {
   validatePageViewerUiThemeSnapshot,
@@ -109,6 +110,11 @@ type PageViewerSnapshotBase = {
   headingFontFamily?: string
   /** 見出し後余白 (em)。`DisplaySettings.headingMarginAfter` と同じ範囲 (0〜1.5)。 */
   headingMarginAfter?: number
+  /**
+   * EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズ（本文比 %）。`DisplaySettings.headingFontScale`
+   * と同じ範囲 (50〜200)。段ごとの em 値（1.55em〜1em）に倍率を掛ける。省略時は 100。
+   */
+  headingFontScale?: number
   /** 見出し区切り線レベル (h1〜h6 の 6 キーすべてが boolean の object のみ)。 */
   headingDividerLevels?: HeadingDividerLevels
   /** 横書き時の見出し配置 (`start` / `center` / `end`)。 */
@@ -357,6 +363,13 @@ function validateHeadingMarginAfter(value: unknown): number | undefined | null {
   return value
 }
 
+function validateHeadingFontScale(value: unknown): number | undefined | null {
+  if (value === undefined) return undefined
+  // 範囲は Display Settings の headingFontScale と同じ (settings/headingFontScale.ts が正本)。
+  if (!isHeadingFontScaleInRange(value)) return null
+  return value
+}
+
 function validateRubySize(value: unknown): number | undefined | null {
   if (value === undefined) return undefined
   if (
@@ -528,7 +541,7 @@ function validatePageViewerReadingSimpleCoverLayoutValue(
  * 検証する。不正なら `null`。`documentInfo` / `includeTableOfContents` /
  * `tableOfContentsMaxLevel` / `writingMode` / `fontSize` / `fontFamily` /
  * `lineHeight` / `pageColor` / `textColor` / `headingColor` / `headingFontFamily` /
- * `headingMarginAfter` / `headingDividerLevels` / `headingAlignHorizontal` /
+ * `headingMarginAfter` / `headingFontScale` / `headingDividerLevels` / `headingAlignHorizontal` /
  * `headingAlignVertical` / `rubySize` / `autoTcyEnabled` / `autoTcyNumbersOnly` /
  * `autoTcyMinDigits` / `autoTcyMaxDigits` / `frontmatterVisible` /
  * `frontmatterShowAuthors` / `frontmatterShowTranslators` /
@@ -564,6 +577,7 @@ export function validatePageViewerSnapshotRequest(value: unknown): PageViewerSna
     headingColor,
     headingFontFamily,
     headingMarginAfter,
+    headingFontScale,
     headingDividerLevels,
     headingAlignHorizontal,
     headingAlignVertical,
@@ -640,6 +654,9 @@ export function validatePageViewerSnapshotRequest(value: unknown): PageViewerSna
 
   const validHeadingMarginAfter = validateHeadingMarginAfter(headingMarginAfter)
   if (validHeadingMarginAfter === null) return null
+
+  const validHeadingFontScale = validateHeadingFontScale(headingFontScale)
+  if (validHeadingFontScale === null) return null
 
   const validHeadingDividerLevels = validateHeadingDividerLevels(headingDividerLevels)
   if (validHeadingDividerLevels === null) return null
@@ -758,6 +775,7 @@ export function validatePageViewerSnapshotRequest(value: unknown): PageViewerSna
     headingColor: validHeadingColor,
     headingFontFamily: validHeadingFontFamily.value,
     headingMarginAfter: validHeadingMarginAfter,
+    headingFontScale: validHeadingFontScale,
     headingDividerLevels: validHeadingDividerLevels,
     headingAlignHorizontal: validHeadingAlignHorizontal,
     headingAlignVertical: validHeadingAlignVertical,

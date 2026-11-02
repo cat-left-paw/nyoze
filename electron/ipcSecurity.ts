@@ -8,6 +8,7 @@
 
 import path from "node:path";
 import fs from "node:fs";
+import { decodePercentEncodedPath } from "./percentDecodePath";
 
 // ---- Size limits ----
 
@@ -245,7 +246,7 @@ export function hasPreservedFileExtension(
  * Check whether a realpath-resolved path falls within a known document boundary.
  *
  * The renderer's `document:setActiveFilePath` claim is only accepted if the
- * path is within the workspace root OR is an explicitly allowed document path.
+ * path is within the workspace root, explicitly allowed, or a verified open-tab pin.
  * This prevents a compromised renderer from setting an arbitrary image base dir.
  *
  * Pure function — no I/O. Both `realPath` and `workspaceRoot` must be
@@ -255,9 +256,11 @@ export function isPathInDocumentBoundary(
   realPath: string,
   workspaceRoot: string | null,
   allowedDocumentPaths: ReadonlySet<string>,
+  pinnedOpenDocumentPaths?: ReadonlySet<string>,
 ): boolean {
   if (workspaceRoot && isWithinDirectory(realPath, workspaceRoot)) return true;
   if (allowedDocumentPaths.has(realPath)) return true;
+  if (pinnedOpenDocumentPaths?.has(realPath)) return true;
   return false;
 }
 
@@ -272,12 +275,13 @@ export function resolveActiveDocumentDir(
   inputPath: string,
   workspaceRoot: string | null,
   allowedDocumentPaths: ReadonlySet<string>,
+  pinnedOpenDocumentPaths?: ReadonlySet<string>,
 ): string | null {
   try {
-    const realPath = fs.realpathSync(path.resolve(inputPath));
+    const realPath = fs.realpathSync.native(path.resolve(inputPath));
     const stat = fs.statSync(realPath);
     if (!stat.isFile()) return null;
-    if (!isPathInDocumentBoundary(realPath, workspaceRoot, allowedDocumentPaths)) {
+    if (!isPathInDocumentBoundary(realPath, workspaceRoot, allowedDocumentPaths, pinnedOpenDocumentPaths)) {
       return null;
     }
     return path.dirname(realPath);
@@ -306,23 +310,34 @@ const ALLOWED_IMAGE_EXTENSIONS_SEC5 = new Set([
  * Pure function (no I/O) — uses path.resolve and path.normalize only.
  * Does NOT check file existence; the protocol handler should catch ENOENT.
  */
+/**
+ * MD-ROUNDTRIP-PATH1 / WEB-BOOK-ASSET-DECODE1: Markdown のリンク先は URL なので、
+ * 相対パスは percent-decode してからファイルのパスとして扱う。実装の正本は
+ * `./percentDecodePath` の共有関数（エディタの表示と Web Book の取り込みで同じ意味）。
+ */
+
 export function validateImageProtocolRequest(
   src: string | null,
   dir: string | null,
 ): string | null {
   if (!src || !dir) return null;
 
-  // Reject null bytes
-  if (src.includes("\0") || dir.includes("\0")) return null;
+  // MD-ROUNDTRIP-PATH1: 先に decode してから、すべての検査を decode 後の値にかける。
+  // decode を検査より後に置くと、`..%2F` が decode で `../` になって境界の外へ出る。
+  const decodedSrc = decodePercentEncodedPath(src);
 
-  // Reject absolute src paths (e.g. /Users/.../private.png, C:\...)
-  if (path.isAbsolute(src)) return null;
+  // Reject null bytes (raw or decoded from `%00`)
+  if (decodedSrc.includes("\0") || dir.includes("\0")) return null;
 
-  // Reject src that looks like a URL scheme
-  if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return null;
+  // Reject absolute src paths (e.g. /Users/.../private.png, C:\...,
+  // or their encoded forms `%2FUsers%2F...`, `C%3A%5C...`)
+  if (path.isAbsolute(decodedSrc)) return null;
+
+  // Reject src that looks like a URL scheme (e.g. `file%3A...`)
+  if (/^[a-z][a-z0-9+.-]*:/i.test(decodedSrc)) return null;
 
   // Resolve and normalize
-  const resolved = path.resolve(dir, src);
+  const resolved = path.resolve(dir, decodedSrc);
 
   // Validate extension
   const ext = path.extname(resolved).toLowerCase();

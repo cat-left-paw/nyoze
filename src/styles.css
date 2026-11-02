@@ -1041,6 +1041,7 @@
   --editor-ruby-size: 0.5em;
   --editor-ruby-offset: -0.8em;
   --editor-heading-margin-after: 0.45em;
+  --editor-heading-scale: 1;
   --editor-heading-divider-h1: 1;
   --editor-heading-divider-h2: 1;
   --editor-heading-divider-h3: 0;
@@ -3742,6 +3743,34 @@ body.is-resizing-pane {
   border-block-end-width: calc(var(--editor-heading-divider-h6, 0) * 1px);
 }
 
+/* EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズ（本文比）。段ごとの値はブラウザ既定
+   （h1 2em / h2 1.5em / h3 1.17em / h4 1em / h5 0.83em / h6 0.67em）のまま、設定の倍率
+   （--editor-heading-scale、既定 1）を掛ける。倍率 1 のとき計算値は従来と同じ。
+   折りたたみ toggle は em 単位で見出しに追従する。 */
+.editor-surface .ProseMirror h1 {
+  font-size: calc(2em * var(--editor-heading-scale, 1));
+}
+
+.editor-surface .ProseMirror h2 {
+  font-size: calc(1.5em * var(--editor-heading-scale, 1));
+}
+
+.editor-surface .ProseMirror h3 {
+  font-size: calc(1.17em * var(--editor-heading-scale, 1));
+}
+
+.editor-surface .ProseMirror h4 {
+  font-size: calc(1em * var(--editor-heading-scale, 1));
+}
+
+.editor-surface .ProseMirror h5 {
+  font-size: calc(0.83em * var(--editor-heading-scale, 1));
+}
+
+.editor-surface .ProseMirror h6 {
+  font-size: calc(0.67em * var(--editor-heading-scale, 1));
+}
+
 /* Editor: fold ellipsis icon (message icon) */
 .heading-fold-ellipsis {
   display: inline-flex;
@@ -3835,9 +3864,20 @@ body.is-resizing-pane {
   position: relative;
 }
 
+/* ANCHOR1: percentageの基準を外枠のpxで確定し、scroll containerのheight指定は変えない。 */
+.editor-surface-frame {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 .editor-surface {
   position: relative;
   width: 100%;
+  /* EDITOR-VERTICAL-LAYOUT-FIX1 / STYLE1 / ANCHOR1: 高さの px は外枠 `.editor-surface-frame` へ書く
+     （`src/ui/utils/editorSurfaceHeightSync.ts`。縦書きの直交 root が祖先の layout のたびに全段落を組み直さない
+     ように）。surface 自身へ px を書くと scroll anchoring が止まる。継承される値（`var()`）で渡さない。 */
   height: 100%;
   writing-mode: var(--editor-writing-mode, horizontal-tb);
   overflow-x: hidden;
@@ -4377,8 +4417,14 @@ body.is-resizing-pane {
   font-family: var(--editor-font-family);
   font-size: var(--editor-font-size);
   font-weight: 400;
+  font-style: normal;
+  font-stretch: normal;
+  font-variant: none;
+  font-variant-east-asian: normal;
+  font-feature-settings: "liga" 0;
   line-height: var(--editor-line-height);
   letter-spacing: 0.02em;
+  word-spacing: normal;
   color: var(--text-primary);
   /* ProseMirror view 注入 CSS と同値。空白を畳ませない。 */
   white-space: break-spaces;
@@ -4389,6 +4435,8 @@ body.is-resizing-pane {
   /* BETA-TY1: 組版改善 — 句読点ぶら下げ・行分割最適化 */
   hanging-punctuation: first allow-end;
   text-wrap: pretty;
+  text-spacing-trim: normal;
+  text-transform: none;
   /* LOCAL-WINDOW-CHAPTER-NAV-HJUSTIFY-POLISH1: editor 本文の折り返し行末揃え。
      writing-mode を問わず host / Local Window が同じ宣言を共有する。
      段落最終行は引き伸ばさない（text-align-last: auto）。 */
@@ -4429,7 +4477,7 @@ body.is-resizing-pane {
    - 空 alternative text (/ "") で a11y tree / コピーから除外する。
    - ruby / 明示 TCY 自体が段落末のときは sentinel + trailingBreak の直後に
      generated ZWSP を重ねると空の表示列になるため、その実 DOM 条件だけ抑止する。
-   - rubyPunctuationNowrap（ルビ直後約物の行頭落ち）とは別件。
+   - ルビ直後の約物の行頭落ち（EDITOR-RUBY-INLINE1 でルビを inline にして解消）とは別件。
    無効化はこのルール 1 箇所を削除/コメントアウトすれば足りる。 */
 .editor-panel[data-writing-mode="vertical-rl"]
   .editor-surface
@@ -4585,7 +4633,7 @@ body.is-resizing-pane {
   margin-inline: 0;
 }
 
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
@@ -4593,32 +4641,32 @@ body.is-resizing-pane {
   margin-block-start: 0.86em;
 }
 
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
   + h1,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
   + h2,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
   + h3,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
   + h4,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
   + h5,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   p
@@ -4626,32 +4674,32 @@ body.is-resizing-pane {
   margin-block-start: 1.15em;
 }
 
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   h1
   + p,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   h2
   + p,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   h3
   + p,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   h4
   + p,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   h5
   + p,
-.editor-panel[data-line-break-policy="commonmark-strict"]
+.editor-panel.editor-line-break-commonmark-strict
   .editor-surface
   .ProseMirror
   h6
@@ -5022,10 +5070,8 @@ body.is-resizing-pane {
   .tategaki-plain-overlay-target[data-plain-mode="true"] {
   /* Keep a subtle indicator on the underlying ProseMirror node */
   outline: none;
-  /* Reserve space so the overlay doesn't hide subsequent content.
-     --pp-reserved-block-size is set on .editor-surface (outside PM DOM)
-     to avoid triggering ProseMirror's MutationObserver. */
-  min-block-size: var(--pp-reserved-block-size, auto);
+  /* 入力欄の後ろの本文を押し出す予約（表示優先のときの min-block-size）は、専用の <style> の規則で書く
+     （ProseMirror の DOM に触れず、継承される値も使わない。paragraphPlainReservedRule.ts）。 */
 }
 
 .plain-text-error {
@@ -6763,6 +6809,32 @@ body.is-resizing-pane {
   background: var(--bg-button-hover);
 }
 
+/*
+ * PIS-S10-NOTICE-LAYOUT1: 入力面の通知（確定できなかった文字）だけの配置。基本の規則は変えない。
+ * `left: 50%` の fixed 要素は、`width: auto` だと使える幅が画面の半分に制限されるため、
+ * 内容の幅（`max-content`）を上限 `max-width` まで使わせる。確認の状態では、メッセージを1行目いっぱいに置き、
+ * 2行目にコピー・確認の文・「残った文字を破棄」・キャンセルを並べる（入らなければ確認の文が折り返す）。
+ * 画面より高くなる場合の安全網として、通知の中でscrollさせる。
+ */
+.local-ime-experimental-preview-notice--input-surface {
+  width: max-content;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.local-ime-experimental-preview-notice--input-surface[data-confirm-discard="true"] {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.local-ime-experimental-preview-notice--input-surface[data-confirm-discard="true"] .local-ime-experimental-preview-notice-message {
+  flex: 1 1 100%;
+}
+
+.local-ime-experimental-preview-notice--input-surface[data-confirm-discard="true"] .local-ime-experimental-preview-notice-confirm {
+  flex: 1 1 14em;
+}
+
 .local-ime-experimental-preview-notice-dismiss {
   background: transparent !important;
   border: none !important;
@@ -8065,19 +8137,30 @@ body.is-resizing-pane {
    13. Aozora Ruby / TCY / Bouten
    ---------------------------------------------------------- */
 
+/*
+ * EDITOR-RUBY-INLINE1: ルビは inline。親文字は本文の文字と同じく行分けされ、直後の約物の前の禁則が効く
+ * （inline-block（atomic inline）では直後に改行の機会ができ、約物が次の列の先頭へ落ちていた。旧
+ * RubyPunctuationNowrap の表示専用 wrapper は撤去した）。親文字の途中では折り返さない
+ * （`text-wrap-mode: nowrap`。`white-space: nowrap` の折り返しの部分だけで、空白の扱いは段落から継ぐ）。
+ * `line-height: 1` は、inline の箱の行への寄与を inline-block のとき（1em の箱）と同じにする。
+ * Host と Local Window の local PM（`.editor-surface .ProseMirror`）で共有する。
+ */
+@property --nyoze-ruby-base-em {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 .editor-surface .ProseMirror .tategaki-aozora-ruby {
-  display: inline-block;
+  display: inline;
+  text-wrap-mode: nowrap;
   position: relative;
   line-height: 1;
   writing-mode: inherit;
   text-orientation: inherit;
-}
-
-.editor-panel[data-writing-mode="horizontal-tb"]
-  .editor-surface
-  .ProseMirror
-  .tategaki-aozora-ruby {
-  height: 1em;
+  /* 親文字の 1em を px（登録した <length>）で読みへ渡す。読みは自分の font-size を持つので、
+     読みの中の `em` は親文字の em にならない。 */
+  --nyoze-ruby-base-em: 1em;
 }
 
 [data-aozora-base] {
@@ -8085,18 +8168,9 @@ body.is-resizing-pane {
 }
 
 /*
- * Strike mark wrappers (`<s>`, `<del>`, `<strike>`) do not reliably paint
- * line-through across the inline-block ruby container, so reapply the
- * decoration to the ruby base text only.
+ * 取り消し線: inline のルビには `<s>` / `<del>` / `<strike>` の線がそのまま伝わる（inline-block だった
+ * ときの補いは不要）。読みは out-of-flow（position: absolute）なので伝わらない。
  */
-.editor-surface .ProseMirror :is(s, del, strike) .tategaki-aozora-ruby > [data-aozora-base] {
-  text-decoration-line: line-through;
-  text-decoration-color: currentColor;
-}
-
-.editor-surface .ProseMirror :is(s, del, strike) .tategaki-aozora-ruby-rt {
-  text-decoration-line: none;
-}
 
 .editor-surface .ProseMirror .tategaki-aozora-ruby-rt {
   position: absolute;
@@ -8110,13 +8184,19 @@ body.is-resizing-pane {
   text-orientation: inherit;
 }
 
+/*
+ * 読みの位置は、親文字の中心（inline の箱の中心。縦書きの中心の基線・横書きの箱の中心）から
+ * 親文字の 0.5em。inline の箱の太さはフォントの ascent＋descent なので、`100%`（箱の端）を使うと
+ * フォントによって読みが動く。中心（50%）＋ 0.5em なら、inline-block（1em の箱）だったときと同じ位置で、
+ * フォントの ascent / descent に依らない。
+ */
 /* Vertical: ruby to the right of base text */
 .editor-panel[data-writing-mode="vertical-rl"]
   .editor-surface
   .ProseMirror
   .tategaki-aozora-ruby-rt {
   top: 50%;
-  left: 100%;
+  left: calc(50% + var(--nyoze-ruby-base-em) / 2);
   right: auto;
   transform: translate(calc(-1 * var(--editor-ruby-offset)), -50%);
   writing-mode: vertical-rl;
@@ -8127,7 +8207,7 @@ body.is-resizing-pane {
   .editor-surface
   .ProseMirror
   .tategaki-aozora-ruby-rt {
-  bottom: 100%;
+  bottom: calc(50% + var(--nyoze-ruby-base-em) / 2);
   left: 50%;
   transform: translate(-50%, var(--editor-ruby-offset));
   writing-mode: horizontal-tb;
@@ -8138,25 +8218,18 @@ body.is-resizing-pane {
   display: none !important;
 }
 
+/*
+ * EDITOR-RUBY-INLINE1: 境界の sentinel（WJ と、Host の変換中の文字が入る）は、空白を保ったまま折り返せる（pre-wrap）。
+ * ルビは inline で、WJ が前後の改行を禁じるので、`pre`（折り返さない）だと変換中は「ルビ＋WJ＋変換中の文字の全体」が
+ * 切れない塊になり、変換中の文字が列（行）の残りに収まらないと、ルビが変換中だけ次の列へ跳んでいた。
+ * 折り返せると、塊は「ルビ＋WJ＋最初の 1 字」になり、確定した後と同じ形になる。
+ */
 .editor-surface .ProseMirror .nyoze-special-inline-boundary {
   display: inline;
   font-size: 1em;
   line-height: inherit;
-  white-space: pre;
+  white-space: pre-wrap;
   text-decoration: none;
-}
-
-/*
- * 青空ルビ直後の対象約物 1 文字を、表示上だけ不可分単位として扱う wrapper。
- * rubyPunctuationNowrap extension が plugin view で `[ruby ... 約物]` をここに包む。
- * 親文字 inline-block と直後約物を同一 nowrap inline-block にまとめ、
- * 縦書きで約物が行頭/次列頭に落ちるのを防ぐ。wrapper は表示専用で doc には載らない。
- */
-.editor-surface .ProseMirror .tategaki-ruby-punct-run {
-  display: inline-block;
-  white-space: nowrap;
-  writing-mode: inherit;
-  text-orientation: inherit;
 }
 
 /* Tate-chu-yoko (horizontal-in-vertical) */
@@ -8428,6 +8501,8 @@ body.is-resizing-pane {
     --nyoze-visual-focus-current-line-bg,
     rgba(30, 144, 255, 0.28)
   );
+  /* ANCHOR1: 表示専用の要素をJSで置き直す前のずれをscrollで補わないよう、入力面と同じく目印から外す。 */
+  overflow-anchor: none;
 }
 
 /* Pseudo caret (Task 2-4): when enabled, hide the WYSIWYG native caret so it does not
@@ -8448,6 +8523,8 @@ body.is-resizing-pane {
   border-radius: 1px;
   box-sizing: border-box;
   background: var(--editor-caret-color, var(--accent, #1e90ff));
+  /* ANCHOR1: 帯を外した後の目印になり得る、表示専用の擬似caretも同じ扱いにする。 */
+  overflow-anchor: none;
 }
 
 /* Pseudo caret blink: instant on/off like a native caret (no fade). Opacity only — no layout / geometry impact. */
@@ -11003,6 +11080,44 @@ body.is-resizing-project-preview {
   > [data-nyoze-local-window-editor="true"]
   > .ProseMirror[data-nyoze-pseudo-caret-native-hidden="true"] {
   caret-color: transparent;
+}
+
+[data-nyoze-input-surface="true"] {
+  caret-color: currentColor;
+}
+/* 再変換の押し出し表示だけ。currentColorはoriginating elementの文字色を使い、
+   親の::selectionの白文字をhighlight継承しない。IMEの文節表示はブラウザが描く。 */
+[data-nyoze-input-surface="true"][data-nyoze-reconversion-selection-hidden]::selection {
+  background-color: transparent;
+  color: currentColor;
+}
+[data-nyoze-input-surface="true"][data-nyoze-pseudo-caret-native-hidden="true"] {
+  caret-color: transparent;
+}
+
+/* PIS-PREEDIT-INLINE-2: 変換中の文字を、Host の widget と同じ位置へ組むための前後の文脈。
+   入力面（開発用 flag の下だけ存在する要素）が、挿入位置の前後の本文を透明な生成内容として持ち、
+   Host の段落と同じ行分け・両端揃え・禁則で preedit を組む。
+   - 規則は固定。cycle ごとに変えるのは入力面自身の属性と変数だけ（stylesheet は書き換えない）。
+   - 生成内容は DOM の文字・確定 payload・Custom Highlight の Range に入らない。代替文字列を空にして
+     a11y tree からも除く。
+   - 入力面が空の間（最初の文字の前、変換中に全部消した後）は従来の text-indent の配置のままにする。 */
+[data-nyoze-input-surface="true"][data-nyoze-preedit-context="true"]:not(:empty) {
+  text-indent: var(--nyoze-preedit-context-indent) !important;
+  margin-block-start: var(--nyoze-preedit-context-offset) !important;
+  block-size: auto !important;
+  text-wrap: var(--nyoze-preedit-context-wrap) !important;
+}
+[data-nyoze-input-surface="true"][data-nyoze-preedit-context="true"]:not(:empty)::before {
+  content: attr(data-nyoze-preedit-context-before) / "";
+}
+[data-nyoze-input-surface="true"][data-nyoze-preedit-context="true"]:not(:empty)::after {
+  content: attr(data-nyoze-preedit-context-after) / "";
+}
+[data-nyoze-input-surface="true"][data-nyoze-preedit-context="true"]::before,
+[data-nyoze-input-surface="true"][data-nyoze-preedit-context="true"]::after {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 /* LOCAL-WINDOW-TYPOGRAPHY-PARITY1: paragraph margin は本文と同じ

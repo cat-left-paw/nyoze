@@ -1,4 +1,6 @@
 import { useEffect } from 'react'
+import { isInputSurfaceCapable } from '../../editor-core/features/inputSurface/inputSurfaceGate'
+import { getInputSurfaceFocusPort, isInputSurfaceFocusOwner } from '../../editor-core/features/inputSurface/focusOwner'
 import type { RefObject } from 'react'
 import type { EditorCoreHandle } from '../../editor-core/types'
 import type { WritingMode } from '../../settings/types'
@@ -553,8 +555,28 @@ export function useGlobalShortcuts({
       }
     }
 
+    // PISのリスト移動はPM command。S3のmodifier navigationへ渡す前に既存handlerへ通す。
+    // Host focus / OFFではこのcapture経路を作らず、既存bubble経路を維持する。
+    const captureSurfaceListMove = (event: KeyboardEvent) => {
+      if (!isInputSurfaceFocusOwner(document.activeElement)) return
+      const port = getInputSurfaceFocusPort(document.activeElement)
+      if (!port?.isEligible() || port.isComposing() || isImeUnsafeShortcutKeyboardEvent(event)) return
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      if (!(writingMode === 'horizontal-tb' ? /^(ArrowUp|ArrowDown)$/ : /^(ArrowLeft|ArrowRight)$/).test(event.key)) return
+      const availability = coreRef.current?.getCommandAvailability()
+      const up = event.key === (writingMode === 'horizontal-tb' ? 'ArrowUp' : 'ArrowRight')
+      // 移動できない位置ではS3のI8 handoffを維持する。
+      if (!(up ? availability?.canMoveListUp : availability?.canMoveListDown)) return
+      handleKeyDown(event)
+      if (event.defaultPrevented) event.stopPropagation()
+    }
+    const surfaceEnabled = isInputSurfaceCapable()
+    if (surfaceEnabled) window.addEventListener('keydown', captureSurfaceListMove, true)
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      if (surfaceEnabled) window.removeEventListener('keydown', captureSurfaceListMove, true)
+    }
   }, [
     coreRef,
     writingMode,

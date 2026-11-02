@@ -6,10 +6,12 @@
 import type { LocalImeDocumentActionPreparation } from './localImeInputSessionState'
 
 export type LocalImeDocumentActionParticipant = {
-  readonly id: 'local-window'
+  readonly id: 'local-window' | 'input-surface'
   prepareForDocumentAction: (reason?: string) => LocalImeDocumentActionPreparation
   /** 例外時にも本文を失う可能性をplain booleanで判定する。 */
   hasPayloadBearingState: () => boolean
+  /** 保留の登録後にownerの表示を同期更新する（入力面の保存notice用）。 */
+  onContinuationRegistered?: () => void
 }
 
 const participants: LocalImeDocumentActionParticipant[] = []
@@ -41,14 +43,26 @@ function unregisterParticipant(next: LocalImeDocumentActionParticipant): void {
 
 /** @internal LOCAL-WINDOW-P0 integrationからのみ呼ぶ独立participant。 */
 export function registerLocalImeLocalWindowDocumentActionParticipant(
-  participant: LocalImeDocumentActionParticipant,
+  participant: LocalImeDocumentActionParticipant & { readonly id: 'local-window' },
 ): void {
-  if (participant.id !== 'local-window') return
   registerParticipant(participant)
 }
 
 export function unregisterLocalImeLocalWindowDocumentActionParticipant(
-  participant: LocalImeDocumentActionParticipant,
+  participant: LocalImeDocumentActionParticipant & { readonly id: 'local-window' },
+): void {
+  unregisterParticipant(participant)
+}
+
+/** PIS-S6: 入力面だけが使うtyped登録。flag OFFでは呼ばれない。 */
+export function registerInputSurfaceDocumentActionParticipant(
+  participant: LocalImeDocumentActionParticipant & { readonly id: 'input-surface' },
+): void {
+  registerParticipant(participant)
+}
+
+export function unregisterInputSurfaceDocumentActionParticipant(
+  participant: LocalImeDocumentActionParticipant & { readonly id: 'input-surface' },
 ): void {
   unregisterParticipant(participant)
 }
@@ -111,18 +125,19 @@ export function prepareLocalImeForDocumentAction(
  * `recovery-required` を製品向け表示で区別し、`ready` 以外では preference を
  * 先行保存しないためである。
  */
-export function requestLocalImeDocumentAction(
+export function requestLocalImeDocumentActionWithOwner(
   reason?: string,
   continuation?: () => void | Promise<void>,
-): LocalImeDocumentActionPreparation {
+): { result: LocalImeDocumentActionPreparation; ownerId: LocalImeDocumentActionParticipant['id'] | null } {
   const evaluation = evaluateLocalImeDocumentAction(reason)
-  if (evaluation.result.status === 'ready') return evaluation.result
+  if (evaluation.result.status === 'ready') return { result: evaluation.result, ownerId: null }
   if (
     evaluation.result.status === 'wait-for-composition' &&
-    evaluation.owner?.id === 'local-window' &&
+    evaluation.owner !== null &&
     evaluation.ownerToken !== null &&
     reason !== undefined &&
     continuation !== undefined &&
+    (evaluation.owner.id === 'local-window' || reason === 'save-document') &&
     pendingContinuation === null
   ) {
     // 元actionの引数を含むclosureはrenderer内だけに保持し、診断bridgeへ公開しない。
@@ -135,8 +150,16 @@ export function requestLocalImeDocumentAction(
       run: continuation,
     }
     nextContinuationToken += 1
+    evaluation.owner.onContinuationRegistered?.()
   }
-  return evaluation.result
+  return { result: evaluation.result, ownerId: evaluation.owner?.id ?? null }
+}
+
+export function requestLocalImeDocumentAction(
+  reason?: string,
+  continuation?: () => void | Promise<void>,
+): LocalImeDocumentActionPreparation {
+  return requestLocalImeDocumentActionWithOwner(reason, continuation).result
 }
 
 export function isLocalImeDocumentActionAllowed(
@@ -175,6 +198,12 @@ export function continuePendingLocalImeDocumentAction(
   }
 }
 
+/** compositionend後に元の先着reasonだけを再開するための読み取り。 */
+export function getPendingLocalImeDocumentActionReason(owner: LocalImeDocumentActionParticipant): string | null {
+  const pending = pendingContinuation
+  return pending?.owner === owner && participantTokens.get(owner) === pending.ownerToken ? pending.reason : null
+}
+
 /**
  * Local Window ownerの明示discard等で古いactionを
  * 再開しない場合だけ、exact owner一致を確認して保留ownershipを解除する。
@@ -190,6 +219,11 @@ export function cancelPendingLocalImeDocumentAction(
 /** P3-A1b1: pending continuation 中は初回 auto-arm を fail-closed にする。 */
 export function isLocalImeDocumentActionPending(): boolean {
   return pendingContinuation !== null
+}
+
+/** 試験専用: 登録されている参加者のid（製品のport・bridgeへは載せない）。 */
+export function listLocalImeDocumentActionParticipantIdsForE2e(): string[] {
+  return participants.map((participant) => participant.id)
 }
 
 /** test only: module registry を未登録状態へ戻す。 */

@@ -10,7 +10,7 @@
  */
 
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { findChildren } from '@tiptap/core'
+import { createDocumentNodeIndex } from '../features/documentNodeIndex'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import { lowlight } from 'lowlight'
@@ -55,6 +55,16 @@ export function isLanguageRegistered(lang: string | null | undefined): boolean {
   return lowlight.registered(normalized)
 }
 
+const codeIndexes = new Map<string, ReturnType<typeof createDocumentNodeIndex>>()
+function codeBlocks(doc: import('@tiptap/pm/model').Node, name: string) {
+  let index = codeIndexes.get(name)
+  if (!index) {
+    index = createDocumentNodeIndex(name)
+    codeIndexes.set(name, index)
+  }
+  return index(doc)
+}
+
 // --- Decoration helpers (ported from @tiptap/extension-code-block-lowlight) ---
 
 type HastNode = {
@@ -86,6 +96,16 @@ function parseNodes(nodes: HastNode[], className: string[] = []): ParsedNode[] {
     .flat()
 }
 
+const highlightedBlocks = new WeakMap<import('@tiptap/pm/model').Node, ParsedNode[]>()
+function highlightedNodes(node: import('@tiptap/pm/model').Node, canonical: string) {
+  let parsed = highlightedBlocks.get(node)
+  if (!parsed) {
+    parsed = parseNodes(getHighlightNodes(lowlight.highlight(canonical, node.textContent)))
+    highlightedBlocks.set(node, parsed)
+  }
+  return parsed
+}
+
 /**
  * Build decorations for code blocks — only for registered languages.
  * Unknown / missing language → no decorations (plain text).
@@ -99,7 +119,7 @@ function getDecorationsNoAutoDetect({
 }): DecorationSet {
   const decorations: Decoration[] = []
 
-  findChildren(doc, (node) => node.type.name === name).forEach((block) => {
+  codeBlocks(doc, name).forEach((block) => {
     let from = block.pos + 1
     const language = block.node.attrs.language as string | undefined
 
@@ -109,10 +129,7 @@ function getDecorationsNoAutoDetect({
     }
 
     const canonical = normalizeCodeBlockLanguage(language)!
-    const result = lowlight.highlight(canonical, block.node.textContent)
-    const nodes = getHighlightNodes(result)
-
-    parseNodes(nodes).forEach((node) => {
+    highlightedNodes(block.node, canonical).forEach((node) => {
       const to = from + node.text.length
       if (node.classes.length) {
         decorations.push(Decoration.inline(from, to, { class: node.classes.join(' ') }))
@@ -135,10 +152,11 @@ function NoAutoDetectLowlightPlugin({ name }: { name: string }): Plugin {
     state: {
       init: (_, { doc }) => getDecorationsNoAutoDetect({ doc, name }),
       apply: (transaction, decorationSet, oldState, newState) => {
+        if (!transaction.docChanged) return decorationSet
         const oldNodeName = oldState.selection.$head.parent.type.name
         const newNodeName = newState.selection.$head.parent.type.name
-        const oldNodes = findChildren(oldState.doc, (node) => node.type.name === name)
-        const newNodes = findChildren(newState.doc, (node) => node.type.name === name)
+        const oldNodes = codeBlocks(oldState.doc, name)
+        const newNodes = codeBlocks(newState.doc, name)
 
         if (
           transaction.docChanged &&

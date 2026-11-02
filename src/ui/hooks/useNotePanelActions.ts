@@ -13,6 +13,8 @@ type UseNotePanelActionsOptions = {
   getBridge: () => NoteAnchorProjectBridge | null
   getUiLanguageMode: () => UiLanguageMode
   onSaved: () => void
+  /** STICKY-NOTE-LIFECYCLE1: 編集・状態変更で書き込んだ entry（provisional の record の更新用）。 */
+  onNoteEntrySaved?: (saved: { id: string; fingerprint: string }) => void
 }
 
 /** 右ペイン付箋の編集・status 更新アクションを App.tsx から分離する。 */

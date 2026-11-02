@@ -79,6 +79,7 @@ function toBookPageViewerAppearanceSnapshot(
     lineHeight: appearance.lineHeight,
     headingFontFamily: appearance.headingFontFamily,
     headingMarginAfter: appearance.headingMarginAfter,
+    headingFontScale: appearance.headingFontScale,
     headingDividerLevels: appearance.headingDividerLevels,
     headingAlignHorizontal: appearance.headingAlignHorizontal,
     headingAlignVertical: appearance.headingAlignVertical,

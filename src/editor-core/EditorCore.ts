@@ -51,6 +51,7 @@ import {
   createEditorPropsKeyDownHandler,
   createEditorPropsPasteHandler,
   editorClipboardCopyCutDOMHandlers,
+  clipboardNodeCodecEditorProps,
   createCompositionEventHandlers,
   createFoldTooltipController,
   createNoteAnchorPreviewController,
@@ -59,7 +60,7 @@ import {
   findNoteAnchorPosition,
   buildRemoveNoteAnchorTransaction,
   buildRemoveNoteAnchorTransactionAtDom,
-  collectNoteAnchorIdsInDoc,
+  collectNoteAnchorIdsInDoc, registerNoteAnchorProtectionNoticeSink, registerNoteAnchorEditDetachListener,
   NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY,
   createEditorSurfaceWheelController,
   createInlineAnnotationController,
@@ -69,7 +70,6 @@ import {
   createOutlineNavigationController,
   createLocalImeIntegration,
   createLocalImeHostTransactionNotifier,
-  buildLocalImeRubyPunctuationWiring,
   createEditorWidgetClickWiring,
   createParagraphPlainModeController,
   createPseudoCaretController,
@@ -119,6 +119,8 @@ import { searchHighlightPluginKey } from './extensions/searchHighlight'
 import { replaceMatchInDoc, replaceAllMatchesInDoc } from './features'
 import { serializeClipboardSliceToPlainText } from './io/clipboardSlicePlainText'
 import { AOZORA_TCY_BODY_PATTERN } from './schema/aozoraTcy'
+import { createInputSurfaceIntegration, isInputSurfacePathActive, connectLazyInputSurface, getInputSurfaceFocusPort, selectSinglePseudoCaretExternalGeometrySource, createInputSurfaceDisplayCallbacks } from './features'
+import { createDocumentStateController } from './features'
 
 const TCY_VALID_PATTERN = AOZORA_TCY_BODY_PATTERN
 
@@ -173,6 +175,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   let searchCloseFocusRestoreEpoch = 0
   let visualFocusCurrentLineController: ReturnType<typeof createVisualFocusCurrentLineController> | null = null
   let pseudoCaretController: ReturnType<typeof createPseudoCaretController> | null = null
+  let inputSurfaceIntegration: ReturnType<typeof createInputSurfaceIntegration> = null
   let enableRubyFlag = true
   const autoTcyRuntimeController = createAutoTcyRuntimeController()
   let documentLineBreakPolicy: LineBreakPolicy = options.lineBreakPolicy ?? 'obsidian-paragraph'
@@ -290,7 +293,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     }
     const isDocumentLoad = Boolean(transaction.getMeta(NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY))
     if (!isDocumentLoad) {
-      emitUpdate()
+      emitUpdate(transaction.docChanged)
       searchController.scheduleRefreshForDocChange()
     }
     typewriterModeController?.handleEditorUpdate({
@@ -306,25 +309,24 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   const editor = new Editor({
     extensions: buildExtensions({
       autoTcy: autoTcyRuntimeController.getExtensionOptions(() => localImeIntegration.beginFlushPerfSpan('auto-tcy')),
-      rubyPunctuation: buildLocalImeRubyPunctuationWiring(localImeIntegration),
       visualFocus: {
         getBlockHighlightEnabled: () => options.getVisualFocusBlockHighlightEnabled?.() ?? false,
         getDimNonFocusedBlocksEnabled: () =>
           options.getVisualFocusDimNonFocusedBlocksEnabled?.() ?? false,
         getSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
         getParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
-        getComposing: () =>
-          isComposing || editorHolder.current?.view.composing === true || localImeIntegration.isActive(),
+        getComposing: () => isCompositionActive(),
       },
     }),
     content: DEFAULT_EDITOR_CONTENT,
-    autofocus: true,
+    autofocus: !isInputSurfacePathActive(),
     element: options.element,
     editorProps: {
       handleKeyDown: onEditorPropsKeyDown,
       handlePaste: onEditorPropsPaste,
       clipboardTextSerializer: (slice) => serializeClipboardSliceToPlainText(slice),
       handleDOMEvents: editorClipboardCopyCutDOMHandlers,
+      ...clipboardNodeCodecEditorProps, // CLIPBOARD-INTERNAL-PASTE3: 画像・改ページなどを属性ごと書く・読む
     },
     onSelectionUpdate,
     onUpdate,
@@ -332,10 +334,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
 
   editorHolder.current = editor
-
-  /** 共通 composition predicate（設計書 §4.6）。全 getIsComposing がこれを参照する。 */
-  const isCompositionActive = (): boolean =>
-    isComposing || editor.view.composing || localImeIntegration.isActive()
+  /** アプリcommand・表示用composition判定。Host DOMの入力経路はHost専用判定を保つ。 */
+  function isCompositionActive(): boolean {
+    const view = editorHolder.current?.view; return isComposing || view?.composing === true || localImeIntegration.isActive() || (view ? getInputSurfaceFocusPort(view.dom)?.isComposing() === true : false)
+  }
 
   paragraphPlainControllerRef.current = createParagraphPlainModeController({
     editor,
@@ -518,7 +520,9 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getIsSourceModeActive: () => options.getIsSourceModeActive?.() ?? false,
     getIsParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
     getIsComposing: () => isCompositionActive(),
-    getExternalGeometrySource: () => localImeIntegration.getPseudoCaretExternalGeometrySource(),
+    getExternalGeometrySource: () => inputSurfaceIntegration
+      ? selectSinglePseudoCaretExternalGeometrySource([localImeIntegration.getPseudoCaretExternalGeometrySource(), inputSurfaceIntegration.getPseudoCaretExternalGeometrySource()])
+      : localImeIntegration.getPseudoCaretExternalGeometrySource(),
     joinPostFlushFrame: (consumer) => localImeIntegration.joinPostFlushFrame(consumer),
   })
   pseudoCaretController.scheduleUpdate()
@@ -558,6 +562,17 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       },
     }),
   })
+  const createInputSurface = () => createInputSurfaceIntegration({
+    editor,
+    getSourceMode: () => options.getIsSourceModeActive?.() ?? false,
+    getParagraphPlain: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+    getLocalWindowActive: () => localImeIntegration.isActive(),
+    onParagraphPlainModeChange: (listener) => paragraphPlainControllerRef.current!.onModeChange(listener),
+    ...createInputSurfaceDisplayCallbacks({ pseudoCaretController, visualFocusController: visualFocusCurrentLineController, typewriterModeController,
+      onCompositionFinished: () => pushLog('commandAvailabilityInvalidate', 'input-surface-compositionend'),
+    }),
+  })
+  const inputSurfaceLifecycle = connectLazyInputSurface({ editor, create: createInputSurface, onChange: (next) => { inputSurfaceIntegration = next }, isHostComposing: () => isComposing || editor.view.composing, isParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false, onParagraphPlainModeChange: (listener) => paragraphPlainControllerRef.current!.onModeChange(listener), record: (kind, detail) => pushLog(kind, JSON.stringify(detail)) })
   function onMouseOver(event: MouseEvent) {
     foldTooltipController.onMouseOver(event, FOLD_ELLIPSIS_CLASS)
     noteAnchorHoverPreviewController?.onMouseOver(event)
@@ -604,6 +619,57 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     emitSearchStateChange,
     scrollToPos: (pos) => {
       outlineNavigationController.scrollToPos(pos)
+    },
+    pushLog,
+  })
+  /**
+   * 本文を置き換える入口（`loadMarkdown` と EDITOR-TAB-HISTORY1 の復元）が共有する前後の処理。
+   * 片方だけ直さない。`reset()` は hover preview を畳まない従来の形のまま。
+   */
+  function prepareDocumentReplace(surfaceReason: string, localImeReason: string): boolean {
+    if (inputSurfaceIntegration && !inputSurfaceIntegration.guardDocumentChange(surfaceReason)) return false
+    if (!localImeIntegration.notifyDocumentChange(localImeReason)) return false
+    inputSurfaceIntegration?.documentChanged()
+    // STICKY-NOTE-ENDMARKER-LAYOUT1: document / tab 切替で hover preview を畳む。
+    noteAnchorHoverPreviewController?.hide()
+    resetHomeEndState()
+    return true
+  }
+  function finishDocumentReplace(): void {
+    documentLineBreakPolicy = readLineBreakPolicy()
+    searchController.refreshImmediately()
+    inputSurfaceIntegration?.documentLoaded()
+  }
+  // EDITOR-TAB-HISTORY1: タブごとの履歴つき state の保持・復元・破棄。判定と順序は features 側
+  // （documentStateCapsule / documentStateController）。ここは loadMarkdown と同じ処理を port で渡すだけ。
+  const documentStateController = createDocumentStateController({
+    getState: () => editor.state, getSchema: () => editor.schema, getView: () => editor.view,
+    isComposing: () => isCompositionActive(),
+    isSurfacePayloadBearing: () => inputSurfaceIntegration?.hasPayloadBearingState() ?? false,
+    isCompositionPresented: () => inputSurfaceIntegration?.isCompositionPresented() ?? false,
+    isParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+    exitParagraphPlain: () => { paragraphPlainControllerRef.current!.setMode(false) },
+    getFrontmatterPrefix: () => markdownIoController.getFrontmatterPrefix(),
+    setFrontmatterPrefix: (prefix) => markdownIoController.setFrontmatterPrefix(prefix),
+    getLineBreakPolicy: readLineBreakPolicy,
+    getDocumentMarkdownOptions: () => documentMarkdownOptions,
+    setDocumentMarkdownOptions: (options) => { documentMarkdownOptions = options },
+    isRubyEnabled: () => enableRubyFlag,
+    serialize: serializeMarkdown, joinWithFrontmatter, peekMarkdown: () => markdownIoController.peekMarkdown(),
+    prepareDocumentReplace: () => prepareDocumentReplace('core-document-restore', 'document-restore'),
+    readSearchState: () => searchHighlightPluginKey.getState(editor.state) ?? null,
+    closeSearch: () => { editor.commands.closeSearch() },
+    setSearchQuery: (query, caseSensitive) => { editor.commands.setSearchQuery(query, caseSensitive) },
+    emitSearchStateChange,
+    finishDocumentReplace,
+    notifyDisplayAfterReplace: () => {
+      // load の transaction が届けていた表示の通知（EditorCore.onUpdate / onSelectionUpdate と同じ順）。
+      typewriterModeController?.handleEditorUpdate({ docChanged: true })
+      visualFocusCurrentLineController?.scheduleUpdate()
+      pseudoCaretController?.scheduleUpdate()
+      noteAnchorPreviewController?.scheduleApply()
+      notifySelectionChanged(editor.state.selection.from)
+      baseOnSelectionUpdate({ editor })
     },
     pushLog,
   })
@@ -845,7 +911,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     },
 
     selectAll() {
-      basicCommandsController.selectAll()
+      if (!getInputSurfaceFocusPort(editor.view.dom)?.selectAll()) basicCommandsController.selectAll()
     },
 
     moveListItemDown(): boolean {
@@ -954,26 +1020,21 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getNoteAnchorIdsInDoc(): string[] {
       return collectNoteAnchorIdsInDoc(editor.state.doc)
     },
-    setOnNoteAnchorReveal(listener: ((id: string) => void) | null) {
-      onNoteAnchorReveal = listener
-    },
+    setOnNoteAnchorReveal(listener: ((id: string) => void) | null) { onNoteAnchorReveal = listener },
+    // STICKY-NOTE-LIFECYCLE1: 拒否の理由の通知の受け口（表示は App 側）。
+    setNoteAnchorProtectionNoticeHandler: (handler, onDetachedByEdit = null) => { registerNoteAnchorProtectionNoticeSink(editor.view, handler); registerNoteAnchorEditDetachListener(editor.view, onDetachedByEdit) },
     beginLocalImeLocalWindowTransition: (kind) => localImeIntegration.beginLocalWindowTransition(kind),
     cancelLocalImeLocalWindowTransition: (kind) => localImeIntegration.cancelLocalWindowTransition(kind),
     completeLocalImeLocalWindowTransition: (kind, writingMode) => localImeIntegration.completeLocalWindowTransition(kind, writingMode),
-
     loadMarkdown(md: string) {
-      if (!localImeIntegration.notifyDocumentChange('document-load')) return false
-      // STICKY-NOTE-ENDMARKER-LAYOUT1: document / tab 切替で hover preview を畳む。
-      noteAnchorHoverPreviewController?.hide()
-      resetHomeEndState()
+      if (!prepareDocumentReplace('core-document-load', 'document-load')) return false
       markdownIoController.loadMarkdown(md)
-      documentLineBreakPolicy = readLineBreakPolicy()
-      searchController.refreshImmediately()
+      finishDocumentReplace()
       return true
     },
-
     setReadOnly(readOnly: boolean) {
       editor.setEditable(!readOnly)
+      inputSurfaceIntegration?.sync()
     },
 
     setFrontmatterPrefix(prefix: string) {
@@ -991,13 +1052,15 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     runWithLocalImePerfSpan(span, run) {
       return localImeIntegration.runWithFlushPerfSpan(span, run)
     },
-
     reset() {
+      if (inputSurfaceIntegration && !inputSurfaceIntegration.guardDocumentChange('core-document-reset')) return false
       if (!localImeIntegration.notifyDocumentChange('document-reset')) return false
+      inputSurfaceIntegration?.documentChanged()
       resetHomeEndState()
       markdownIoController.reset()
       documentLineBreakPolicy = readLineBreakPolicy()
       searchController.refreshImmediately()
+      inputSurfaceIntegration?.documentLoaded()
       return true
     },
 
@@ -1008,6 +1071,13 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       })
       editor.view.updateState(freshState)
     },
+
+    // EDITOR-TAB-HISTORY1: タブごとの履歴の保持・復元・破棄（features/documentStateController.ts へ委譲）。
+    captureDocumentState: (key, markdown, filePath) => documentStateController.capture(key, markdown, filePath),
+    restoreDocumentState: (key, expectedMarkdown, filePath) => documentStateController.restore(key, expectedMarkdown, filePath),
+    discardDocumentState: (key) => documentStateController.discard(key),
+    readDocumentStateDiagnosticsForE2e: () => documentStateController.diagnosticsForE2e(),
+    injectDocumentStateRestoreFailureForE2e: (kind) => documentStateController.injectRestoreFailureForE2e(kind),
 
     undoParagraphPlain() {
       paragraphPlainControllerRef.current!.undoOverlay()
@@ -1036,12 +1106,10 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     commitParagraphPlainIfActive(): boolean {
       return paragraphPlainControllerRef.current!.commitIfActive()
     },
-    hasParagraphPlainPendingOverlayChanges(): boolean {
-      return paragraphPlainControllerRef.current!.hasPendingOverlayChanges()
-    },
-    onParagraphPlainModeChange(listener: ParagraphPlainModeListener): () => void {
-      return paragraphPlainControllerRef.current!.onModeChange(listener)
-    },
+    hasParagraphPlainPendingOverlayChanges(): boolean { return paragraphPlainControllerRef.current!.hasPendingOverlayChanges() },
+    discardParagraphPlainIfActive(): void { paragraphPlainControllerRef.current!.discardIfActive() },
+    onParagraphPlainPendingChanges(listener) { return paragraphPlainControllerRef.current!.onPendingChanges(listener) },
+    onParagraphPlainModeChange(listener: ParagraphPlainModeListener): () => void { return paragraphPlainControllerRef.current!.onModeChange(listener) },
 
     getLineBreakPolicy(): LineBreakPolicy {
       return readLineBreakPolicy()
@@ -1394,19 +1462,20 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
 
     syncTypewriterRuntimeState() {
       typewriterModeController?.syncRuntimeState()
+      inputSurfaceIntegration?.sync()
     },
 
     nudgeDecorationsRefresh() {
       const tr = editor.state.tr.setMeta('addToHistory', false)
       editor.view.dispatch(tr)
     },
-
     scheduleVisualFocusCurrentLineUpdate() {
       visualFocusCurrentLineController?.scheduleUpdate()
     },
     schedulePseudoCaretUpdate() {
       pseudoCaretController?.scheduleUpdate()
     },
+    refreshInputSurfaceDisplay() { inputSurfaceIntegration?.displayChanged() },
     getLocalImeLocalWindowSnapshotForE2e: () => localImeIntegration.getLocalWindowSnapshotForE2e(),
     getLocalImeNavigationPerformanceSnapshotForE2e: () => localImeIntegration.getNavigationPerformanceSnapshotForE2e(),
     setLocalImeLocalWindowFailureForE2e: (failure) => localImeIntegration.setLocalWindowFailureForE2e(failure),
@@ -1416,7 +1485,9 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     dispatchLocalImeLocalWindowGrowthForE2e: (additionalBlocks, text) => localImeIntegration.dispatchLocalWindowGrowthForE2e(additionalBlocks, text),
     destroy() {
       searchCloseFocusRestoreEpoch = nextSearchCloseFocusRestoreEpoch(searchCloseFocusRestoreEpoch)
+      if (inputSurfaceIntegration && !inputSurfaceIntegration.guardDocumentChange('core-destroy')) return false
       if (!localImeIntegration.destroy()) return false
+      inputSurfaceLifecycle.destroy()
       unsubscribeTypewriterParagraphPlainMode()
       visualFocusCurrentLineController?.destroy()
       visualFocusCurrentLineController = null

@@ -222,7 +222,7 @@ export type LocalImeLocalWindowIntegrationHandle = {
 
 export function createLocalImeLocalWindowIntegration(): LocalImeLocalWindowIntegrationHandle {
   let controller: LocalImeLocalWindowControllerHandle | null = null
-  let participant: LocalImeDocumentActionParticipant | null = null
+  let participant: (LocalImeDocumentActionParticipant & { readonly id: 'local-window' }) | null = null
   let pilotTarget: LocalImePilotTarget | null = null
   let resizeExit: LocalImeLocalWindowResizeExitHandle | null = null
   let pointerHandoff: LocalImeLocalWindowPointerHandoffHandle | null = null

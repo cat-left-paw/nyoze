@@ -1,5 +1,5 @@
 /**
- * Paragraph Plain「表示優先」(comfortable) 時の host 側 `--pp-reserved-block-size` 更新を
+ * Paragraph Plain「表示優先」(comfortable) 時の予約の大きさ（専用の <style> の規則。paragraphPlainReservedRule.ts）の更新を
  * 粗くするための純関数と stepPx 解決。
  *
  * overlay の textarea 寸法・キャレットは paragraphPlainMode 側で即時更新し、

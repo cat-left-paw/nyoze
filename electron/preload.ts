@@ -1,7 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import {
+  INPUT_STRATEGY_CHANNEL,
+  INPUT_STRATEGY_NONE,
+  normalizeInputStrategyCapability,
+  type InputStrategyCapability,
+} from './inputStrategyGate'
 import type { UiLanguageMode } from '../src/settings/types'
 import type { NyozeNotesStore } from '../src/project/noteStore'
 import type { ProvisionalNoteCleanupRequest } from '../src/project/provisionalNoteCleanup'
+import type { TrackedNoteReconciliationRequest } from '../src/project/noteLifecycleTracking'
 import type {
   HtmlTemplatePart,
   WebBookAssetFailure,
@@ -17,6 +24,7 @@ import type {
   ProjectReadNotesResult,
   ProjectWriteNotesResult,
   ProjectDiscardProvisionalNotesResult,
+  ProjectReconcileTrackedNotesResult,
   ProjectMissingFileNotesResult,
   BookFullOutlineResult,
   ChapterNeighborsResult,
@@ -129,28 +137,25 @@ const localImePilotBridge = resolveLocalImePilotAvailable()
   : undefined
 
 /**
- * P3-EXP1: packaged Experimental Preview の read-only capability。
+ * PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値。
  *
- * preload は sandbox 実行で `app.isPackaged` も `process.platform` の policy も
- * 判定できないため、**main の同期 IPC だけを正本**にする（env は読まない）。
- * renderer へ渡すのは fixed boolean 1 個だけで、session 操作・本文・path・
- * diagnostics・任意 payload は載せない。既定 OFF の preference は settings.json 側が
- * 正本なので、この capability だけで機能が ON になることはない。
+ * preloadはsandbox実行で`app.isPackaged`もplatformの区分も判定できないため、
+ * **mainの同期IPCだけを正本**にする。rendererへ渡すのは形を確かめた3つの値だけで、
+ * session操作・本文・path・診断・任意payloadは載せない。既定OFFの設定はsettings.json側が
+ * 正本なので、この値だけで機能がONになることはない（開発用の強制ONを除く）。
+ * 強制ONは、mainの値に加えて、このprocessのenvも確かめる（mainは効かない指定のenvを落とす）。
  */
-function resolveLocalImeExperimentalPreviewCapable(): boolean {
+function resolveInputStrategy(): InputStrategyCapability {
   try {
-    return (
-      ipcRenderer.sendSync('localImeExperimentalPreview:isCapable') === true
-    )
+    const capability = normalizeInputStrategyCapability(ipcRenderer.sendSync(INPUT_STRATEGY_CHANNEL))
+    if (capability.forced && process.env.NYOZE_INPUT_SURFACE !== '1') return INPUT_STRATEGY_NONE
+    return capability
   } catch {
-    // 応答が取れない場合は安全側で無効。
-    return false
+    // 応答が取れない場合は安全側（製品の入口なし）。
+    return INPUT_STRATEGY_NONE
   }
 }
-
-const localImeExperimentalPreviewBridge = resolveLocalImeExperimentalPreviewCapable()
-  ? { capable: true as const }
-  : undefined
+const inputStrategy = Object.freeze({ ...resolveInputStrategy() })
 
 const e2eBridge = resolveMainE2eEnabled()
   ? {
@@ -403,6 +408,7 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
           headingAlignHorizontal: 'start' | 'center' | 'end'
           headingAlignVertical: 'start' | 'center' | 'end'
           headingMarginAfter: number
+          headingFontScale: number
           headingDividerLevels: {
             h1: boolean
             h2: boolean
@@ -496,6 +502,7 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
           headingAlignHorizontal: 'start' | 'center' | 'end'
           headingAlignVertical: 'start' | 'center' | 'end'
           headingMarginAfter: number
+          headingFontScale: number
           headingDividerLevels: {
             h1: boolean
             h2: boolean
@@ -650,6 +657,9 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
         filePath,
         request,
       ) as Promise<ProjectDiscardProvisionalNotesResult>,
+    // STICKY-NOTE-LIFECYCLE1: 保存の後の、追跡中の付箋の status の確定。
+    reconcileTrackedNotes: (filePath: string, request: TrackedNoteReconciliationRequest) =>
+      ipcRenderer.invoke('project:reconcileTrackedNotes', filePath, request) as Promise<ProjectReconcileTrackedNotesResult>,
     updateTitle: (filePathOrAnchor: string | ProjectPanelContextIpcRequest, title: string) =>
       ipcRenderer.invoke('project:updateTitle', filePathOrAnchor, title) as Promise<ProjectUpdateTitleResult>,
     updateBookManifestV3: (
@@ -681,6 +691,10 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
       >,
   },
   document: {
+    // The complete tab report is acknowledged before a later library switch IPC can be sent.
+    setOpenDocumentPaths: (paths: string[]) => {
+      ipcRenderer.sendSync('document:setOpenDocumentPaths', paths)
+    },
     // SEC-5: Notify main of the active file path before each document load.
     // Uses sendSync so main's activeDocumentDir is set before <img> tags fire nyoze-img:// requests.
     setActiveFilePath: (filePath: string | null) => {
@@ -747,6 +761,6 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
   e2e: e2eBridge,
   // P3-A1a: 作者限定 pilot の read-only capability。非 available 時は undefined。
   localImePilot: localImePilotBridge,
-  // P3-EXP1: packaged Experimental Preview の read-only capability。非 capable 時は undefined。
-  localImeExperimentalPreview: localImeExperimentalPreviewBridge,
+  // PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値（mainが正本）。
+  inputStrategy,
 })

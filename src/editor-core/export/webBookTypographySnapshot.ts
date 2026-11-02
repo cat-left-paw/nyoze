@@ -22,6 +22,8 @@ export type WebBookTypographySnapshotInput = {
   headingAlignHorizontal: WebBookHeadingAlign
   headingAlignVertical: WebBookHeadingAlign
   headingMarginAfter: number
+  /** EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズ（本文比 %、50〜200、刻み 5）。 */
+  headingFontScale: number
   headingDividerLevels: WebBookHeadingDividerLevels
 }
 
@@ -32,6 +34,7 @@ const TYPOGRAPHY_KEYS = [
   'headingAlignHorizontal',
   'headingAlignVertical',
   'headingMarginAfter',
+  'headingFontScale',
   'headingDividerLevels',
 ] as const
 
@@ -43,6 +46,16 @@ const DIVIDER_KEYS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const
 export const WEB_BOOK_HEADING_MARGIN_AFTER_MIN = 0
 export const WEB_BOOK_HEADING_MARGIN_AFTER_MAX = 1.5
 export const WEB_BOOK_HEADING_MARGIN_AFTER_DEFAULT = 0.45
+
+/**
+ * 見出しの文字サイズ（本文比 %）。Display Settings の headingFontScale と同じ範囲・刻み
+ * （`src/settings/headingFontScale.ts` が正本。export 層は settings を import しない作りなので値を写し、
+ * tests/web-book-typography-snapshot.test.ts が一致を固定する）。
+ */
+export const WEB_BOOK_HEADING_FONT_SCALE_MIN = 50
+export const WEB_BOOK_HEADING_FONT_SCALE_MAX = 200
+export const WEB_BOOK_HEADING_FONT_SCALE_STEP = 5
+export const WEB_BOOK_HEADING_FONT_SCALE_DEFAULT = 100
 
 export const DEFAULT_WEB_BOOK_HEADING_DIVIDER_LEVELS: WebBookHeadingDividerLevels = Object.freeze({
   h1: true,
@@ -58,6 +71,7 @@ export const DEFAULT_WEB_BOOK_TYPOGRAPHY_SNAPSHOT: WebBookTypographySnapshot = O
   headingAlignHorizontal: 'start',
   headingAlignVertical: 'start',
   headingMarginAfter: WEB_BOOK_HEADING_MARGIN_AFTER_DEFAULT,
+  headingFontScale: WEB_BOOK_HEADING_FONT_SCALE_DEFAULT,
   headingDividerLevels: { ...DEFAULT_WEB_BOOK_HEADING_DIVIDER_LEVELS },
 })
 
@@ -92,6 +106,36 @@ export function normalizeWebBookHeadingMarginAfter(value: unknown): number {
     WEB_BOOK_HEADING_MARGIN_AFTER_MAX,
     Math.max(WEB_BOOK_HEADING_MARGIN_AFTER_MIN, rounded),
   )
+}
+
+function isWebBookHeadingFontScaleInRange(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= WEB_BOOK_HEADING_FONT_SCALE_MIN &&
+    value <= WEB_BOOK_HEADING_FONT_SCALE_MAX
+  )
+}
+
+function snapWebBookHeadingFontScale(value: number): number {
+  const snapped = Math.round(value / WEB_BOOK_HEADING_FONT_SCALE_STEP) * WEB_BOOK_HEADING_FONT_SCALE_STEP
+  return Math.min(
+    WEB_BOOK_HEADING_FONT_SCALE_MAX,
+    Math.max(WEB_BOOK_HEADING_FONT_SCALE_MIN, snapped),
+  )
+}
+
+/**
+ * 見出しの文字サイズ（本文比 %）。有限数で 50〜200 の範囲外は throw（IPC strict 経路用）、
+ * 範囲内は刻み 5 の倍数へ丸める。
+ */
+export function normalizeWebBookHeadingFontScale(value: unknown): number {
+  if (!isWebBookHeadingFontScaleInRange(value)) {
+    throw new Error(
+      `Web Book typography snapshot の headingFontScale は ${WEB_BOOK_HEADING_FONT_SCALE_MIN}〜${WEB_BOOK_HEADING_FONT_SCALE_MAX} の有限数で指定してください`,
+    )
+  }
+  return snapWebBookHeadingFontScale(value)
 }
 
 function normalizeDividerLevelsStrict(value: unknown): WebBookHeadingDividerLevels {
@@ -129,7 +173,7 @@ function normalizeDividerLevelsStrict(value: unknown): WebBookHeadingDividerLeve
 export function normalizeWebBookTypographySnapshot(input: unknown): WebBookTypographySnapshot {
   if (!isPlainObject(input)) {
     throw new Error(
-      'Web Book typography snapshot は headingFont / headingAlignHorizontal / headingAlignVertical / headingMarginAfter / headingDividerLevels を持つ object で指定してください',
+      'Web Book typography snapshot は headingFont / headingAlignHorizontal / headingAlignVertical / headingMarginAfter / headingFontScale / headingDividerLevels を持つ object で指定してください',
     )
   }
 
@@ -139,7 +183,7 @@ export function normalizeWebBookTypographySnapshot(input: unknown): WebBookTypog
     keys.some((key) => !TYPOGRAPHY_KEYS.includes(key as (typeof TYPOGRAPHY_KEYS)[number]))
   ) {
     throw new Error(
-      'Web Book typography snapshot には headingFont / headingAlignHorizontal / headingAlignVertical / headingMarginAfter / headingDividerLevels 以外を指定できません',
+      'Web Book typography snapshot には headingFont / headingAlignHorizontal / headingAlignVertical / headingMarginAfter / headingFontScale / headingDividerLevels 以外を指定できません',
     )
   }
 
@@ -148,6 +192,7 @@ export function normalizeWebBookTypographySnapshot(input: unknown): WebBookTypog
     headingAlignHorizontal: normalizeHeadingAlignStrict(input.headingAlignHorizontal, 'headingAlignHorizontal'),
     headingAlignVertical: normalizeHeadingAlignStrict(input.headingAlignVertical, 'headingAlignVertical'),
     headingMarginAfter: normalizeWebBookHeadingMarginAfter(input.headingMarginAfter),
+    headingFontScale: normalizeWebBookHeadingFontScale(input.headingFontScale),
     headingDividerLevels: Object.freeze(normalizeDividerLevelsStrict(input.headingDividerLevels)),
   })
 }
@@ -155,7 +200,7 @@ export function normalizeWebBookTypographySnapshot(input: unknown): WebBookTypog
 /**
  * Display Settings / docHeadingFont から export-time snapshot を組み立てる。
  * custom heading font と不明値は安全側で same-as-body へ正規化する。
- * align / margin / divider の不正値は Display 既定へフォールバックする。
+ * align / margin / fontScale / divider の不正値は Display 既定へフォールバックする。
  */
 export function resolveWebBookTypographySnapshotFromDisplay(input: {
   docHeadingFont?: unknown
@@ -163,6 +208,7 @@ export function resolveWebBookTypographySnapshotFromDisplay(input: {
     headingAlignHorizontal?: unknown
     headingAlignVertical?: unknown
     headingMarginAfter?: unknown
+    headingFontScale?: unknown
     headingDividerLevels?: unknown
   }
 }): WebBookTypographySnapshot {
@@ -178,6 +224,7 @@ export function resolveWebBookTypographySnapshotFromDisplay(input: {
     DEFAULT_WEB_BOOK_TYPOGRAPHY_SNAPSHOT.headingAlignVertical,
   )
   const headingMarginAfter = resolveMarginFromDisplay(settings.headingMarginAfter)
+  const headingFontScale = resolveFontScaleFromDisplay(settings.headingFontScale)
   const headingDividerLevels = resolveDividerLevelsFromDisplay(settings.headingDividerLevels)
 
   return normalizeWebBookTypographySnapshot({
@@ -185,6 +232,7 @@ export function resolveWebBookTypographySnapshotFromDisplay(input: {
     headingAlignHorizontal,
     headingAlignVertical,
     headingMarginAfter,
+    headingFontScale,
     headingDividerLevels,
   })
 }
@@ -213,6 +261,12 @@ function resolveMarginFromDisplay(value: unknown): number {
   )
 }
 
+/** 不正値・範囲外は既定 100%（Display Settings の normalizeHeadingFontScale と同じ規則）。 */
+function resolveFontScaleFromDisplay(value: unknown): number {
+  if (!isWebBookHeadingFontScaleInRange(value)) return WEB_BOOK_HEADING_FONT_SCALE_DEFAULT
+  return snapWebBookHeadingFontScale(value)
+}
+
 function resolveDividerLevelsFromDisplay(value: unknown): WebBookHeadingDividerLevels {
   if (!isPlainObject(value)) {
     return { ...DEFAULT_WEB_BOOK_HEADING_DIVIDER_LEVELS }
@@ -229,6 +283,7 @@ export function buildWebBookTypographyCssVariables(snapshot: WebBookTypographySn
   const d = snapshot.headingDividerLevels
   return [
     `--wb-heading-margin-after: ${snapshot.headingMarginAfter}em`,
+    `--wb-heading-font-scale: ${Math.round(snapshot.headingFontScale) / 100}`,
     `--wb-heading-align-h: ${snapshot.headingAlignHorizontal}`,
     `--wb-heading-align-v: ${snapshot.headingAlignVertical}`,
     `--wb-heading-divider-h1: ${d.h1 ? '1' : '0'}`,

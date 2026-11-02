@@ -83,7 +83,7 @@ export type HeadingUiSnapshot = {
 }
 
 /** Callback for content update events (for dirty tracking) */
-export type UpdateListener = () => void
+export type UpdateListener = (docChanged?: boolean) => void
 
 /**
  * Layout-independent anchor into the current document, used to restore the
@@ -328,6 +328,8 @@ export interface EditorCoreHandle {
   hasParagraphPlainPendingOverlayChanges(): boolean
 
   /** Subscribe paragraph plain mode state changes */
+  discardParagraphPlainIfActive(): void
+  onParagraphPlainPendingChanges(listener: import('./features/paragraphPlainPendingChanges').ParagraphPlainPendingChangesListener): () => void
   onParagraphPlainModeChange(listener: ParagraphPlainModeListener): () => void
 
   /** Returns current markdown line break policy */
@@ -399,6 +401,16 @@ export interface EditorCoreHandle {
   /** noteAnchor marker クリック時のコールバック。PM selection は変更しない。 */
   setOnNoteAnchorReveal(listener: ((id: string) => void) | null): void
 
+  /**
+   * STICKY-NOTE-LIFECYCLE1: 付箋のマーカーを含む範囲の削除・切り取りを拒否したときの通知
+   * （Host の keydown / cut、PIS の削除規則）。表示と連打の抑制は受け手が持つ。
+   */
+  setNoteAnchorProtectionNoticeHandler(
+    handler: ((kind: import('./features/noteAnchorProtectionNotice').NoteAnchorProtectionNoticeKind) => void) | null,
+    /** REVIEWFIX2 R3: Paragraph Plain の確定で anchor が消えた id の通知（文字の編集で外れた付箋は削除しない）。 */
+    onDetachedByEdit?: ((ids: readonly string[]) => void) | null,
+  ): void
+
   /** Get the current link href at cursor, or undefined */
   getLinkHref(): string | undefined
 
@@ -445,6 +457,21 @@ export interface EditorCoreHandle {
 
   /** Clear undo/redo history. Call at document-load boundaries only. */
   clearHistory(): void
+
+  /**
+   * EDITOR-TAB-HISTORY1: タブごとの履歴の保持（`features/documentStateCapsule.ts`）。
+   * - `captureDocumentState`: タブを離れるとき。`markdown` は同じ時点の `peekMarkdown()` の値、`filePath` は
+   *   離れるタブの path（文書の同一性）。変換中・入力面の保持文字・preeditの表示・Paragraph Plain の間は保持しない（false）。
+   * - `restoreDocumentState`: タブへ戻るとき。capsule が現在の入力（文書の同一性・Markdown・改行の方針・Ruby表示・schema）と
+   *   一致し、直列化した本文が `expectedMarkdown` と一致するときだけ履歴つきで戻す。false なら呼び出し側が
+   *   従来の `loadMarkdown` + `clearHistory` を使う。capsule は成功・失敗を問わず消費する。
+   * - `discardDocumentState`: タブを閉じるとき、同じタブへ別の文書を読み込んだとき、離脱を取り消したとき。
+   */
+  captureDocumentState(key: string, markdown: string, filePath: string | null): boolean
+  restoreDocumentState(key: string, expectedMarkdown: string, filePath: string | null): boolean
+  discardDocumentState(key: string): void
+  readDocumentStateDiagnosticsForE2e(): import('./features/documentStateCapsule').DocumentStateDiagnostics
+  injectDocumentStateRestoreFailureForE2e(kind: 'post-check' | null): void
 
   /** Subscribe to log events; returns unsubscribe function */
   onLog(listener: LogListener): () => void
@@ -627,6 +654,8 @@ export interface EditorCoreHandle {
 
   /** Recompute pseudo caret overlay (settings / mode / layout). */
   schedulePseudoCaretUpdate(): void
+  /** PIS display-only layout invalidation; no-op with its development flag off. */
+  refreshInputSurfaceDisplay(): void
 
   getLocalImeLocalWindowSnapshotForE2e(): import('./features/localImeLocalWindowController').LocalImeLocalWindowSnapshot | null
   getLocalImeNavigationPerformanceSnapshotForE2e(): ReturnType<

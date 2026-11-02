@@ -38,6 +38,8 @@ type DocumentNotesPanelProps = {
   state: DocumentNotesViewState
   uiLanguageMode: UiLanguageMode
   anchoredNoteIds?: ReadonlySet<string>
+  /** STICKY-NOTE-LIFECYCLE1: 仮の削除の間の付箋。anchor が本文にない間は orphan 一覧にも出さない。 */
+  hiddenNoteIds?: ReadonlySet<string>
   focusedNoteId?: string | null
   /** marker click ごとに増える単調キー。reveal 再発火に使う。 */
   focusedNoteEventKey?: number
@@ -527,6 +529,7 @@ export function DocumentNotesPanel({
   state,
   uiLanguageMode,
   anchoredNoteIds,
+  hiddenNoteIds,
   focusedNoteId = null,
   focusedNoteEventKey = 0,
   onJumpToNote,
@@ -605,10 +608,11 @@ export function DocumentNotesPanel({
         rawResolvedNotes: [] as DocumentNoteView[],
       }
     }
+    const isHidden = (note: DocumentNoteView) => hiddenNoteIds?.has(note.id) ?? false
     if (!anchoredNoteIds || anchoredNoteIds.size === 0) {
       return {
         rawAnchoredNotes: [],
-        rawOrphanNotes: state.notes,
+        rawOrphanNotes: state.notes.filter((note) => !isHidden(note)),
         rawResolvedNotes: state.resolvedNotes,
       }
     }
@@ -616,14 +620,14 @@ export function DocumentNotesPanel({
     const orphan: DocumentNoteView[] = []
     for (const note of state.notes) {
       if (anchoredNoteIds.has(note.id)) anchored.push(note)
-      else orphan.push(note)
+      else if (!isHidden(note)) orphan.push(note)
     }
     return {
       rawAnchoredNotes: anchored,
       rawOrphanNotes: orphan,
       rawResolvedNotes: state.resolvedNotes,
     }
-  }, [anchoredNoteIds, state])
+  }, [anchoredNoteIds, hiddenNoteIds, state])
 
   const anchoredNotes = useMemo(
     () => filterNoteViewsByTag(rawAnchoredNotes, selectedFilterTagId),

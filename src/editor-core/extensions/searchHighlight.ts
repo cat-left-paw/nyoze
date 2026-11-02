@@ -30,7 +30,17 @@ export const searchHighlightPluginKey = new PluginKey<SearchHighlightPluginState
 // Decoration builder
 // ---------------------------------------------------------------------------
 
-function buildSearchDecorations(
+const searchDecorations = new WeakMap<EditorState['doc'], WeakMap<SearchHighlightPluginState, DecorationSet>>()
+
+function buildSearchDecorations(state: EditorState, pluginState: SearchHighlightPluginState): DecorationSet {
+  let byState = searchDecorations.get(state.doc)
+  if (!byState) { byState = new WeakMap(); searchDecorations.set(state.doc, byState) }
+  let result = byState.get(pluginState)
+  if (!result) { result = computeSearchDecorations(state, pluginState); byState.set(pluginState, result) }
+  return result
+}
+
+function computeSearchDecorations(
   state: EditorState,
   pluginState: SearchHighlightPluginState,
 ): DecorationSet {
@@ -248,6 +258,7 @@ export const SearchHighlight = Extension.create({
                   const index = value.matches.length > 0
                     ? Math.max(0, Math.min(meta.index, value.matches.length - 1))
                     : -1
+                  if (index === value.currentIndex) return value
                   return { ...value, currentIndex: index }
                 }
                 case 'close':

@@ -1,3 +1,6 @@
+import { resolveCaretRectAtDomPoint } from './caretDomGeometry'
+import { registerTypewriterDiagnostics } from './typewriterDiagnostics'
+import type { CompositionCaretSource } from './visualFocusCurrentLine'
 import type { EditorView } from '@tiptap/pm/view'
 import {
   resolveTypewriterScrollPlan,
@@ -94,6 +97,13 @@ type CreateTypewriterModeControllerOptions = {
 }
 
 type TypewriterModeController = {
+  isEnabled: () => boolean
+  /** この打鍵のselection更新がfollowを予約したか。geometry・抑止状態を書き換えない。 */
+  hasScheduledArrowFollow: () => boolean
+  /** 既存follow frameの末尾の可視範囲検査。予約・schedulerは増やさない。 */
+  setNavigationRevealAfterFollow: (reveal: () => void) => void
+  setCompositionCaretSource: (source: CompositionCaretSource | null) => void
+  noteInputSurfaceDisplayChange: () => void
   noteKeyboardNavigationIntent: (
     event: Pick<
       KeyboardEvent,
@@ -226,6 +236,7 @@ export function createTypewriterModeController({
   const scrollPastEndAttr = 'data-typewriter-scroll-past-end'
   const scrollPastEndSpacerAttr = 'data-typewriter-scroll-past-end-spacer'
   const scrollPastEndDirectionAttr = 'data-typewriter-scroll-past-end-direction'
+  let compositionCaretSource: CompositionCaretSource | null = null
   let rafHandle: number | null = null
   /** PERF2b-2c1: 共有 frame に参加中なら leave 関数を保持する（二重実行防止）。 */
   let leaveSharedFrame: (() => void) | null = null
@@ -234,6 +245,8 @@ export function createTypewriterModeController({
   let manualScrollSuppressedUntil = 0
   let programmaticScrollEventsToIgnore = 0
   let pendingFollowIntent: TypewriterFollowIntent | null = null
+  let arrowFollowScheduled = false
+  let navigationRevealAfterFollow: (() => void) | null = null
   let scrollHost: TypewriterScrollHost | null = null
   let scrollPastEndSpacer: HTMLElement | null = null
   let jumpNavigationSuppressedUntil = 0
@@ -243,6 +256,17 @@ export function createTypewriterModeController({
   let pointerClickSuppressRaf: number | null = null
 
   const documentTarget = view.dom.ownerDocument as TypewriterDocumentTarget | null
+  const unregisterDiagnostics = registerTypewriterDiagnostics(view.dom as unknown as HTMLElement, () => ({
+    canFollow: shouldRunTypewriterFollowNow({
+      enabled: getIsEnabled(), selectionEmpty: view.state.selection.empty,
+      isParagraphPlainActive: getIsParagraphPlainActive(), isSourceModeActive: getIsSourceModeActive(),
+      isPointerSelecting: pointerSelecting, isManualScrollSuppressed: isManualScrollSuppressed(),
+      isJumpNavigationSuppressed: isJumpNavigationSuppressed(),
+    }),
+    manualScrollSuppressed: isManualScrollSuppressed(),
+    jumpNavigationSuppressed: isJumpNavigationSuppressed(),
+    programmaticScrollEventsToIgnore,
+  }))
 
   function isManualScrollSuppressed(): boolean {
     return getNow() < manualScrollSuppressedUntil
@@ -388,6 +412,7 @@ export function createTypewriterModeController({
       'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'defaultPrevented'
     >,
   ): void {
+    arrowFollowScheduled = false
     const arrowIntent = resolveTypewriterArrowNavigationIntent({
       key: event.key,
       selectionEmpty: view.state.selection.empty,
@@ -452,10 +477,11 @@ export function createTypewriterModeController({
       participant: 'typewriter-follow',
       prepare: () => {
         const plan = prepareFollow()
-        return plan ? () => commitFollow(plan) : null
+        return plan || navigationRevealAfterFollow ? () => { if (plan) commitFollow(plan); finishNavigationReveal() } : null
       },
-      settle: () => {
+      settle: outcome => {
         leaveSharedFrame = null
+        if (outcome === 'cancelled') { navigationRevealAfterFollow = null; arrowFollowScheduled = false }
       },
     })
     if (leave) {
@@ -494,10 +520,11 @@ export function createTypewriterModeController({
     }
     const followIntent = pendingFollowIntent
     pendingFollowIntent = null
-    return scheduleFollow({
+    arrowFollowScheduled = scheduleFollow({
       docChanged: false,
       followIntent,
     })
+    return arrowFollowScheduled
   }
 
   /**
@@ -533,8 +560,11 @@ export function createTypewriterModeController({
     if (!viewportRect) return null
 
     let caretCoords: RectLike
+    let compositionWritingMode: TypewriterWritingMode | null = null
     try {
-      caretCoords = view.coordsAtPos(selection.head)
+      const point = getIsComposing() ? compositionCaretSource?.() ?? null : null
+      if (point) compositionWritingMode = resolveTypewriterWritingMode(view.dom as unknown as Element, getComputedStyle)
+      caretCoords = (point ? resolveCaretRectAtDomPoint(point.node, point.offset, compositionWritingMode !== 'horizontal-tb') : null) ?? view.coordsAtPos(selection.head)
     } catch {
       return null
     }
@@ -542,7 +572,7 @@ export function createTypewriterModeController({
     const caretRect = normalizeCaretRect(caretCoords)
     if (!caretRect) return null
 
-    const writingMode = resolveTypewriterWritingMode(
+    const writingMode = compositionWritingMode ?? resolveTypewriterWritingMode(
       view.dom as unknown as Element,
       getComputedStyle,
     )
@@ -575,6 +605,14 @@ export function createTypewriterModeController({
     rafHandle = null
     const plan = prepareFollow()
     if (plan) commitFollow(plan)
+    finishNavigationReveal()
+  }
+
+  function finishNavigationReveal(): void {
+    const reveal = navigationRevealAfterFollow
+    navigationRevealAfterFollow = null
+    arrowFollowScheduled = false
+    if (!destroyRequested) reveal?.()
   }
 
   function handleEditorUpdate({ docChanged }: { docChanged: boolean }): boolean {
@@ -594,6 +632,14 @@ export function createTypewriterModeController({
   documentTarget?.addEventListener('pointercancel', onPointerFinish)
 
   return {
+    isEnabled: getIsEnabled,
+    hasScheduledArrowFollow: () => arrowFollowScheduled && (rafHandle !== null || leaveSharedFrame !== null),
+    setNavigationRevealAfterFollow(reveal) { navigationRevealAfterFollow = reveal },
+    setCompositionCaretSource(source) { compositionCaretSource = source },
+    noteInputSurfaceDisplayChange() {
+      // OFFではscheduler・DOMに触れない。Hostの通知はこの入口へ来ない。
+      if (getIsEnabled() && getIsComposing()) scheduleFollow({ docChanged: false, followIntent: 'text-input' })
+    },
     noteKeyboardNavigationIntent,
     noteClassifiedBareArrowNavigationIntent,
     noteJumpNavigationSuppress,
@@ -604,7 +650,11 @@ export function createTypewriterModeController({
     prepareFollow,
     commitFollow,
     destroy() {
+      unregisterDiagnostics()
       destroyRequested = true
+      navigationRevealAfterFollow = null
+      arrowFollowScheduled = false
+      compositionCaretSource = null
       if (leaveSharedFrame) {
         try {
           leaveSharedFrame()

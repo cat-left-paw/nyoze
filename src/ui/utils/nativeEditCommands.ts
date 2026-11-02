@@ -1,3 +1,8 @@
+import {
+  NYOZE_PLAIN_LITERAL_PASTE_TYPE,
+  resolvePlainPastePayload,
+} from '../../editor-core/features/literalPlainPaste'
+
 function runExecCommand(command: string, value?: string): boolean {
   try {
     return document.execCommand(command, false, value)
@@ -9,6 +14,8 @@ function runExecCommand(command: string, value?: string): boolean {
 type ClipboardPayload = {
   text: string | null
   html: string | null
+  /** true のとき、`text/plain` を文字のまま入れる指示（専用の type）を貼り付けのイベントへ足す。 */
+  literal?: boolean
 }
 
 function normalizeClipboardText(text: string): string {
@@ -43,6 +50,9 @@ function dispatchSyntheticPasteEvent(payload: ClipboardPayload): SyntheticPasteD
     }
     if (payload.text) {
       data.setData('text/plain', normalizeClipboardText(payload.text))
+    }
+    if (payload.literal) {
+      data.setData(NYOZE_PLAIN_LITERAL_PASTE_TYPE, '1')
     }
     const event = new ClipboardEvent('paste', {
       bubbles: true,
@@ -148,8 +158,10 @@ export async function pasteFromClipboardPlainOnly(): Promise<PastePlainOnlyResul
   const payload = await readClipboardPayload()
   if (!payload) return { ok: false, reason: 'clipboard_unavailable' }
   if (!payload.text) return { ok: false, reason: 'empty_text' }
-  const plain = normalizeClipboardText(payload.text)
-  const { defaultWasPrevented } = dispatchSyntheticPasteEvent({ html: null, text: plain })
+  // CLIPBOARD-INTERNAL-PASTE2: Nyoze の中でコピーした内容なら、文字のまま入れる指示を足す。
+  // `text/html` は付けない（付けると通常の貼り付けになる）。
+  const { text: plain, literal } = resolvePlainPastePayload({ html: payload.html, text: payload.text })
+  const { defaultWasPrevented } = dispatchSyntheticPasteEvent({ html: null, text: plain, literal })
   if (!defaultWasPrevented) {
     runExecCommand('insertText', plain)
   }

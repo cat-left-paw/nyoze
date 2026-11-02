@@ -74,6 +74,8 @@ export function createMarkdownIoController({
 }: CreateMarkdownIoControllerOptions): {
   loadMarkdown: (markdown: string) => void
   setFrontmatterPrefix: (nextFrontmatterPrefix: string) => void
+  /** EDITOR-TAB-HISTORY1: capsule に記録する現在の prefix（読み取りだけ）。 */
+  getFrontmatterPrefix: () => string
   saveMarkdown: () => string
   peekMarkdown: () => string
   reset: () => void
@@ -175,6 +177,7 @@ export function createMarkdownIoController({
   return {
     loadMarkdown,
     setFrontmatterPrefix,
+    getFrontmatterPrefix: () => frontmatterPrefix,
     saveMarkdown,
     peekMarkdown,
     reset,

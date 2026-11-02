@@ -131,14 +131,6 @@ import {
   resolveLocalImeLocalWindowReservationOwner,
   type LocalImeLocalWindowReservationOwner,
 } from '../extensions/localImeLocalWindowReservationDecoration'
-// LOCAL-WINDOW-RUBY-PUNCT-NOWRAP1: host PMと同一のRuby直後約物nowrap plugin。
-// 検出器・Decoration・plugin view・DOM wrapper controllerはhostの正本をそのまま使い、
-// Local Window専用のscanner / regex / wrapper controller / CSSは作らない。
-import {
-  createRubyPunctuationNowrapPlugin,
-  rubyPunctuationNowrapPluginKey,
-  RUBY_PUNCT_RUN_WRAPPER_CLASS,
-} from '../extensions/rubyPunctuationNowrap'
 import { parseCssFontSizeToPx, parseCssLineHeightToPx } from './overlayReservedBlockLayout'
 import type { LocalImeEditMenuCommandResult, LocalImeEditMenuOperation } from './localImeEditMenuCommandState'
 import {
@@ -388,13 +380,6 @@ export type LocalImeLocalWindowSnapshot = {
   localSpecialInlineCount: number | null
   /** local root DOMにhost sentinelが混入していないこと（常に0であるべき）。 */
   localSentinelCount: number
-  /**
-   * LOCAL-WINDOW-RUBY-PUNCT-NOWRAP1: 表示専用診断（read-only）。
-   * ownership / commit completion / 原稿保全の根拠にはしない。
-   */
-  localRubyPunctPluginCount: number
-  localRubyPunctRunCount: number | null
-  localRubyPunctWrapperCount: number
   resizeExit?: {
     armed: boolean
     latched: boolean
@@ -2674,10 +2659,8 @@ export function createLocalImeLocalWindowController(
         createInlineMarkInputRulesPlugin(capture.capture.localDoc.type.schema),
         keymap({ Backspace: undoInlineMarkInputRule }),
         keymap(baseKeymap),
-        // LOCAL-WINDOW-RUBY-PUNCT-NOWRAP1: 表示専用。plugin stateとDecorationはlocal doc
-        // 位置で閉じ、plugin viewのwrapper registryもこのlocal EditorView限定になる。
-        // 診断portは渡さない（hostのperf / DOM sync診断と混線させない）。
-        createRubyPunctuationNowrapPlugin(),
+        // EDITOR-RUBY-INLINE1: ルビの直後の約物は、host と共有の CSS（ルビを inline・nowrap）で
+        // 落ちない。表示専用の wrapper の plugin は持たない。
       ],
     })
     let created: EditorView | null = null
@@ -3060,17 +3043,6 @@ export function createLocalImeLocalWindowController(
         : null,
       localSentinelCount:
         localView?.dom.querySelectorAll('[data-nyoze-special-inline-boundary]').length ?? 0,
-      localRubyPunctPluginCount: localView
-        ? localView.state.plugins.filter(
-            (plugin) => (plugin as { spec?: { key?: unknown } }).spec?.key ===
-              rubyPunctuationNowrapPluginKey,
-          ).length
-        : 0,
-      localRubyPunctRunCount: localView
-        ? rubyPunctuationNowrapPluginKey.getState(localView.state)?.runs.length ?? null
-        : null,
-      localRubyPunctWrapperCount:
-        localView?.dom.querySelectorAll(`.${RUBY_PUNCT_RUN_WRAPPER_CLASS}`).length ?? 0,
       historyShortcutCount, compositionActive, pendingBoundaryReason, closingPhase,
       localRevision, recoveryIntent, recoveryCompositionFinalizationPending,
       // 実DOMの`pointer-events`を読む。内部flagではなく適用結果を証拠にする。

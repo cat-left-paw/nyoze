@@ -1,5 +1,6 @@
 import type { PlainModeKind } from './plainModeCommandGate'
 import { isNativeTextFormControl } from './nativeTextTarget'
+import { isInputSurfaceFocusOwner } from '../../editor-core/features/inputSurface/focusOwner'
 
 export type SelectAllShortcutTargetInfo = {
   tagName: string | null
@@ -24,7 +25,7 @@ export function resolveSelectAllShortcutTargetInfo(
     tagName: target.tagName.toLowerCase(),
     inputType:
       target instanceof HTMLInputElement ? target.type.toLowerCase() : null,
-    isContentEditable: target.isContentEditable,
+    isContentEditable: target.isContentEditable && (!isInputSurfaceFocusOwner(target) || !!target.textContent),
   }
 }
 

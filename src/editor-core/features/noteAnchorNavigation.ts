@@ -1,3 +1,4 @@
+import { indexDocumentNoteAnchors } from './documentNodeIndex'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 
 /**
@@ -6,14 +7,5 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
  */
 export function findNoteAnchorPosition(doc: ProseMirrorNode, id: string): number | null {
   if (!id) return null
-  let found: number | null = null
-  doc.descendants((node, pos) => {
-    if (found !== null) return false
-    if (node.type.name === 'noteAnchor' && node.attrs.id === id) {
-      found = pos
-      return false
-    }
-    return true
-  })
-  return found
+  return indexDocumentNoteAnchors(doc).find(({ node }) => node.attrs.id === id)?.pos ?? null
 }

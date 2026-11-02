@@ -11,9 +11,11 @@
  * maps `origin` to a base directory + allowed containment root + a safe
  * label, this module does the full validation pipeline:
  *
- * 1. reject empty / oversized / null-byte / any-scheme (remote, `file:`,
- *    `data:`, `blob:`, `javascript:`, unknown) / UNC / percent-encoded
- *    `rawSrc`
+ * 1. reject empty / oversized / null-byte `rawSrc`, then percent-decode it
+ *    once (`decodePercentEncodedPath`, shared with the editor image display)
+ *    and apply every later check to the decoded value — any-scheme (remote,
+ *    `file:`, `data:`, `blob:`, `javascript:`, unknown) / UNC / decoded
+ *    null-byte rejection all happen after the decode, never before it
  * 2. resolve relative to the origin's base directory (absolute input paths
  *    are also accepted here — containment is what matters, not the input
  *    shape)
@@ -48,6 +50,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { isWithinDirectory } from "./ipcSecurity";
+import { decodePercentEncodedPath } from "./percentDecodePath";
 import { sniffImageFormat } from "../src/editor-core/io/imageFormatSniff";
 import { exceedsImagePixelLimit, parseImageDimensions } from "../src/editor-core/io/imageDimensions";
 import type {
@@ -146,18 +149,6 @@ export function hasUnsupportedScheme(rawSrc: string): boolean {
 }
 
 /**
- * Reject any percent-encoded byte (`%XX`), not just the ones that decode to
- * `.` / `/` / `\`. The design boundary is "never interpret `rawSrc` as a
- * URL" — this app's own Markdown image syntax never needs percent-encoding
- * for a legitimate relative filename, so treating *any* escape as
- * unsupported avoids both single- and double-encoded traversal/separator
- * tricks (e.g. `%2e%2e%2f`, `%252f`) without needing a decode step at all.
- */
-export function hasPercentEncoding(rawSrc: string): boolean {
-  return /%[0-9a-fA-F]{2}/.test(rawSrc);
-}
-
-/**
  * True for anything absolute on *either* platform's rules — including a
  * Windows drive-absolute path (`C:\...`), a Windows root-relative path
  * (`\Users\...`, absolute on the current drive), and a POSIX absolute path
@@ -178,10 +169,31 @@ export function isAbsoluteLocalPath(rawSrc: string): boolean {
  */
 /** Exported for capacity-warning tests; production callers use resolveWebBookAssets. */
 export function sanitizeRawSrcForDisplay(rawSrc: string): string {
-  if (isUncPath(rawSrc) || hasUnsupportedScheme(rawSrc) || isAbsoluteLocalPath(rawSrc)) {
-    return "(参照元は伏せています)";
+  if (exposesFilesystemStructure(rawSrc)) {
+    return REDACTED_RAW_SRC_FOR_DISPLAY;
   }
   return rawSrc;
+}
+
+/** True when a `rawSrc` spelling would expose filesystem structure in UI strings. */
+export function exposesFilesystemStructure(rawSrc: string): boolean {
+  return isUncPath(rawSrc) || hasUnsupportedScheme(rawSrc) || isAbsoluteLocalPath(rawSrc);
+}
+
+/** Fixed placeholder used instead of any spelling that exposes filesystem structure. */
+export const REDACTED_RAW_SRC_FOR_DISPLAY = "(参照元は伏せています)";
+
+/**
+ * WEB-BOOK-ASSET-DECODE1: 失敗・警告の報告に出す表示値。利用者が書いた元の文字を
+ * そのまま出すが、decode した後の値がファイルの構造（絶対パス・scheme・UNC）を
+ * 表す場合（`%2Fsecret%2F…` など）は伏せる。decode 前の元の文字と decode 後の値の
+ * どちらかが該当すれば伏せ、どちらでもなければ元の文字を変えない。
+ */
+export function displayRawSrcForFailure(originalRawSrc: string, decodedSrc: string): string {
+  if (exposesFilesystemStructure(originalRawSrc) || exposesFilesystemStructure(decodedSrc)) {
+    return REDACTED_RAW_SRC_FOR_DISPLAY;
+  }
+  return originalRawSrc;
 }
 
 /** Minimal identity shape compared to detect a path swap between check and use. */
@@ -239,6 +251,8 @@ type ResolvedAssetBytes = {
   bytes: Buffer;
   mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
   extension: "png" | "jpg" | "webp" | "gif";
+  /** 失敗・警告の報告に出す表示値（元の文字。decode 後に構造が出る場合は伏せ字）。 */
+  displayRawSrc: string;
 };
 
 function resolveOneAsset(
@@ -271,36 +285,48 @@ function resolveOneAsset(
       "画像の参照が不正です。",
     );
   }
-  if (isUncPath(rawSrc) || hasUnsupportedScheme(rawSrc)) {
+
+  // WEB-BOOK-ASSET-DECODE1: `rawSrc` は相対 URL として扱う。エディタの画像表示と
+  // 共有する唯一の decode で1回だけ decode し、以降のすべての検査（空・長さ・null
+  // 文字・UNC・scheme・絶対パス・相対の解決・realpath と範囲の確認・`lstat` の
+  // 同一性・`fstat`・形式の判定）を decode した後の値にかける。decode を検査より
+  // 後に置くと、`..%2F` が decode で `../` になって範囲の外へ出る。
+  // `file%3A…` は decode 後に scheme として拒否し、`%5C%5Cserver…` は UNC として
+  // 拒否する。二重 encode は1回だけ decode した文字のファイル名として扱う。
+  const decodedSrc = decodePercentEncodedPath(rawSrc);
+  // 失敗の報告には利用者が書いた元の文字を出す。ただし decode した後の値が
+  // 絶対パス・scheme・UNC を表す場合（`%2Fsecret%2F…` など）は伏せる。
+  const displaySrc = displayRawSrcForFailure(rawSrc, decodedSrc);
+  if (decodedSrc.includes("\0")) {
     return failure(
       "unsupported-source",
       originLabel,
-      rawSrc,
+      displaySrc,
+      "画像の参照が不正です。",
+    );
+  }
+  if (isUncPath(decodedSrc) || hasUnsupportedScheme(decodedSrc)) {
+    return failure(
+      "unsupported-source",
+      originLabel,
+      displaySrc,
       "リモート URL や特殊な scheme の画像は埋め込めません。",
     );
   }
-  if (hasPercentEncoding(rawSrc)) {
-    return failure(
-      "unsupported-source",
-      originLabel,
-      rawSrc,
-      "URL エンコードされた画像参照は埋め込めません。",
-    );
-  }
 
-  const resolvedPath = path.resolve(originCtx.baseDir, rawSrc);
+  const resolvedPath = path.resolve(originCtx.baseDir, decodedSrc);
   let realImagePath: string;
   try {
     realImagePath = fs.realpathSync(resolvedPath);
   } catch {
-    return failure("missing", originLabel, rawSrc, "画像ファイルが見つかりませんでした。");
+    return failure("missing", originLabel, displaySrc, "画像ファイルが見つかりませんでした。");
   }
 
   if (!isWithinDirectory(realImagePath, originCtx.allowedRoot)) {
     return failure(
       "outside-allowed-root",
       originLabel,
-      rawSrc,
+      displaySrc,
       "許可された範囲外の画像は埋め込めません。",
     );
   }
@@ -316,7 +342,7 @@ function resolveOneAsset(
   try {
     identityAnchor = fs.lstatSync(realImagePath);
   } catch {
-    return failure("read-failed", originLabel, rawSrc, "画像ファイルを読み込めませんでした。");
+    return failure("read-failed", originLabel, displaySrc, "画像ファイルを読み込めませんでした。");
   }
 
   // Open a single fd and fstat/read through that same fd: the size check and
@@ -329,7 +355,7 @@ function resolveOneAsset(
   try {
     fd = fs.openSync(realImagePath, "r");
   } catch {
-    return failure("read-failed", originLabel, rawSrc, "画像ファイルを読み込めませんでした。");
+    return failure("read-failed", originLabel, displaySrc, "画像ファイルを読み込めませんでした。");
   }
 
   let bytes: Buffer;
@@ -338,13 +364,13 @@ function resolveOneAsset(
     try {
       stat = fs.fstatSync(fd);
     } catch {
-      return failure("read-failed", originLabel, rawSrc, "画像ファイルを読み込めませんでした。");
+      return failure("read-failed", originLabel, displaySrc, "画像ファイルを読み込めませんでした。");
     }
     if (!statIdentityMatches(identityAnchor, stat)) {
       return failure(
         "read-failed",
         originLabel,
-        rawSrc,
+        displaySrc,
         "画像ファイルの検証中に内容が変化したため中止しました。",
       );
     }
@@ -352,7 +378,7 @@ function resolveOneAsset(
       return failure(
         "not-regular-file",
         originLabel,
-        rawSrc,
+        displaySrc,
         "通常のファイルではない参照は埋め込めません。",
       );
     }
@@ -360,7 +386,7 @@ function resolveOneAsset(
       return failure(
         "image-too-large",
         originLabel,
-        rawSrc,
+        displaySrc,
         "画像のファイルサイズが上限（25MB）を超えています。",
       );
     }
@@ -372,7 +398,7 @@ function resolveOneAsset(
       return fs.readSync(fd, buf, offset, length, position);
     }, stat.size);
     if (read === null) {
-      return failure("read-failed", originLabel, rawSrc, "画像ファイルを読み込めませんでした。");
+      return failure("read-failed", originLabel, displaySrc, "画像ファイルを読み込めませんでした。");
     }
     bytes = read;
   } finally {
@@ -388,7 +414,7 @@ function resolveOneAsset(
     return failure(
       "unsupported-image-format",
       originLabel,
-      rawSrc,
+      displaySrc,
       "対応していない画像形式です（PNG / JPEG / WebP / GIF のみ埋め込めます）。",
     );
   }
@@ -398,7 +424,7 @@ function resolveOneAsset(
     return failure(
       "unsupported-image-format",
       originLabel,
-      rawSrc,
+      displaySrc,
       "画像ヘッダを解析できませんでした（PNG / JPEG / WebP / GIF のみ埋め込めます）。",
     );
   }
@@ -406,13 +432,13 @@ function resolveOneAsset(
     return failure(
       "image-pixel-limit-exceeded",
       originLabel,
-      rawSrc,
+      displaySrc,
       "画像の画素数が上限（1億画素）を超えています。",
     );
   }
 
   const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
-  return { ok: true, sha256, bytes, mediaType: sniffed.mediaType, extension: sniffed.extension };
+  return { ok: true, sha256, bytes, mediaType: sniffed.mediaType, extension: sniffed.extension, displayRawSrc: displaySrc };
 }
 
 /**
@@ -457,7 +483,7 @@ export function resolveWebBookAssets(
         const originCtx = resolveOrigin(request.origin);
         largeImageWarnings.push({
           originLabel: originCtx?.originLabel ?? "",
-          rawSrc: sanitizeRawSrcForDisplay(request.rawSrc),
+          rawSrc: resolved.displayRawSrc,
           byteLength: asset.byteLength,
         });
       }

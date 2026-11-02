@@ -8,14 +8,16 @@ import {
 } from './emptyParagraphPreservation'
 import { validateDocumentLinkHref } from './linkHrefSafety'
 import { INLINE_PATTERN_WITH_EMPHASIS_REGEX } from './fallbackEmphasis'
-import { matchNoteAnchorComment, NOTE_ANCHOR_NODE_NAME } from './noteAnchor'
+import { matchNoteAnchorComment, splitLeadingNoteAnchorComment, NOTE_ANCHOR_NODE_NAME } from './noteAnchor'
 import { rescueOrphanDelimiters } from './rescueOrphanDelimiters'
+import { registerEscapedCharMask, unmaskEscapedChars, type EscapedCharEnv } from './escapedStarMask'
 import {
   NYOZE_BLANK_PAGE_NODE_NAME,
   NYOZE_DIRECTIVE_NODE_NAME,
   NYOZE_PAGE_BREAK_NODE_NAME,
   PAGE_BREAK_TOKEN,
   formatBlankPageToken,
+  matchFencedCodeOpen,
   splitDirectiveSegments,
   type DirectiveSegment,
 } from './customBlockDirective'
@@ -37,6 +39,24 @@ import {
 
 const md = MarkdownIt('commonmark', { html: true })
 md.enable('strikethrough')
+// MD-ROUNDTRIP-PATH1: 既定の normalizeLink はリンク先・画像 src の非ASCIIを
+// percent-encodeする。Nyozeは書かれたとおりの文字を持ち、保存でもそのまま書く
+// ため、恒等関数にする。危険schemeの拒否（validateLink）は残す。
+// Nyoze自身の検査（validateDocumentLinkHref / classifyImageSrc）は、
+// 最終的にnodeへ入る値に効く（下の link_open / image）。
+// 付箋・資料のpreviewは別のinstance（noteMarkdownPreview.ts）で変えない。
+md.normalizeLink = (url: string): string => url
+
+/**
+ * リンク先・画像の src が、Markdown の読み込みで受け付けられるか（この instance の
+ * `validateLink(normalizeLink(url))`。危険な scheme を拒む）。CLIPBOARD-INTERNAL-PASTE3: clipboard の
+ * 経路で画像を作るときも、同じ検査を使う（scheme の一覧を別に書かない）。
+ */
+export function isMarkdownLinkDestinationAllowed(url: string): boolean {
+  return md.validateLink(md.normalizeLink(url))
+}
+// MD-ROUNDTRIP-ESCAPE1: ファイルの `\*` を Nyoze の救済の正規表現に区切りとして見せない。
+registerEscapedCharMask(md)
 
 type MarkAttrs = Record<string, unknown>
 
@@ -212,8 +232,9 @@ function buildDirectiveNodes(
 }
 
 function parseCommonmarkMarkdown(schema: Schema, markdown: string, options?: ParseMarkdownOptions): PMNode {
-  const tokens = md.parse(markdown, {})
-  const builder = new DocBuilder(schema, markdown, options)
+  const env: EscapedCharEnv = { source: markdown }
+  const tokens = md.parse(markdown, env)
+  const builder = new DocBuilder(schema, markdown, options, env)
   builder.processTokens(tokens)
   const doc = builder.build()
   if (options?.preserveEmptyParagraphs !== true) {
@@ -226,6 +247,91 @@ function normalizeLineEndings(markdown: string): string {
   return markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
+/**
+ * MD-ROUNDTRIP-INDENT1: 行頭の字下げ幅を CommonMark と同じ数え方で求める。
+ * 行頭の半角スペースとタブだけを数え、タブは次の4の倍数の桁まで進む。
+ * U+3000 の全角スペースを含むそれ以外の文字が来たら数えるのをやめる。
+ */
+function measureLeadingIndentWidth(line: string): number {
+  let column = 0
+  for (const char of line) {
+    if (char === ' ') column += 1
+    else if (char === '\t') column += 4 - (column % 4)
+    else break
+  }
+  return column
+}
+
+/**
+ * MD-ROUNDTRIP-CHUNK1: 引用でない構造の行から始まる chunk の読み方を決める。
+ * R1（`<` で始まる行・`|` で始まる行の後ろの行も行ごとに読む）。
+ *
+ * - 先頭の1行だけを parse して最初の block の種類を決める。
+ * - `html_block`・`bullet_list`・`ordered_list` のときだけ、その block の範囲
+ *  （token の `map`）までを chunk にし、`appendCommonmarkChunk` で読む。
+ *   範囲が要る場合だけ窓（parse する行数）を倍にしながら parse し、最初の
+ *   block の `map[1]` が窓の終わりより前に来たら（次の行まで見て終わりが
+ *   決まったら）その値を使う。窓が chunk の終わりに達したらそこまでとする。
+ *   各 head が1行以上消費し、窓の cost は消費行数の定数倍に償却されるので、
+ *   空行のない原稿でも2乗に増えない。
+ * - `map` がない・範囲がおかしい（先頭の行より前・chunk の外）ときは、
+ *   従来どおり chunk 全体へ倒す（fail-closed）。
+ * - 先頭が `hr`（`- - -` など）のときはその1行だけを chunk にする。後ろの行を
+ *   含めると setext の見出しに読まれ得る（`map` の範囲と同じ）。
+ * - 表の各行: `|` で始まる行が続けば1つの chunk に保つ（書き出しで表として
+ *   扱うため）。単独の `|` 行＋非 `|` 行は1行に切る。
+ * - 段落・setext の見出しなど（表の連続を除く）の先頭の1行は、
+ *   `parseObsidianPlainLine` で読む（行頭・行末の空白を保つ。R1）。
+ *   後ろの行を CommonMark の段落の続き・setext の見出し・indented code
+ *   として読まない。
+ * - `<div>` などの次の空行まで続く HTML block（X1）は chunk 全体のまま。
+ */
+function resolveNonQuoteStructuralChunk(
+  lines: string[],
+  index: number,
+): { next: number; plain: boolean } {
+  let end = index + 1
+  while (end < lines.length && lines[end] !== '') {
+    end++
+  }
+  const total = end - index
+  let window = 1
+  for (;;) {
+    const tokens = md.parse(lines.slice(index, index + window).join('\n'), {})
+    const first = tokens[0]
+    const map = first?.map
+    if (!Array.isArray(map) || map[0] !== 0 || map[1] <= 0 || map[1] > window) {
+      return { next: end, plain: false }
+    }
+    if (
+      first.type === 'html_block' ||
+      first.type === 'bullet_list_open' ||
+      first.type === 'ordered_list_open'
+    ) {
+      if (map[1] < window) return { next: index + map[1], plain: false }
+      if (window >= total) return { next: end, plain: false }
+      window = Math.min(window * 2, total)
+      continue
+    }
+    if (first.type === 'hr') return { next: index + 1, plain: false }
+    // 表の各行: `|` で始まる行が続けば1つの chunk に保つ。1行ずつに切ると
+    // 段落が割れて表が壊れる（単独の `|` 行＋非 `|` 行は1行に切る）。
+    if (isTableLikeLine(lines[index] ?? '') && isTableLikeLine(lines[index + 1] ?? '')) {
+      let run = index + 1
+      while (run < end && isTableLikeLine(lines[run] ?? '')) {
+        run++
+      }
+      return { next: run, plain: false }
+    }
+    return { next: index + 1, plain: true }
+  }
+}
+
+/** `isStructuralLine` の `|` 行の判定と同じ（GFM の表の行・区切り行）。 */
+function isTableLikeLine(line: string): boolean {
+  return /^\|.*\|$/.test(line.trimStart())
+}
+
 function parseObsidianParagraphMarkdown(schema: Schema, markdown: string, options?: ParseMarkdownOptions): PMNode {
   const lines = markdown.split('\n')
   const children: PMNode[] = []
@@ -235,6 +341,15 @@ function parseObsidianParagraphMarkdown(schema: Schema, markdown: string, option
 
     if (line.length === 0) {
       children.push(createParagraphNode(schema, ''))
+      index++
+      continue
+    }
+
+    // MD-ROUNDTRIP-INDENT1: 幅4以上の字下げの行は chunk の先頭で通常段落として読む。
+    // R1（行頭空白は保持する）に従い、indented code block として読まない。
+    // `  ## 見出し` と同じく parseObsidianPlainLine へ1行ずつ渡す。
+    if (measureLeadingIndentWidth(line) >= 4) {
+      children.push(parseObsidianPlainLine(schema, line, options))
       index++
       continue
     }
@@ -264,9 +379,18 @@ function parseObsidianParagraphMarkdown(schema: Schema, markdown: string, option
           next++
         }
       } else {
-        while (next < lines.length && lines[next] !== '') {
-          next++
+        // MD-ROUNDTRIP-CHUNK1: html_block・リスト・hr・表の連続は block の範囲
+        // だけを chunk にして CommonMark で読み、段落系の先頭の1行は
+        // parseObsidianPlainLine で読む（行頭・行末の空白を保つ）。
+        // 後ろの行は行の loop へ戻す。
+        const resolved = resolveNonQuoteStructuralChunk(lines, index)
+        if (resolved.plain) {
+          children.push(parseObsidianPlainLine(schema, lines[index] ?? '', options))
+        } else {
+          appendCommonmarkChunk(schema, lines.slice(index, resolved.next).join('\n'), children, options)
         }
+        index = resolved.next
+        continue
       }
       appendCommonmarkChunk(schema, lines.slice(index, next).join('\n'), children, options)
       index = next
@@ -352,7 +476,9 @@ function parseObsidianPlainLine(schema: Schema, line: string, options?: ParseMar
         content.push(schema.text(markerPadding))
       }
       heading.forEach((child) => content.push(child))
-      if (trailing.length > 0) {
+      // A5: 空の見出し (marker padding も本文も無い) に trailing 空白を足さない。
+      // 足すと heading[hardBreak] になり、直後の本文との間に空行が挿入される。
+      if (trailing.length > 0 && content.length > 0) {
         content.push(schema.text(trailing))
       }
       return headingType.create(heading.attrs, content)
@@ -410,9 +536,11 @@ function isStructuralLine(line: string): boolean {
   if (/^>/.test(trimmed)) return true
   if (/^(?:[-+*]|\d+[.)])\s+/.test(trimmed)) return true
   if (isThematicBreakLine(trimmed)) return true
-  if (/^\|.*\|$/.test(trimmed)) return true
+  if (isTableLikeLine(line)) return true
   if (/^<[^>]+>/.test(trimmed)) return true
-  if (/^(?: {4}|\t)/.test(line)) return true
+  // MD-ROUNDTRIP-INDENT1: 行頭の字下げ（半角4スペース・タブ）は構造の印にしない。
+  // 幅4以上の字下げの行は loop の先頭で通常段落として処理済みのため、
+  // ここに `/^(?: {4}|\t)/` の判定を残さない（意味が二重になる）。
   return false
 }
 
@@ -425,7 +553,7 @@ function isThematicBreakLine(line: string): boolean {
 }
 
 function isFencedCodeStart(line: string): boolean {
-  return /^ {0,3}(?:`{3,}|~{3,})/.test(line)
+  return matchFencedCodeOpen(line) !== null
 }
 
 function readFencedCodeChunk(
@@ -433,12 +561,11 @@ function readFencedCodeChunk(
   start: number,
 ): { chunk: string; nextLine: number } | null {
   const firstLine = lines[start] ?? ''
-  const match = firstLine.match(/^ {0,3}(`{3,}|~{3,})/)
-  if (!match) return null
+  const open = matchFencedCodeOpen(firstLine)
+  if (!open) return null
 
-  const fenceRun = match[1]
-  const fenceChar = fenceRun[0]
-  const minFenceLength = fenceRun.length
+  const fenceChar = open.fenceChar
+  const minFenceLength = open.fenceLength
   const closeRegex = new RegExp(`^ {0,3}${escapeForRegex(fenceChar)}{${minFenceLength},}\\s*$`)
 
   let end = start + 1
@@ -488,8 +615,11 @@ class DocBuilder {
   private lineStartOffsets: number[]
   private enableRuby: boolean
   private linkStack: Array<{ kind: 'valid' } | { kind: 'invalid'; closeText: string }>
+  /** ESCAPE1 / ESCAPE2: `\*` と `\[` の目印（parse 1回分。text を作るところで戻す）。 */
+  private escapedCharEnv: EscapedCharEnv
 
-  constructor(schema: Schema, source: string, options?: ParseMarkdownOptions) {
+  constructor(schema: Schema, source: string, options?: ParseMarkdownOptions, env?: EscapedCharEnv) {
+    this.escapedCharEnv = env ?? { source }
     this.schema = schema
     this.blockStack = [{ type: 'doc', children: [], marks: [] }]
     this.source = source
@@ -528,7 +658,7 @@ class DocBuilder {
         const leadingWs = this.currentFrame().type === 'doc'
           ? this.extractParagraphLeadingWs(tok)
           : undefined
-        this.openBlock('paragraph', null, leadingWs)
+        this.openBlock('paragraph', null, leadingWs, tok.map ?? null)
         break
       }
       case 'paragraph_close':
@@ -536,35 +666,35 @@ class DocBuilder {
         break
 
       case 'heading_open':
-        this.openBlock('heading', { level: parseInt(tok.tag.slice(1), 10) })
+        this.openBlock('heading', { level: parseInt(tok.tag.slice(1), 10) }, undefined, tok.map ?? null)
         break
       case 'heading_close':
         this.closeBlock()
         break
 
       case 'blockquote_open':
-        this.openBlock('blockquote')
+        this.openBlock('blockquote', null, undefined, tok.map ?? null)
         break
       case 'blockquote_close':
         this.closeBlock()
         break
 
       case 'bullet_list_open':
-        this.openBlock('bulletList')
+        this.openBlock('bulletList', null, undefined, tok.map ?? null)
         break
       case 'bullet_list_close':
         this.closeBlock()
         break
 
       case 'ordered_list_open':
-        this.openBlock('orderedList', { start: tok.attrGet('start') ? Number(tok.attrGet('start')) : 1 })
+        this.openBlock('orderedList', { start: tok.attrGet('start') ? Number(tok.attrGet('start')) : 1 }, undefined, tok.map ?? null)
         break
       case 'ordered_list_close':
         this.closeBlock()
         break
 
       case 'list_item_open':
-        this.openBlock('listItem', { checked: null })
+        this.openBlock('listItem', { checked: null }, undefined, tok.map ?? null)
         break
       case 'list_item_close':
         this.closeBlock()
@@ -686,9 +816,10 @@ class DocBuilder {
           // Serializer reconstructs ![alt](src) or ![alt](src "title") losslessly.
           // alt is derived from children (unescaped) to avoid double-escaped
           // backslashes when the serializer re-escapes `]` / `\` etc.
-          const alt = extractImageAltFromToken(tok)
+          const alt = unmaskEscapedChars(this.escapedCharEnv, extractImageAltFromToken(tok))
           const src = tok.attrGet('src') ?? ''
-          const title = tok.attrGet('title') ?? null
+          const titleRaw = tok.attrGet('title')
+          const title = titleRaw === null ? null : unmaskEscapedChars(this.escapedCharEnv, titleRaw)
           this.addImageNode(src, alt, title)
           break
         }
@@ -715,13 +846,19 @@ class DocBuilder {
     }
   }
 
-  private openBlock(typeName: string, attrs?: Record<string, unknown> | null, leadingWs?: string): void {
+  private openBlock(
+    typeName: string,
+    attrs?: Record<string, unknown> | null,
+    leadingWs?: string,
+    map?: readonly [number, number] | null,
+  ): void {
     this.blockStack.push({
       type: typeName,
       attrs: attrs ?? null,
       children: [],
       marks: [],
       leadingWs,
+      map: map ?? null,
     })
   }
 
@@ -771,8 +908,10 @@ class DocBuilder {
     if (frame.type === 'paragraph' && frame.leadingWs && children.length > 0) {
       children = [this.schema.text(frame.leadingWs), ...children]
     }
-    // Ensure blocks that require content have at least one child
-    if (children.length === 0 && nodeType.spec.content) {
+    // Ensure blocks that require content have at least one child.
+    // 空を許す content (paragraph / heading の inline*) は補完しない (A5)。
+    // 空段落・空見出しは空のまま作り、hardBreak を混入させない。
+    if (children.length === 0 && nodeType.spec.content && frame.type !== 'paragraph' && frame.type !== 'heading') {
       const contentMatch = nodeType.contentMatch
       const defaultChild = contentMatch.defaultType
       if (defaultChild) {
@@ -784,6 +923,13 @@ class DocBuilder {
       const node = this.schema.node(frame.type, frame.attrs ?? null, children)
       this.currentFrame().children.push(node)
     } catch {
+      // A7: 検証に失敗した block は捨てず、3段階で保全する。
+      // (1) リスト項目は先頭が段落でなければ空段落を補って作り直す。
+      if (frame.type === 'listItem' && this.tryCloseListItemWithEmptyParagraph(frame, children)) return
+      // (2) リスト自体が作れないときは子を親へ展開する。
+      if ((frame.type === 'bulletList' || frame.type === 'orderedList') && this.expandFailedList(frame, children)) return
+      // (3) それでも作れないリスト項目は元の行の文字を段落として残す (fail-closed)。
+      if (frame.type === 'listItem' && this.tryCloseAsSourceParagraph(frame)) return
       // If node creation fails (invalid content), wrap as paragraph
       if (frame.type !== 'paragraph') {
         const p = this.schema.node('paragraph', null, children.filter(
@@ -794,9 +940,63 @@ class DocBuilder {
     }
   }
 
+  /**
+   * A7-(1): 先頭が段落でないリスト項目の先頭に空段落を補い、項目として保全する。
+   * content `paragraph block*` への適合が目的で、子の順序・内容は変えない。
+   */
+  private tryCloseListItemWithEmptyParagraph(frame: BlockFrame, children: PMNode[]): boolean {
+    const paragraphType = this.schema.nodes['paragraph']
+    if (!paragraphType) return false
+    try {
+      const node = this.schema.node(
+        frame.type,
+        frame.attrs ?? null,
+        [paragraphType.create(null), ...children],
+      )
+      this.currentFrame().children.push(node)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * A7-(2): リスト自体の検証に失敗したとき、子 (項目由来の段落など) を親へ展開する。
+   * push 自体は検証を伴わないため失敗しない。戻り値は将来の拡張のための予約で、
+   * 常に true を返す。
+   */
+  private expandFailedList(_frame: BlockFrame, children: PMNode[]): boolean {
+    for (const child of children) {
+      this.currentFrame().children.push(child)
+    }
+    return true
+  }
+
+  /**
+   * A7-(3): 最後の手段として、開き token の行範囲の原文を段落として残す。
+   * map が無い (合成 frame) ときは false を返し、呼び出し側の従来処理へ委ねる。
+   */
+  private tryCloseAsSourceParagraph(frame: BlockFrame): boolean {
+    if (frame.map == null) return false
+    const [fromLine, toLine] = frame.map
+    const start = lineToOffset(this.lineStartOffsets, fromLine, this.source.length)
+    const end = lineToOffset(this.lineStartOffsets, toLine, this.source.length)
+    let textContent = this.source.slice(start, end)
+    if (textContent.endsWith('\n')) textContent = textContent.slice(0, -1)
+    try {
+      const paragraphType = this.schema.nodes['paragraph']
+      if (!paragraphType) return false
+      const content = textContent.length > 0 ? [this.schema.text(textContent)] : []
+      this.currentFrame().children.push(paragraphType.create(null, content))
+      return true
+    } catch {
+      return false
+    }
+  }
+
   private addText(text: string, marks: MarkEntry[]): void {
     const pmMarks = this.toPmMarks(marks)
-    const textNode = this.schema.text(text, pmMarks)
+    const textNode = this.schema.text(unmaskEscapedChars(this.escapedCharEnv, text), pmMarks)
     this.currentFrame().children.push(textNode)
   }
 
@@ -937,11 +1137,12 @@ class DocBuilder {
   private addRubyNode(base: string, ruby: string, hasDelimiter: boolean, marks: MarkEntry[]): void {
     const nodeType = this.schema.nodes['aozoraRuby']
     if (!nodeType || !base || !ruby) return
-    const textNode = this.schema.text(base)
+    // ESCAPE1 / ESCAPE2: base・ruby の目印を元の文字へ戻す（失敗時の addText も戻す）。
+    const textNode = this.schema.text(unmaskEscapedChars(this.escapedCharEnv, base))
     const pmMarks = this.toPmMarks(marks)
     try {
       this.currentFrame().children.push(
-        nodeType.create({ ruby, hasDelimiter }, [textNode], pmMarks),
+        nodeType.create({ ruby: unmaskEscapedChars(this.escapedCharEnv, ruby), hasDelimiter }, [textNode], pmMarks),
       )
     } catch {
       // Fallback: keep original text if mark constraints reject this node.
@@ -953,7 +1154,7 @@ class DocBuilder {
   private addTcyNode(body: string, marks: MarkEntry[]): void {
     const nodeType = this.schema.nodes['aozoraTcy']
     if (!nodeType || !body) return
-    const textNode = this.schema.text(body)
+    const textNode = this.schema.text(unmaskEscapedChars(this.escapedCharEnv, body))
     const pmMarks = this.toPmMarks(marks)
     try {
       this.currentFrame().children.push(
@@ -1006,6 +1207,9 @@ class DocBuilder {
   }
 
   private addHtmlBlockAtom(tok: Token): void {
+    // A1: 行頭が付箋アンカーの html_block は段落として読む。
+    // markdown-it の type-2 ブロックは `-->` のある行で終わるため、対象は常に1行。
+    if (this.tryAddNoteAnchorParagraph(tok)) return
     const nodeType = this.schema.nodes['html_block_atom']
     if (!nodeType) return
     const raw = this.extractRawByLineMap(tok)
@@ -1014,7 +1218,31 @@ class DocBuilder {
     )
   }
 
+  private tryAddNoteAnchorParagraph(tok: Token): boolean {
+    if (!tok.map || tok.map[1] - tok.map[0] !== 1) return false
+    const lineText = tok.content.endsWith('\n') ? tok.content.slice(0, -1) : tok.content
+    if (splitLeadingNoteAnchorComment(lineText) === null) return false
+    this.openBlock('paragraph')
+    // 行全体を inline として読み直す。行頭のアンカーは既存 html_inline 経路で
+    // noteAnchor になり、行途中の扱いと一致する。
+    const inlineTokens = md.parseInline(lineText, this.escapedCharEnv)
+    const inline = inlineTokens[0]
+    if (inline?.children) {
+      this.processInlineTokens(inline.children)
+    }
+    this.closeBlock()
+    return true
+  }
+
   private extractRawByLineMap(tok: Token): string {
+    // A6: 容器の中 (blockquote / list item 等) では markdown-it が接頭辞を除いた
+    // tok.content を使う。行 map の slice は `> ` 等を含むため二重化する。
+    // content の末尾改行は除く (容器内の結合で空行が挿入されてしまうため)。
+    // top-level は従来どおり行 map の slice (原文の verbatim 保持)。
+    if (tok.level > 0) {
+      const content = tok.content
+      return content.endsWith('\n') ? content.slice(0, -1) : content
+    }
     if (!tok.map || tok.map.length < 2) {
       return tok.content
     }
@@ -1032,6 +1260,8 @@ interface BlockFrame {
   marks: MarkEntry[]
   /** Leading whitespace to prepend to paragraph inline content (commonmark-strict only) */
   leadingWs?: string
+  /** Source line range of the block open token (fail-closed source fallback only) */
+  map?: readonly [number, number] | null
 }
 
 function buildLineStartOffsets(source: string): number[] {

@@ -46,41 +46,29 @@ export function resolveVisualFocusActiveTextblockRange(
   return null
 }
 
-function hasCodeBlockAncestor(doc: PmNode, pos: number): boolean {
-  const $p = doc.resolve(Math.min(pos + 1, doc.content.size))
-  for (let ad = $p.depth; ad > 0; ad -= 1) {
-    if ($p.node(ad).type.name === 'codeBlock') {
-      return true
-    }
-  }
-  return false
-}
+const dimCache = new WeakMap<PmNode, readonly Decoration[]>()
 
 /** Dim decorations for every textblock except the active one; skips blocks under codeBlock. */
 export function collectDimTextblockDecorations(
   doc: PmNode,
   activeRange: VisualFocusActiveTextblockRange,
 ): Decoration[] {
-  const decorations: Decoration[] = []
-  doc.descendants((node, pos) => {
-    if (!node.isTextblock) {
-      return true
-    }
-    if (hasCodeBlockAncestor(doc, pos)) {
-      return true
-    }
-    const from = pos
-    const to = pos + node.nodeSize
-    if (from === activeRange.from && to === activeRange.to) {
-      return true
-    }
-    decorations.push(
-      Decoration.node(from, to, {
+  let decorations = dimCache.get(doc)
+  if (!decorations) {
+    const all: Decoration[] = []
+    doc.descendants((node, pos) => {
+      // Nothing beneath a code block can participate in dimming.
+      if (node.type.name === 'codeBlock') return false
+      if (node.isTextblock) all.push(Decoration.node(pos, pos + node.nodeSize, {
         class: DIM_BLOCK_CLASS,
         'data-visual-focus-dim-block': 'true',
-      }),
-    )
-    return true
-  })
-  return decorations
+      }))
+      return true
+    })
+    decorations = all
+    dimCache.set(doc, decorations)
+  }
+  return decorations.filter(decoration =>
+    decoration.from !== activeRange.from || decoration.to !== activeRange.to,
+  )
 }

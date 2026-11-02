@@ -2,8 +2,6 @@
 export const LOCAL_IME_PERFORMANCE_SPANS = [
   'markdown-serialize',
   'app-derived-ui',
-  'ruby-punctuation',
-  'ruby-decoration-map',
   'auto-tcy',
 ] as const
 

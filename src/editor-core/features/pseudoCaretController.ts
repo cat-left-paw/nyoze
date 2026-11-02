@@ -202,6 +202,14 @@ export function resolvePseudoCaretFinalSource(input: {
   return input.pmFocus && input.pmCollapsedOrComposing ? 'pm' : 'hidden'
 }
 
+/** 表示成功時だけnextを渡す。sourceが消えた後もpreviousを必ず解除できる。 */
+export function updatePseudoCaretNativeHiddenRoot(previous: HTMLElement | null, next: HTMLElement | null): HTMLElement | null {
+  if (previous === next) return next
+  previous?.removeAttribute('data-nyoze-pseudo-caret-native-hidden')
+  next?.setAttribute('data-nyoze-pseudo-caret-native-hidden', 'true')
+  return next
+}
+
 /**
  * Display-only pseudo caret controller. Reads `view.coordsAtPos(selection.head)` once per animation
  * frame and positions a thin line overlay mounted directly under `.editor-surface`. It never
@@ -290,10 +298,7 @@ export function createPseudoCaretController(
   // 消える」ことを防ぎ、pseudo/native の切替を同じ validated state からだけ制御する。
   let nativeHiddenRoot: HTMLElement | null = null
   const setNativeHiddenRoot = (root: HTMLElement | null): void => {
-    if (nativeHiddenRoot === root) return
-    if (nativeHiddenRoot) nativeHiddenRoot.removeAttribute('data-nyoze-pseudo-caret-native-hidden')
-    if (root) root.setAttribute('data-nyoze-pseudo-caret-native-hidden', 'true')
-    nativeHiddenRoot = root
+    nativeHiddenRoot = updatePseudoCaretNativeHiddenRoot(nativeHiddenRoot, root)
   }
 
   const clearNativeSlotCaret = () => {
@@ -479,21 +484,25 @@ export function createPseudoCaretController(
     // 空 local paragraph だけ、DOM caret rect が存在しないので
     // ProseMirror 自身の trailing `<br>` の実 rect を使う。固定座標や隣接 paragraph の
     // geometry へは絶対に fallback しない。
-    const identity = resolveLocalImeLocalWindowPseudoCaretGeometrySourceIdentity(source)
+    const identity = source.kind === 'input-surface'
+      ? (source.focusRoot.isConnected && source.focusRoot.ownerDocument.hasFocus() &&
+        source.focusRoot.ownerDocument.activeElement === source.focusRoot ? source : null)
+      : resolveLocalImeLocalWindowPseudoCaretGeometrySourceIdentity(source)
     if (!identity) return null
-    const emptyCaretAnchor = identity.emptyCaretAnchor
+    const emptyCaretAnchor = 'emptyCaretAnchor' in identity ? identity.emptyCaretAnchor : null
     const focusRoot = identity.focusRoot
     const writingMode = identity.writingMode
     const generation = identity.generation
     const documentIdentity = identity.documentIdentity
-    const composingNow = source.mode === 'composing'
+    const composingNow = source.kind === 'input-surface' ? source.composing : source.mode === 'composing'
     const orientation = resolvePseudoCaretOrientation(writingMode)
     // host branchと同じwrap-boundary affinity選択（同一controller instanceが
     // 保持するwrapAffinity / pointer intentを共有する）をLocal Windowの
     // focusRootにも再利用する。第二のshape計算は作らない。
-    const coords =
-      resolveDomCaretViewportRect(focusRoot, composingNow, orientation) ??
-      resolveEmptyCaretAnchorViewportRect(emptyCaretAnchor)
+    const coords = source.kind === 'input-surface' && source.geometry === 'owner-caret'
+      ? source.caretRect()
+      : resolveDomCaretViewportRect(focusRoot, composingNow, orientation) ??
+        resolveEmptyCaretAnchorViewportRect(emptyCaretAnchor)
     if (!coords) return null
     const rootRect = surfaceResolved.getBoundingClientRect()
     const shape = buildPseudoCaretShape({
@@ -564,6 +573,11 @@ export function createPseudoCaretController(
         hideWithNativeSlotCaret()
         return
       }
+      // PIS's pending empty receiver shares this read phase. The callback is
+      // consumed synchronously; Local Window's geometry/flush contract is unchanged.
+      const applySurfacePlacement = externalSource.kind === 'input-surface'
+        ? externalSource.preparePendingEmptyPlacement?.() : null
+      applySurfacePlacement?.()
       applyExternalPlan(plan, externalSource)
       return
     }
@@ -573,6 +587,7 @@ export function createPseudoCaretController(
       return
     }
     const state = view.state
+    clearNativeSlotCaret()
     const composingNow = options.getIsComposing() || view.composing
     // Non-collapsed selection → hide, except while composing (the caret should keep following head).
     if (!state.selection.empty && !composingNow) {

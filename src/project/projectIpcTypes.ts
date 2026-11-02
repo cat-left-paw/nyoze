@@ -316,6 +316,34 @@ export type ProjectWriteNotesResult =
     }
 
 /**
+ * `project:reconcileTrackedNotes` の結果（STICKY-NOTE-LIFECYCLE1）。
+ *
+ * 追跡中の付箋の status を、保存した本文の anchor の有無へ合わせる read-modify-write。
+ * renderer は id / 相対 file / action（delete | reopen）/ 必要なら fingerprint と期待する
+ * project root を渡すだけで、project root は main が document path から再解決する。
+ * 再証明できない entry は書かず `skipped` へ返す（他の entry は書く）。
+ */
+export type ProjectReconcileTrackedNotesResult =
+  | {
+      ok: true
+      deletedIds: string[]
+      reopenedIds: string[]
+      skipped: { id: string; reason: 'missing' | 'file-mismatch' | 'status-mismatch' | 'fingerprint-mismatch' }[]
+    }
+  | {
+      ok: false
+      reason:
+        | 'invalid-path'
+        | 'not-in-project'
+        | 'invalid-request'
+        | 'project-mismatch'
+        | 'invalid'
+        | 'read-failed'
+        | 'existing-invalid'
+        | 'write-failed'
+    }
+
+/**
  * `project:discardProvisionalNotes` の結果。
  *
  * STICKY-NOTE-DISCARD-CONSISTENCY1: 未保存 anchor に対応する provisional note を、

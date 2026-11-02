@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { closeInputSurfaceContextMenu } from '../../editor-core/features/inputSurface/focusOwner'
+import { isInputSurfacePathActive } from '../../editor-core/features/inputSurface/inputSurfaceGate'
 import type { RefObject } from 'react'
 import type { CommandAvailability, EditorCoreHandle, SelectionRange } from '../../editor-core/types'
 import { resolveNoteAnchorIdAtTarget } from '../../editor-core/features/noteAnchorProtection'
@@ -114,7 +116,8 @@ export function useEditorContextMenu(
 
   const close = useCallback(() => {
     setMenu((prev) => (prev.visible ? { ...prev, visible: false } : prev))
-  }, [])
+    closeInputSurfaceContextMenu(editorDivRef.current, menuRef.current)
+  }, [editorDivRef])
 
   const handleContextMenu = useCallback(
     (e: MouseEvent) => {
@@ -245,13 +248,16 @@ export function useEditorContextMenu(
     const onResize = () => close()
 
     document.addEventListener('keydown', onKeyDown, true)
-    document.addEventListener('mousedown', onMouseDown, true)
+    // ONではclickの明示closeで戻す。mousedown中に戻すとbrowser defaultの
+    // focus更新が直後に上書きする。OFFは既存のmousedown経路を維持する。
+    const outsideCloseEvent = isInputSurfacePathActive() ? 'click' : 'mousedown'
+    document.addEventListener(outsideCloseEvent, onMouseDown, true)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onResize)
 
     return () => {
       document.removeEventListener('keydown', onKeyDown, true)
-      document.removeEventListener('mousedown', onMouseDown, true)
+      document.removeEventListener(outsideCloseEvent, onMouseDown, true)
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onResize)
     }

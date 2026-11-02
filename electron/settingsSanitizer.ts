@@ -8,7 +8,9 @@
  * This module runs in the main process (Node) and has no renderer deps.
  */
 import { resolveAutoTcyDigitRange } from "../src/editor-core/features/autoTcy";
+import { normalizeHeadingFontScale } from "../src/settings/headingFontScale";
 import { normalizeParagraphPlainBehavior } from "../src/settings/paragraphPlainBehavior";
+import { normalizeExperimentalInputSurfacePreeditDisplay } from "../src/settings/inputSurfacePreeditDisplay";
 import {
   normalizeTypewriterFollowBandRatio,
   normalizeTypewriterModeEnabled,
@@ -186,6 +188,7 @@ type SanitizedDisplaySettings = {
   autoTcyMinDigits: number;
   autoTcyMaxDigits: number;
   headingMarginAfter: number;
+  headingFontScale: number;
   headingDividerLevels: Record<string, boolean>;
   headingAlignHorizontal: HeadingAlignSanitized;
   headingAlignVertical: HeadingAlignSanitized;
@@ -215,6 +218,7 @@ function sanitizeDisplaySettings(v: unknown): SanitizedDisplaySettings {
     autoTcyMinDigits: autoTcyDigitRange.minDigits,
     autoTcyMaxDigits: autoTcyDigitRange.maxDigits,
     headingMarginAfter: clamp(Number(d.headingMarginAfter ?? 0.45), 0, 1.5),
+    headingFontScale: normalizeHeadingFontScale(d.headingFontScale),
     headingDividerLevels: sanitizeHeadingDividerLevels(d.headingDividerLevels),
     headingAlignHorizontal: sanitizeHeadingAlign(
       d.headingAlignHorizontal,
@@ -567,6 +571,14 @@ export function sanitizeSettingsJson(
   // migration cannot fall back to a stale legacy ON value.
   if (Object.prototype.hasOwnProperty.call(raw, "experimentalLocalImeEnabled")) {
     out.experimentalLocalImeEnabled = raw.experimentalLocalImeEnabled === true;
+  }
+
+  // PIS-S10-PREEDIT-DISPLAY1: 'overlay'のときだけ'overlay'、それ以外の値は'inline'。
+  // 未設定は書かない（rendererが既定の'inline'で読む）。
+  if (Object.prototype.hasOwnProperty.call(raw, "experimentalInputSurfacePreeditDisplay")) {
+    out.experimentalInputSurfacePreeditDisplay = normalizeExperimentalInputSurfacePreeditDisplay(
+      raw.experimentalInputSurfacePreeditDisplay,
+    );
   }
 
   // 付箋 (Task 3A-3): 初回説明の確認済みフラグ。boolean のみ受け付ける。

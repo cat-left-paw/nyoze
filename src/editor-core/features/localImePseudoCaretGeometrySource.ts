@@ -1,6 +1,7 @@
 import { TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { resolveSupportedEditorWritingMode } from './writingModeNavigationMapping'
+import type { InputSurfacePseudoCaretGeometrySource } from './inputSurface/pseudoCaretSource'
 
 /**
  * Local Window がpseudo caretのsourceとして有効なmodeだけ。
@@ -33,6 +34,7 @@ export type LocalImeLocalWindowPseudoCaretGeometrySource = {
 
 export type LocalImePseudoCaretGeometrySource =
   LocalImeLocalWindowPseudoCaretGeometrySource
+  | InputSurfacePseudoCaretGeometrySource
 
 export function isLocalImeLocalWindowPseudoCaretGeometrySource(
   source: LocalImePseudoCaretGeometrySource,
@@ -44,14 +46,22 @@ export function isLocalImeLocalWindowPseudoCaretGeometrySource(
 export function resolveLocalImePseudoCaretGeometrySourceFocusRoot(
   source: LocalImePseudoCaretGeometrySource,
 ): HTMLElement {
-  return source.localRoot
+  return source.kind === 'input-surface' ? source.focusRoot : source.localRoot
 }
 
 /** Local Windowがliveのときだけ既存pseudo caretへ表示sourceを渡す。 */
 export function selectLocalImePseudoCaretExternalGeometrySource(input: {
   localWindow: LocalImeLocalWindowPseudoCaretGeometrySource | null
+  inputSurface?: InputSurfacePseudoCaretGeometrySource | null
 }): LocalImePseudoCaretGeometrySource | null {
-  return input.localWindow
+  return selectSinglePseudoCaretExternalGeometrySource([input.localWindow, input.inputSurface ?? null])
+}
+
+export function selectSinglePseudoCaretExternalGeometrySource(
+  sources: readonly (LocalImePseudoCaretGeometrySource | null)[],
+): LocalImePseudoCaretGeometrySource | null {
+  const live = sources.filter((source): source is LocalImePseudoCaretGeometrySource => source !== null)
+  return live.length === 1 ? live[0] : null
 }
 
 /** local EditorView を持つ source で共通の DOM / focus identity。selection 方針は含めない。 */

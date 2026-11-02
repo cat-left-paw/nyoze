@@ -15,6 +15,8 @@ Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta �
 
 現在のGitHub LatestとMicrosoft Store版は、いずれも`0.4.0-beta.2`です。
 
+試用版の`0.5.0-alpha.1`は、GitHub Releasesのプレリリースとして公開しています（Microsoft Store版はありません）。前の版へ戻すときの注意は、[RELEASE_NOTES.md](./RELEASE_NOTES.md)を参照してください。
+
 ## macOS
 
 1. GitHub Releases から、自分の環境に合った DMG をダウンロードします。

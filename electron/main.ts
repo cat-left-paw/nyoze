@@ -18,6 +18,7 @@ import {
   realpathExisting,
   resolvePathForCheck,
   isWithinDirectory,
+  isPathInDocumentBoundary,
   resolveActiveDocumentDir,
   resolveImageProtocolPath,
   MAX_IMAGE_FILE_BYTES,
@@ -26,6 +27,7 @@ import {
   coerceSaveBeforeCloseOk,
   type Utf8FileReadErrorKind,
 } from "./ipcSecurity";
+import { reportOpenDocumentPins, collectOpenDocumentPins, type OpenDocumentPinsByWindow } from './openDocumentPins';
 import {
   sanitizeSettingsJson,
   MAX_SETTINGS_FILE_SIZE,
@@ -95,6 +97,7 @@ import {
   resolvePanelContextIpc,
   writeNotesIpc,
   discardProvisionalNotesIpc,
+  reconcileTrackedNotesIpc,
   updateProjectTitleIpc,
   unregisterProjectIpc,
   updateBookManifestV3Ipc,
@@ -173,10 +176,12 @@ import {
   resolveE2eThemeBootstrap,
 } from "./e2eBootstrapTheme";
 import {
-  LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY_CHANNEL,
+  INPUT_STRATEGY_CHANNEL,
+  INPUT_STRATEGY_ENV,
+  INPUT_SURFACE_ENV,
   LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV,
-  resolveLocalImeExperimentalPreviewCapability,
-} from "./localImeExperimentalPreviewGate";
+  resolveInputStrategyCapability,
+} from "./inputStrategyGate";
 import {
   LOCAL_IME_PILOT_AVAILABILITY_CHANNEL,
   LOCAL_IME_PILOT_ENV,
@@ -259,29 +264,25 @@ const LOCAL_IME_PILOT_AVAILABLE = resolveLocalImePilotAvailability({
 if (!LOCAL_IME_PILOT_AVAILABLE) {
   delete process.env[LOCAL_IME_PILOT_ENV];
 }
-
 /**
- * PUBLIC-ENTRY1: Local Window Experimental product **capability**。
+ * PIS-S10-ENTRY1a: 入力の方式の正本。
  *
- * `true` は「設定 UI を出してよい」だけで、有効化ではない。実効有効化は
- * settings.json のstrategy-neutral preference（既定 false）が正本で、platformは
- * main-process Local Window availability authorityだけが決める。通常devでも利用できる。
- * Linux でも capable になり得るが、公式サポート対象ではない。
- * 作者 pilot が available な起動では常に false（pure policy 上の排他）。
- * E2E/test envは製品capabilityにもruntime stateにも使わない。
+ * 製品の入口が選ぶ方式（Persistent Input Surface / 開発用の指定で戻したLocal Window / なし）、
+ * 作者Pilot、開発用の強制ONを、mainがここで1回だけ決める。有効化ではない。実効の方式は
+ * settings.jsonの設定（既定OFF）とrendererのpureな決定関数が決める。
+ * 開発用の指定は非packagedだけで効き、作者Pilotと同時ならPilotを優先する。
+ * preloadはsandbox実行で`app.isPackaged`を判定できないため、効かない指定のenvはここで落とす。
  */
-const LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY =
-  resolveLocalImeExperimentalPreviewCapability({
-    platform: process.platform,
-    isPackaged: app.isPackaged,
-    authorPilotAvailable: LOCAL_IME_PILOT_AVAILABLE,
-    e2eEnabled: MAIN_E2E_ENABLED,
-    testCapabilityFlagValue:
-      process.env[LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV],
-  });
-if (LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY.reason !== "test-launch-boundary") {
-  delete process.env[LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV];
-}
+const INPUT_STRATEGY_CAPABILITY = resolveInputStrategyCapability({
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  pilotFlagValue: process.env[LOCAL_IME_PILOT_ENV],
+  forceFlagValue: process.env[INPUT_SURFACE_ENV],
+  strategyFlagValue: process.env[INPUT_STRATEGY_ENV],
+});
+if (!INPUT_STRATEGY_CAPABILITY.forced) delete process.env[INPUT_SURFACE_ENV];
+if (INPUT_STRATEGY_CAPABILITY.productStrategy !== "local-window") delete process.env[INPUT_STRATEGY_ENV];
+delete process.env[LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV];
 
 /**
  * E2E-UX1b: renderer の初回 paint 前に適用する theme bootstrap。
@@ -674,6 +675,7 @@ let e2eQueuedOpenPathResult: { kind: "file" | "directory"; path: string } | null
 let pendingLibraryCreateParentPath: string | null = null;
 // Realpath-resolved document paths explicitly established via OS dialogs.
 const allowedDocumentPaths = new Set<string>();
+let pinnedOpenDocumentPathsByWindow: OpenDocumentPinsByWindow = new Map();
 
 /** Register a file path as an allowed document path (from dialog result). */
 async function trackDocumentPath(filePath: string): Promise<void> {
@@ -707,15 +709,13 @@ async function checkWorkspacePath(inputPath: string): Promise<string | null> {
 
 /**
  * Resolve a path and verify it is allowed for document read/write.
- * Allowed if within the active workspace root OR in allowedDocumentPaths.
+ * Workspace / explicit dialog permission / verified open-tab pin only.
  */
 async function checkDocumentPath(inputPath: string): Promise<string | null> {
   const real = await resolvePathForCheck(inputPath);
   if (!real) return null;
-  if (activeWorkspaceRoot && isWithinDirectory(real, activeWorkspaceRoot))
-    return real;
-  if (allowedDocumentPaths.has(real)) return real;
-  return null;
+  return isPathInDocumentBoundary(real, activeWorkspaceRoot, allowedDocumentPaths,
+    collectOpenDocumentPins(pinnedOpenDocumentPathsByWindow)) ? real : null;
 }
 
 type WriteFileIpcResult = SaveResult & {
@@ -999,6 +999,13 @@ function createWindow() {
     }
   });
 
+  // A renderer guard cancels Electron's quit too. Retire that attempt so a later
+  // ordinary window close cannot inherit Cmd+Q (also covers Local Window / PIS).
+  currentWindow.webContents.on("will-prevent-unload", () => {
+    const attemptId = currentQuitAttemptId(appQuitIntent);
+    if (attemptId !== null) dispatchAppQuitIntent({ type: "attempt-abandoned", attemptId });
+  });
+
   currentWindow.on("close", (event) => {
     // APP-WINDOW-BOUNDS-RESTORE1: dialog へ入る前に最新の通常 bounds を確保する。
     // disk write は実 close（`closed`）/ quit 境界まで行わないので、ここで
@@ -1134,6 +1141,9 @@ function createWindow() {
   });
 
   currentWindow.on("closed", () => {
+    const remainingPins = new Map(pinnedOpenDocumentPathsByWindow);
+    remainingPins.delete(webContentsId);
+    pinnedOpenDocumentPathsByWindow = remainingPins;
     dirtyStateByWebContentsId.delete(webContentsId);
     forceCloseWindowIds.delete(currentWindow.id);
     dirtyCloseDialogWindowIds.delete(currentWindow.id);
@@ -1576,14 +1586,29 @@ function requestDiscardBeforeClose(
   return requestRendererBeforeClose(targetWindow, "app:requestDiscardBeforeClose");
 }
 
-// SEC-5: Renderer notifies main of the active file path before loading a document.
-// Using ipcRenderer.sendSync so that activeDocumentDir is set before <img> elements
-// trigger nyoze-img:// requests.
-//
-// The renderer-supplied path is treated as a hint — main verifies it against
-// the SEC-1 document boundary (workspace root + explicitly allowed paths) and
-// only accepts existing regular files, so a compromised renderer cannot point
-// activeDocumentDir at an arbitrary directory.
+// WORKSPACE-SWITCH-OPEN-DOCS1: full tab report, verified and replaced synchronously.
+ipcMain.on("document:setOpenDocumentPaths", (event, rawPaths: unknown): void => {
+  // Only editor windows may report tabs (Page Viewer windows cannot mint pins).
+  if (!dirtyStateByWebContentsId.has(event.sender.id) || event.senderFrame !== event.sender.mainFrame) {
+    event.returnValue = null;
+    return;
+  }
+  pinnedOpenDocumentPathsByWindow = reportOpenDocumentPins(
+    pinnedOpenDocumentPathsByWindow, event.sender.id, rawPaths,
+    { workspaceRoot: activeWorkspaceRoot, allowedDocumentPaths },
+    input => {
+      try {
+        const real = fs.realpathSync.native(path.resolve(input));
+        return fs.statSync(real).isFile() ? real : null;
+      } catch { return null; }
+    },
+  );
+  // Acknowledge only after replacing the verified set, before a later library IPC.
+  event.returnValue = null;
+});
+
+// SEC-5: synchronous active-file hint before <img> requests. The document boundary
+// (workspace, explicit permission, verified open-tab pins) is checked in main.
 ipcMain.on("document:setActiveFilePath", (event, rawPath: unknown): void => {
   event.returnValue = null;
   const filePath = typeof rawPath === "string" ? validatePathArg(rawPath) : null;
@@ -1595,7 +1620,8 @@ ipcMain.on("document:setActiveFilePath", (event, rawPath: unknown): void => {
     return;
   }
   activeDocumentDir =
-    resolveActiveDocumentDir(filePath, activeWorkspaceRoot, allowedDocumentPaths) ??
+    resolveActiveDocumentDir(filePath, activeWorkspaceRoot, allowedDocumentPaths,
+      collectOpenDocumentPins(pinnedOpenDocumentPathsByWindow)) ??
     undefined;
   activeDocumentFilePath = filePath;
   updateFileBackupMenuItemEnabled(true);
@@ -2115,7 +2141,8 @@ ipcMain.handle(
 // projectRoot は renderer から受け取らず、main 側で filePath から解決する。
 const projectIpcBoundary: ProjectIpcBoundary = {
   getWorkspaceRoot: () => activeWorkspaceRoot,
-  isAllowedDocumentPath: (realPath) => allowedDocumentPaths.has(realPath),
+  isAllowedDocumentPath: (realPath) => allowedDocumentPaths.has(realPath) ||
+    collectOpenDocumentPins(pinnedOpenDocumentPathsByWindow).has(realPath),
 };
 
 ipcMain.handle("project:resolveForFile", (_event, filePath: unknown) =>
@@ -2204,6 +2231,13 @@ ipcMain.handle(
   "project:discardProvisionalNotes",
   (_event, filePath: unknown, request: unknown) =>
     discardProvisionalNotesIpc(projectIpcBoundary, filePath, request),
+);
+// STICKY-NOTE-LIFECYCLE1: 保存の後に、追跡中の付箋の status を本文の anchor の有無へ合わせる
+// （project 単位 notes lock の中で read → 再証明 → write）。
+ipcMain.handle(
+  "project:reconcileTrackedNotes",
+  (_event, filePath: unknown, request: unknown) =>
+    reconcileTrackedNotesIpc(projectIpcBoundary, filePath, request),
 );
 ipcMain.handle("project:updateTitle", (_event, filePath: unknown, title: unknown) =>
   updateProjectTitleIpc(projectIpcBoundary, filePath, title),
@@ -2349,16 +2383,14 @@ ipcMain.on("e2e:bootstrapTheme", (event) => {
 ipcMain.on(LOCAL_IME_PILOT_AVAILABILITY_CHANNEL, (event) => {
   event.returnValue = LOCAL_IME_PILOT_AVAILABLE;
 });
-
 /**
- * PUBLIC-ENTRY1: Local Window Experimentalのread-only capability。
+ * PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値。
  *
- * 返すのは fixed read-only boolean 1 個だけで、session 操作・本文・path・diagnostics・
- * 任意 payload は載せない。preference は settings.json 側が正本なのでこの channel には現れず、
- * capability だけで自動的に ON にはならない。
+ * 返すのは{@link InputStrategyCapability}の3つの値だけで、session操作・本文・path・診断・
+ * 任意payloadは載せない。設定はsettings.json側が正本なので、このchannelには現れない。
  */
-ipcMain.on(LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY_CHANNEL, (event) => {
-  event.returnValue = LOCAL_IME_EXPERIMENTAL_PREVIEW_CAPABILITY.capable;
+ipcMain.on(INPUT_STRATEGY_CHANNEL, (event) => {
+  event.returnValue = { ...INPUT_STRATEGY_CAPABILITY };
 });
 
 ipcMain.handle(
@@ -3785,7 +3817,9 @@ function buildAppMenuTemplate(
       label: t("menu.window"),
       submenu: [
         { label: t("common.minimize"), role: "minimize" },
-        { label: t("common.close"), role: "close" },
+        // 「閉じる」(role: close, Ctrl+W) は置かない。Ctrl+W はタブではなくウインドウ
+        // （Nyozeは1ウインドウなのでアプリ）を閉じるが、タブを閉じる操作と誤解されやすい
+        // （APP-WINDOWS-CTRL-W1）。閉じる操作は × ボタン / Alt+F4 / 終了に残す。
       ],
     });
   }

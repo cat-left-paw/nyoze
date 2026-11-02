@@ -1,11 +1,5 @@
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import type { EditorView } from '@tiptap/pm/view'
-import {
-  RUBY_PUNCT_BASE_CLASS,
-  RUBY_PUNCT_RUN_WRAPPER_ATTRIBUTE,
-  RUBY_PUNCT_RUN_WRAPPER_CLASS,
-  RUBY_PUNCT_TAIL_CLASS,
-} from '../extensions/rubyPunctuationNowrap'
 
 /**
  * LOCAL-WINDOW-INLINE-CAP1: whitelisted markの`<a>`（link）と`<code>`（inline code）は
@@ -160,10 +154,29 @@ function proveParagraphSpecialInlineDom(
 }
 
 /**
+ * host sentinel の境界 position を、DOM 属性ではなく view から求める（EDITOR-SPECIALINLINE-SENTINEL-PERF1）。
+ * sentinel widget の desc は size 0 なので `posAtDOM(sentinel, 0)` が widget の position を返す。
+ * 求められなければ `undefined`（pair proof が拒否する）。
+ */
+function resolveSentinelBoundaryPosForProof(
+  view: EditorView,
+  element: HTMLElement,
+): string | undefined {
+  if (element.dataset.nyozeSpecialInlineBoundary !== 'after') return undefined
+  try {
+    const pos = view.posAtDOM(element, 0)
+    return Number.isInteger(pos) ? String(pos) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * `contenteditable="false"` と host sentinel を、証明済みspecial-inline DOMだけで説明する。
  * 説明できない1件でもfalse。DOM走査だけを行い、判定は上の pure 述語へ委ねる。
  */
 function areConditionalElementsExplained(
+  view: EditorView,
   dom: HTMLElement,
   proof: SpecialInlineDomProof,
 ): boolean {
@@ -177,7 +190,7 @@ function areConditionalElementsExplained(
         ),
         sentinelBoundary: element.dataset.nyozeSpecialInlineBoundary,
         sentinelNodeName: element.dataset.nyozeSpecialInlineNode,
-        sentinelBoundaryPos: element.dataset.nyozeSpecialInlineBoundaryPos,
+        sentinelBoundaryPos: resolveSentinelBoundaryPosForProof(view, element),
         contentEditable: element.getAttribute('contenteditable'),
       },
       proof.sentinelPairs,
@@ -188,148 +201,14 @@ function areConditionalElementsExplained(
 }
 
 /**
- * LOCAL-WINDOW-RUBY-PUNCT-NOWRAP1: `RubyPunctuationNowrap` の run wrapper は表示専用で、
- * host PM の focus / decoration 更新のたびに **同じ子要素のまま span だけが貼り替わる**。
- * この境界を paragraph child identity の正本に含めると、Ruby ＋ 対象約物を含む
- * window で Local Window の base proof が Start 直後に stale になり、dirty commit が
- * recovery へ落ちる（本スライス以前から再現する既存不具合）。
+ * paragraph の child identity 列（capture と validate が同じ関数を使う）。
  *
- * そこで **exact な run wrapper 1 種類だけ** を 1 段だけ展開し、中身（text node /
- * Ruby wrapper / sentinel / tail span）は従来どおり exact identity で並べて比較する。
- * wrapper 以外の未知 DOM は展開しないので、「wrapper があるから未知 DOM を許す」には
- * ならない。special-inline / sentinel の proof（`proveParagraphSpecialInlineDom` /
- * `areConditionalElementsExplained`）は生 DOM のまま一切変更していない。
+ * EDITOR-RUBY-INLINE1: ルビの直後の約物の表示専用 wrapper（旧 `RubyPunctuationNowrap`）は撤去したので、
+ * 1 段展開する wrapper はない。paragraph の生の child をそのまま exact identity で比べる
+ * （許す DOM の形は減るだけで、未知の要素を許す変更はしていない）。
  */
-/** display-only wrapper の直下 child を、DOM を持ち込まずに記述する。 */
-export type LocalImeLocalWindowDisplayWrapperChild = {
-  readonly isElement: boolean
-  readonly tagName: string | null
-  /** `data-nyoze-ruby-punct`（`base` / `tail`）。名乗っていなければ `null`。 */
-  readonly punctRole: string | null
-  /** `data-aozora-ruby="1"` を持つ実 Ruby wrapper か。 */
-  readonly isRubyBaseElement: boolean
-  readonly classes: readonly string[]
-  /** special-inline sentinel の dataset を 1 つでも持つか（混合 role 検出用）。 */
-  readonly carriesSentinelAttributes: boolean
-  /** 入れ子 run wrapper か。 */
-  readonly isRunWrapper: boolean
-}
-
-export type LocalImeLocalWindowDisplayWrapperCandidate = {
-  readonly tagName: string
-  /** 要素が持つ属性名の**全件**。production wrapper は `class` と識別属性の 2 件だけ。 */
-  readonly attributeNames: readonly string[]
-  /** `data-nyoze-ruby-punct-run` の値。未設定は `null`。 */
-  readonly wrapperAttributeValue: string | null
-  readonly classes: readonly string[]
-  readonly children: readonly LocalImeLocalWindowDisplayWrapperChild[]
-}
-
-/**
- * display-only wrapper と認めてよい **唯一** の形（pure 判定）。
- *
- * production の `wrapRun()` が作る wrapper は
- * `<span class="tategaki-ruby-punct-run" data-nyoze-ruby-punct-run="1">` で、
- * それ以外の属性（`contenteditable` / `style` / `id` / sentinel dataset 等）も
- * 追加 class も持たない。ここでは
- *
- * 1. tag が `SPAN`
- * 2. 識別属性が **exact に `"1"`**
- * 3. class が `tategaki-ruby-punct-run` **のみ**
- * 4. 属性集合が `class` と識別属性の **2 件ちょうど**（未知属性・混合 role を拒否）
- * 5. 実 Ruby base（`data-aozora-ruby="1"` ＋ `data-nyoze-ruby-punct="base"` ＋
- *    `tategaki-ruby-punct-base`）から tail（`data-nyoze-ruby-punct="tail"` ＋
- *    `tategaki-ruby-punct-tail`）までの正規 run 構造
- * 6. 中間 child が role を名乗らない・入れ子 wrapper でない
- *
- * をすべて満たすときだけ true を返す。1 つでも欠ければ未知 DOM として
- * 従来どおり exact identity 比較の対象に残す（fail-closed）。
- * 中間 child の種別は限定しない（`img.ProseMirror-separator` や host sentinel が
- * 入り得るため）が、identity 比較からは外さないので検出力は落ちない。
- */
-export function isLocalImeLocalWindowDisplayNeutralWrapper(
-  candidate: LocalImeLocalWindowDisplayWrapperCandidate,
-): boolean {
-  if (candidate.tagName !== 'SPAN') return false
-  if (candidate.wrapperAttributeValue !== '1') return false
-  if (candidate.classes.length !== 1) return false
-  if (candidate.classes[0] !== RUBY_PUNCT_RUN_WRAPPER_CLASS) return false
-  const attributeNames = new Set(candidate.attributeNames)
-  if (attributeNames.size !== 2) return false
-  if (!attributeNames.has('class')) return false
-  if (!attributeNames.has(RUBY_PUNCT_RUN_WRAPPER_ATTRIBUTE)) return false
-
-  const children = candidate.children
-  if (children.length < 2) return false
-  const base = children[0]
-  const tail = children[children.length - 1]
-  if (!base || !tail) return false
-  if (
-    !base.isElement || base.tagName !== 'SPAN' || !base.isRubyBaseElement ||
-    base.punctRole !== 'base' || !base.classes.includes(RUBY_PUNCT_BASE_CLASS) ||
-    base.carriesSentinelAttributes || base.isRunWrapper
-  ) return false
-  if (
-    !tail.isElement || tail.tagName !== 'SPAN' || tail.punctRole !== 'tail' ||
-    !tail.classes.includes(RUBY_PUNCT_TAIL_CLASS) ||
-    tail.carriesSentinelAttributes || tail.isRunWrapper
-  ) return false
-  for (let index = 1; index < children.length - 1; index += 1) {
-    const middle = children[index]!
-    if (middle.punctRole !== null || middle.isRunWrapper) return false
-  }
-  return true
-}
-
-function describeDisplayWrapperChild(
-  node: Node,
-): LocalImeLocalWindowDisplayWrapperChild {
-  if (!(node instanceof HTMLElement)) {
-    return {
-      isElement: false, tagName: null, punctRole: null, isRubyBaseElement: false,
-      classes: [], carriesSentinelAttributes: false, isRunWrapper: false,
-    }
-  }
-  return {
-    isElement: true,
-    tagName: node.tagName,
-    punctRole: node.dataset.nyozeRubyPunct ?? null,
-    isRubyBaseElement: node.dataset.aozoraRuby === '1',
-    classes: Array.from(node.classList),
-    carriesSentinelAttributes: carriesSentinelAttributes({
-      sentinelBoundary: node.dataset.nyozeSpecialInlineBoundary,
-      sentinelNodeName: node.dataset.nyozeSpecialInlineNode,
-      sentinelBoundaryPos: node.dataset.nyozeSpecialInlineBoundaryPos,
-    }),
-    isRunWrapper: node.hasAttribute(RUBY_PUNCT_RUN_WRAPPER_ATTRIBUTE),
-  }
-}
-
-function isRubyPunctuationRunWrapper(node: Node): node is HTMLElement {
-  if (!(node instanceof HTMLElement)) return false
-  return isLocalImeLocalWindowDisplayNeutralWrapper({
-    tagName: node.tagName,
-    attributeNames: node.getAttributeNames(),
-    wrapperAttributeValue: node.getAttribute(RUBY_PUNCT_RUN_WRAPPER_ATTRIBUTE),
-    classes: Array.from(node.classList),
-    children: Array.from(node.childNodes).map(describeDisplayWrapperChild),
-  })
-}
-
-/** 表示専用 wrapper 境界を除いた、identity 比較用の child node 列。 */
-export function collectLocalImeLocalWindowDisplayNeutralChildren(
-  dom: HTMLElement,
-): Node[] {
-  const children: Node[] = []
-  for (const child of Array.from(dom.childNodes)) {
-    if (isRubyPunctuationRunWrapper(child)) {
-      // 1 段だけ展開する。入れ子 wrapper は production では作られないので追わない。
-      for (const inner of Array.from(child.childNodes)) children.push(inner)
-      continue
-    }
-    children.push(child)
-  }
-  return children
+function collectLocalImeLocalWindowParagraphChildren(dom: HTMLElement): Node[] {
+  return Array.from(dom.childNodes)
 }
 
 export type LocalImeLocalWindowDomProof = {
@@ -378,7 +257,7 @@ export function captureLocalImeLocalWindowDomProof(input: {
       input.blockPositions[index],
       candidate,
     )
-    if (!specialInline || !areConditionalElementsExplained(candidate, specialInline)) {
+    if (!specialInline || !areConditionalElementsExplained(view, candidate, specialInline)) {
       return { ok: false, reason: 'paragraph-shape' }
     }
     doms.push(candidate)
@@ -390,7 +269,7 @@ export function captureLocalImeLocalWindowDomProof(input: {
       editorSurface,
       paragraphDoms: doms,
       paragraphChildren: doms.map(
-        (dom) => collectLocalImeLocalWindowDisplayNeutralChildren(dom),
+        (dom) => collectLocalImeLocalWindowParagraphChildren(dom),
       ),
       blockPositions: input.blockPositions,
     },
@@ -417,7 +296,7 @@ export function validateLocalImeLocalWindowDomProof(input: {
     let current: Node | null = null
     try { current = view.nodeDOM(proof.blockPositions[index]) } catch { return false }
     if (current !== proof.paragraphDoms[index] || current.parentNode !== view.dom) return false
-    const children = collectLocalImeLocalWindowDisplayNeutralChildren(
+    const children = collectLocalImeLocalWindowParagraphChildren(
       proof.paragraphDoms[index],
     )
     if (

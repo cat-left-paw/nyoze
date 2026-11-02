@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
+import { getInputSurfaceFocusPort, isInputSurfaceFocusOwner } from '../../editor-core/features/inputSurface/focusOwner'
 import type { RefObject } from 'react'
 
 /**
@@ -58,6 +59,9 @@ export function useFocusTrap(
 
     const updateLastFocused = (target: EventTarget | null): void => {
       if (target instanceof HTMLElement) {
+        // React autoFocusはlayout effectのcleanupより先に発火することがある。
+        // 入力面から開くmodalでは、trap内のinputを復帰先へ上書きしない。
+        if (isInputSurfaceFocusOwner(lastFocusedWhileDisabledRef.current) && containerRef.current?.contains(target)) return
         lastFocusedWhileDisabledRef.current = target
       }
     }
@@ -65,14 +69,16 @@ export function useFocusTrap(
     updateLastFocused(document.activeElement)
 
     function onFocusIn(event: FocusEvent): void {
-      updateLastFocused(event.target)
+      // 同期安全網がnested focusinで入力面へ戻した後、外側のHost eventが続く。
+      // その古いtargetで実際のopenerを上書きしない。
+      updateLastFocused(isInputSurfaceFocusOwner(document.activeElement) ? document.activeElement : event.target)
     }
 
     document.addEventListener('focusin', onFocusIn)
     return () => {
       document.removeEventListener('focusin', onFocusIn)
     }
-  }, [enabled])
+  }, [containerRef, enabled])
 
   useLayoutEffect(() => {
     if (!enabled) return
@@ -131,7 +137,9 @@ export function useFocusTrap(
       container?.removeEventListener('keydown', onKeyDown)
       const prev = previousFocusRef.current
       if (prev?.isConnected) {
-        prev.focus()
+        const port = isInputSurfaceFocusOwner(prev) ? getInputSurfaceFocusPort(prev) : null
+        if (port?.isEligible()) port.focus()
+        else prev.focus()
       }
     }
   }, [containerRef, enabled])

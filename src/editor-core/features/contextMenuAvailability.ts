@@ -8,6 +8,7 @@ import {
 import { resolveSelectedTcyRanges } from './tcyFormatting'
 import { isPageBreakNodeSelected, resolveCurrentDirectiveDescriptor } from '../commands/customBlockDirectiveCommands'
 import { formatDirectiveToken } from '../io/customBlockDirective'
+import { hasDocumentText } from './documentTextPresence'
 
 type ActiveMarksSnapshot = {
   isBold: boolean
@@ -121,7 +122,7 @@ export function buildCommandAvailability({
     canCopy: hasSelection && !composing,
     canCut: hasSelection && !composing && !blockNoteAnchorEdits,
     canPaste: !composing,
-    canSelectAll: !composing && state.doc.textContent.length > 0,
+    canSelectAll: !composing && hasDocumentText(state.doc),
     canMoveListUp: canMoveListUp,
     canMoveListDown: canMoveListDown,
     isHeading: resolveHeadingState(state),

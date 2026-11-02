@@ -21,7 +21,7 @@ export function createEditorLifecycleCallbacks({
   pushLog,
 }: CreateEditorLifecycleCallbacksOptions): {
   onSelectionUpdate: (payload: SelectionUpdatePayload) => void
-  onUpdate: () => void
+  onUpdate: (docChanged?: boolean) => void
 } {
   function onSelectionUpdate({ editor }: SelectionUpdatePayload): void {
     const { from, to, empty } = editor.state.selection
@@ -32,9 +32,9 @@ export function createEditorLifecycleCallbacks({
     pushLog('selectionUpdate', snapshot)
   }
 
-  function onUpdate(): void {
+  function onUpdate(docChanged = true): void {
     for (const listener of updateListeners) {
-      listener()
+      listener(docChanged)
     }
   }
 

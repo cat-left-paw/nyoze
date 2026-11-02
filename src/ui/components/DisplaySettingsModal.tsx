@@ -79,6 +79,11 @@ import { createUiTextGetter } from "../i18n/uiText";
 import type { LocalImeExperimentalPreviewView } from "../hooks/useLocalImeExperimentalPreview";
 import { DisplayNumberSlider } from "./DisplayNumberSlider";
 import {
+  HEADING_FONT_SCALE_MAX,
+  HEADING_FONT_SCALE_MIN,
+  HEADING_FONT_SCALE_STEP,
+} from "../../settings/headingFontScale";
+import {
   createDefaultDisplaySettingsSectionOpenState,
   resolveDisplaySettingsSectionOpenStateForVisibilityChange,
   type DisplaySettingsSectionKey,
@@ -86,6 +91,7 @@ import {
 } from "./displaySettingsSectionState";
 import { formatNativeSelectOptionLabel } from "../utils/nativeSelectOptionLabel";
 import { ThemeSwatchSelect } from "./ThemeSwatchSelect";
+import { InputSurfacePreeditDisplaySetting } from "./InputSurfacePreeditDisplaySetting";
 import {
   getDocumentPresetSwatches,
   getDocumentThemeSwatches,
@@ -1375,6 +1381,24 @@ export function DisplaySettingsModal({
                     </button>
                   </div>
                 </div>
+
+                <DisplayNumberSlider
+                  label={t("displaySettings.headingFontScale")}
+                  description={t("displaySettings.headingFontScaleDesc")}
+                  min={HEADING_FONT_SCALE_MIN}
+                  max={HEADING_FONT_SCALE_MAX}
+                  step={HEADING_FONT_SCALE_STEP}
+                  value={displaySettings.headingFontScale}
+                  valueText={`${displaySettings.headingFontScale}%`}
+                  onChange={(value) =>
+                    onSetDisplayNumber(
+                      "headingFontScale",
+                      value,
+                      HEADING_FONT_SCALE_MIN,
+                      HEADING_FONT_SCALE_MAX,
+                    )
+                  }
+                />
 
                 <div className="setting-item">
                   <div className="setting-item-info">
@@ -2716,17 +2740,36 @@ export function DisplaySettingsModal({
                         />
                         {t("displaySettings.experimentalLocalIme.enabled")}
                       </label>
-                      <div className="setting-item-desc setting-item-desc-multiline">
-                        {t("displaySettings.experimentalLocalIme.enabled", "helper")}
+                      <div
+                        className="setting-item-desc setting-item-desc-multiline"
+                        data-testid="settings-experimental-local-ime-description"
+                      >
+                        {/* ENTRY-UI1: PISの起動の説明文。Local Windowの開発用の経路は従来の文のまま。 */}
+                        {localImeExperimentalPreview.inputSurface
+                          ? t("displaySettings.experimentalLocalIme.enabled", "helper")
+                          : t("displaySettings.experimentalLocalIme.localWindowHelper", "helper")}
                       </div>
                       {platform === "linux" && (
-                        <div className="setting-item-desc">
+                        <div
+                          className="setting-item-desc"
+                          data-testid="settings-experimental-local-ime-linux"
+                        >
                           {t("displaySettings.experimentalLocalIme.linuxUnsupported")}
                         </div>
                       )}
                     </div>
                   </div>
-                  {localImeExperimentalPreview.effectiveEnabled && (
+                  {localImeExperimentalPreview.inputSurface &&
+                    localImeExperimentalPreview.toggleOn && (
+                      <InputSurfacePreeditDisplaySetting
+                        value={localImeExperimentalPreview.inputSurface.preeditDisplay}
+                        onChange={localImeExperimentalPreview.inputSurface.onChangePreeditDisplay}
+                        t={t}
+                      />
+                    )}
+                  {/* ENTRY-UI1: 「状態」の行は、Local Windowの開発用の経路だけ（PISはcheckboxと本文の上の通知が正本）。 */}
+                  {!localImeExperimentalPreview.inputSurface &&
+                    localImeExperimentalPreview.effectiveEnabled && (
                     <div className="setting-item">
                       <div className="setting-item-info">
                         <div className="setting-item-name">

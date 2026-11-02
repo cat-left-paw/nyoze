@@ -9,6 +9,8 @@ Published by Left Paw Studio.
 
 現行の GitHub Latest と Microsoft Store版は、いずれも `0.4.0-beta.2` です。
 
+試用版の `0.5.0-alpha.1` を、GitHub Releases のプレリリースとして公開しています。長文編集モード（実験的）の新しい入力の方式を試していただくための版です。内容と注意は [RELEASE_NOTES.md](./RELEASE_NOTES.md) を参照してください。
+
 `0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。以後の版にもこの修正が含まれています。
 
 - 小説やエッセイを縦書きでそのまま書けます

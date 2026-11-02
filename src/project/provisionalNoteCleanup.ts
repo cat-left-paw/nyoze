@@ -32,8 +32,13 @@ export type ProvisionalNoteRecord = {
   readonly relativeFile: string
   /** anchor を追加した時点の tab identity。 */
   readonly tabId: string
-  /** 作成時 entry の fingerprint（外部変更検出用）。 */
+  /** 作成時 entry の fingerprint（外部変更検出用）。編集・状態変更の成功で更新する。 */
   readonly fingerprint: string
+  /**
+   * STICKY-NOTE-LIFECYCLE1: anchor のない本文を保存した後は true。追跡は続ける（後の保存で
+   * anchor があれば durable、破棄なら cleanup）が、dirty へは寄与させない。
+   */
+  readonly savedWithoutAnchor?: boolean
 }
 
 /** fingerprint の field 区切り。note field には現れない unit separator を使う。 */
@@ -86,6 +91,18 @@ export function removeProvisionalNotes(
   return list.filter((entry) => !removed.has(entry.noteId))
 }
 
+/**
+ * STICKY-NOTE-LIFECYCLE1: 編集・状態変更で entry を書き換えた後、同じ id の record の
+ * fingerprint を書き込んだ entry のものへ更新する（破棄の再証明が外部変更と区別できるように）。
+ */
+export function updateProvisionalNoteFingerprint(
+  list: readonly ProvisionalNoteRecord[],
+  noteId: string,
+  fingerprint: string,
+): ProvisionalNoteRecord[] {
+  return list.map((entry) => (entry.noteId === noteId ? { ...entry, fingerprint } : entry))
+}
+
 /** 指定 document（tab identity + 絶対 path）に属する provisional note。 */
 export function selectProvisionalNotesForDocument(
   list: readonly ProvisionalNoteRecord[],
@@ -120,7 +137,13 @@ export function resolveDurableProvisionalNotes(
         saved.markdown.includes(formatNoteAnchorComment(entry.noteId)),
     )
     .map((entry) => entry.noteId)
-  return { next: removeProvisionalNotes(list, durableIds), durableIds }
+  // anchor のない本文を保存した record は、dirty へ寄与させずに追跡を続ける。
+  const next = removeProvisionalNotes(list, durableIds).map((entry) =>
+    entry.tabId === saved.tabId && entry.filePath === saved.filePath && !entry.savedWithoutAnchor
+      ? { ...entry, savedWithoutAnchor: true }
+      : entry,
+  )
+  return { next, durableIds }
 }
 
 /** cleanup 要求 1 件（note 単位）。 */

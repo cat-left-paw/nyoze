@@ -5,6 +5,7 @@ import {
   DEFAULT_AUTO_TCY_MIN_DIGITS,
   DEFAULT_AUTO_TCY_NUMBERS_ONLY,
 } from '../editor-core/features/autoTcy'
+import { DEFAULT_HEADING_FONT_SCALE } from './headingFontScale'
 import type {
   AppTitleFont,
   AppTitlePreset,
@@ -89,6 +90,7 @@ export const DEFAULT_DISPLAY_SETTINGS: DisplaySettings = {
   autoTcyMinDigits: DEFAULT_AUTO_TCY_MIN_DIGITS,
   autoTcyMaxDigits: DEFAULT_AUTO_TCY_MAX_DIGITS,
   headingMarginAfter: 0.45,
+  headingFontScale: DEFAULT_HEADING_FONT_SCALE,
   headingDividerLevels: {
     h1: true,
     h2: true,
@@ -472,6 +474,9 @@ export const DEFAULT_PSEUDO_CARET_BLINK_ENABLED = true
  */
 /** PUBLIC-ENTRY1: strategy-neutral Local IME Experimental product preference. */
 export const DEFAULT_EXPERIMENTAL_LOCAL_IME_ENABLED = false
+
+/** PIS-S10-PREEDIT-DISPLAY1: 変換中の文字の表示の既定は押し出す（`inline`）。 */
+export const DEFAULT_EXPERIMENTAL_INPUT_SURFACE_PREEDIT_DISPLAY = 'inline' as const
 
 /**
  * 付箋 (Task 3A-3): 初回付箋作成時の「本文に非表示コメントが追加される」説明を

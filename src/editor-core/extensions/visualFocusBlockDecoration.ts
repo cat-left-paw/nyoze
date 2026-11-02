@@ -1,6 +1,7 @@
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import type { Node as PmNode } from '@tiptap/pm/model'
 import type { EditorState } from '@tiptap/pm/state'
 import {
   collectDimTextblockDecorations,
@@ -23,6 +24,8 @@ export type VisualFocusBlockDecorationOptions = {
   getComposing: () => boolean
 }
 
+const decorationCache = new WeakMap<PmNode, { key: string; decorations: DecorationSet }>()
+
 export function buildVisualFocusBlockDecorations(
   state: EditorState,
   options: VisualFocusBlockDecorationOptions,
@@ -40,6 +43,9 @@ export function buildVisualFocusBlockDecorations(
     return DecorationSet.empty
   }
 
+  const key = `${activeRange.from}:${activeRange.to}:${options.getBlockHighlightEnabled()}:${options.getDimNonFocusedBlocksEnabled()}`
+  const cached = decorationCache.get(state.doc)
+  if (cached?.key === key) return cached.decorations
   const pieces: Decoration[] = []
 
   if (options.getBlockHighlightEnabled()) {
@@ -55,7 +61,9 @@ export function buildVisualFocusBlockDecorations(
     pieces.push(...collectDimTextblockDecorations(state.doc, activeRange))
   }
 
-  return DecorationSet.create(state.doc, pieces)
+  const decorations = DecorationSet.create(state.doc, pieces)
+  decorationCache.set(state.doc, { key, decorations })
+  return decorations
 }
 
 function createVisualFocusBlockDecorationPlugin(

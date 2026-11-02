@@ -10,6 +10,7 @@ import type {
   EditMenuCommandTargetInfo,
   EditMenuCommandTargetRegion,
 } from './editMenuCommandRouting'
+import { isInputSurfaceFocusOwner } from '../../editor-core/features/inputSurface/focusOwner'
 const SOURCE_MODE_SELECTOR = '.source-mode-host'
 const PARAGRAPH_PLAIN_SELECTOR = 'textarea.tategaki-plain-overlay'
 const PROSEMIRROR_SELECTOR = '.ProseMirror'
@@ -27,7 +28,7 @@ export function resolveEditMenuCommandTargetRegion(
   if (!element) return 'none'
   if (element.closest(SOURCE_MODE_SELECTOR)) return 'source-mode'
   if (element.closest(PARAGRAPH_PLAIN_SELECTOR)) return 'paragraph-plain'
-  if (element.closest(PROSEMIRROR_SELECTOR)) return 'prosemirror'
+  if (element.closest(PROSEMIRROR_SELECTOR) || isInputSurfaceFocusOwner(element)) return 'prosemirror'
   return 'none'
 }
 

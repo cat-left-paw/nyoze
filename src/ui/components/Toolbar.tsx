@@ -1,3 +1,4 @@
+import { getInputSurfacePromptMouseDownHandler } from '../../editor-core/features/inputSurface/focusOwner'
 import {
   IconSettings,
   IconArrowBackUp,
@@ -505,6 +506,7 @@ export function Toolbar({
       <button
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={withPlainFormattingGuard(onSetOrUnsetLink)}
+        onMouseDown={getInputSurfacePromptMouseDownHandler()}
         type="button"
         aria-label={t("editor.link")}
         {...getFormattingButtonProps(t("editor.link"))}
@@ -514,6 +516,7 @@ export function Toolbar({
       <button
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={withPlainFormattingGuard(onInsertImage)}
+        onMouseDown={getInputSurfacePromptMouseDownHandler()}
         type="button"
         aria-label={t("editor.image")}
         {...getFormattingButtonProps(t("editor.image"))}
@@ -523,6 +526,7 @@ export function Toolbar({
       <button
         className="toolbar-btn-iconized toolbar-btn-icon-only"
         onClick={withPlainFormattingGuard(onInsertRubyBouten)}
+        onMouseDown={getInputSurfacePromptMouseDownHandler()}
         type="button"
         disabled={!plainFormattingBlocked && !availability.canInsertRuby}
         aria-label={t("editor.insertRuby")}

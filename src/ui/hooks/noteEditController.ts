@@ -5,6 +5,7 @@ import {
 } from '../../project/noteTags'
 import type { NyozeNote, NyozeNotesStore } from '../../project/noteStore'
 import { toProjectRelativeFilePath } from '../../project/notePath'
+import { computeNoteEntryFingerprint } from '../../project/provisionalNoteCleanup'
 import type { NoteAnchorProjectBridge } from './noteAnchorInsertController'
 import {
   NOTE_ANCHOR_BRIDGE_UNAVAILABLE_MESSAGE,
@@ -60,7 +61,12 @@ export type NoteEditPrepareResult =
   | { kind: 'blocked'; message: string }
 
 export type NoteEditCommitResult =
-  | { kind: 'edited'; id: string }
+  | {
+      kind: 'edited'
+      id: string
+      /** STICKY-NOTE-LIFECYCLE1: 書き込んだ entry の fingerprint（provisional の record を更新する）。 */
+      fingerprint: string
+    }
   | { kind: 'failed'; message: string }
 
 /** UI (DocumentNotesPanel) へ返す保存結果。cancelled は plain/internal 等の安全停止。 */
@@ -203,5 +209,5 @@ export async function commitNoteEdit(
     return { kind: 'failed', message: NOTE_EDIT_WRITE_ERROR_MESSAGE }
   }
 
-  return { kind: 'edited', id: options.id }
+  return { kind: 'edited', id: options.id, fingerprint: computeNoteEntryFingerprint(store.notes[options.id]!) }
 }

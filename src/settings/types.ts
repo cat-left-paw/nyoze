@@ -31,6 +31,9 @@ export type UiFont = 'mincho' | 'gothic' | `custom:${string}`
 /** 0.1.1-beta.1 T1: UI language mode */
 export type UiLanguageMode = 'ja' | 'en' | 'mixed'
 
+/** PIS-S10-PREEDIT-DISPLAY1: 変換中の文字の表示（押し出す / 重ねる）。 */
+export type ExperimentalInputSurfacePreeditDisplay = 'inline' | 'overlay'
+
 /** App title preset selector */
 export type AppTitlePreset = 'nyoze' | 'nyoze-upper' | 'nyoze-kanji' | 'custom'
 
@@ -87,6 +90,8 @@ export type DisplaySettings = {
   autoTcyMinDigits: number
   autoTcyMaxDigits: number
   headingMarginAfter: number
+  /** EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズ（本文比 %、50〜200、刻み 5、既定 100）。 */
+  headingFontScale: number
   headingDividerLevels: HeadingDividerLevels
   /** 横書き（horizontal-tb）時の見出し位置 */
   headingAlignHorizontal: HeadingAlign
@@ -113,6 +118,7 @@ export type DisplaySettingsNumericKey =
   | 'autoTcyMinDigits'
   | 'autoTcyMaxDigits'
   | 'headingMarginAfter'
+  | 'headingFontScale'
 
 export type PaneState = {
   leftOpen: boolean
@@ -288,6 +294,12 @@ export type SettingsJson = {
    * field is accepted only as an idempotent read-time migration source.
    */
   experimentalLocalImeEnabled?: boolean
+  /**
+   * PIS-S10-PREEDIT-DISPLAY1: 長文編集モード（入力の方式がPIS）の、変換中の文字の表示。
+   * `inline`（既定）は後ろの本文を押し出す、`overlay`は後ろの本文に重ねる。
+   * `overlay`以外の値（未設定・不正値）は`inline`として読む。
+   */
+  experimentalInputSurfacePreeditDisplay?: ExperimentalInputSurfacePreeditDisplay
   /**
    * 付箋 (Task 3A-3): 初回付箋作成時の説明を確認済みか。既定 false。設定 UI なし。
    */

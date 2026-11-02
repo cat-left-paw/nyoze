@@ -1,15 +1,19 @@
+import { createDocumentIdentityState, createDocumentInstanceId } from "../utils/saveTargetIdentity";
+import { createActiveHeadingStore } from './activeHeadingStore';
+import { useOpenDocumentTabs } from './useOpenDocumentTabs';
+import { useOutlineHeadingTargets } from './useOutlineHeadingTargets';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type {
   CommandAvailability,
   EditorCoreHandle,
-  HeadingInfo,
   LineBreakPolicy,
   LogEntry,
   MarkdownDocumentOptions,
 } from "../../editor-core/types";
 import { resolveAutoTcyDigitRange } from "../../editor-core/features/autoTcy";
 import { setParagraphPlainFormalBehaviorRuntime } from "../../editor-core/features/paragraphPlainExperiments";
+import { allowInputSurfaceDocumentMutation } from "../../editor-core/features/inputSurface/documentAction";
 import type { FrontmatterFields } from "../../editor-core/io/frontmatter";
 import {
   resolveDocumentType,
@@ -49,6 +53,7 @@ import {
   UI_THEME_MAIN_COLORS,
 } from "../../settings/defaults";
 import { normalizeAppTitleCustomValue } from "../../settings/appTitleCustom";
+import { useEditorHeadingScaleVariable } from "./useEditorHeadingScaleVariable";
 import {
   DEFAULT_PARAGRAPH_PLAIN_BEHAVIOR,
   normalizeParagraphPlainBehavior,
@@ -91,6 +96,7 @@ import {
 } from "../../settings/pseudoCaretSettings";
 import { normalizeNoteAnchorNoticeConfirmed } from "../../settings/noteAnchorSettings";
 import { resolveExperimentalLocalImeEnabledSetting } from "../../settings/localImeExperimentalPreviewSettings";
+import { useExperimentalInputSurfacePreeditDisplaySetting } from "./useExperimentalInputSurfacePreeditDisplaySetting";
 import { normalizeUiLanguageMode } from "../../settings/uiLanguageMode";
 import { normalizeTheme } from "../../settings/themeUtils";
 import {
@@ -206,10 +212,6 @@ import {
   resolveDirtyState,
   resolveDirtyStateFromDocChangeSignal,
 } from "./dirtyTracking";
-import {
-  areHeadingListsEqual,
-  arePositionSetsEqual,
-} from "./headingUiState";
 
 const MAX_LOGS = 120;
 const INITIAL_TAB_ID = "tab-main";
@@ -262,6 +264,7 @@ export type RightPaneTab = "outline" | "document" | "notes" | "project" | "theme
 
 export type EditorTab = {
   id: string;
+  documentInstanceId: string;
   title: string;
   dirty: boolean;
   filePath: string | null;
@@ -311,6 +314,7 @@ export type EditorTab = {
 export type ActiveTabPatch = Partial<
   Pick<
     EditorTab,
+    | "documentInstanceId"
     | "title"
     | "dirty"
     | "filePath"
@@ -618,15 +622,18 @@ function isSameDocumentColors(
 }
 
 type UseAppUiStateOptions = {
-  coreRef: RefObject<EditorCoreHandle | null>;
+  coreRef: RefObject<EditorCoreHandle | null>; flushDeferredCoreUiSync?: (reason: string) => number | undefined; invalidateDeferredCoreUiSnapshot?: () => void;
 };
 
-export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+export function useAppUiState({ coreRef, flushDeferredCoreUiSync, invalidateDeferredCoreUiSnapshot }: UseAppUiStateOptions) {
+  // Logs have no rendered consumer. Retain the diagnostic history without
+  // scheduling an App render for every keydown / selectionUpdate.
+  const logsRef = useRef<LogEntry[]>([]);
   const [editorInlineHintMessage, setEditorInlineHintMessage] = useState<
     string | null
   >(null);
   const editorInlineHintTimerRef = useRef<number | null>(null);
+  const editorInlineHintMessageRef = useRef<string | null>(null);
   const [lineBreakPolicyNoticeMessage, setLineBreakPolicyNoticeMessage] =
     useState<string | null>(null);
   const [lineBreakPolicyNoticeIsDirty, setLineBreakPolicyNoticeIsDirty] =
@@ -723,14 +730,15 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     [],
   );
 
-  const [fullPlainEditActive, setFullPlainEditActive] = useState(false);
+  const [fullPlainEditActive, _setFullPlainEditActive] = useState(false);
   const [fullPlainEditValue, setFullPlainEditValue] = useState("");
   const [fullPlainEditError, setFullPlainEditError] = useState("");
   const [paragraphPlainModeActive, setParagraphPlainModeActive] =
     useState(false);
-  const [tabs, setTabs] = useState<EditorTab[]>([
+  const [tabs, setTabs, readTabs] = useOpenDocumentTabs([
     {
       id: INITIAL_TAB_ID,
+      documentInstanceId: createDocumentInstanceId(),
       title: INITIAL_TAB_TITLE,
       dirty: false,
       filePath: null,
@@ -752,19 +760,29 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       sourceModeTopOffset: null,
     },
   ]);
-  const [activeTabId, setActiveTabId] = useState(INITIAL_TAB_ID);
+  const [activeTabId, _setActiveTabId] = useState(INITIAL_TAB_ID);
   const activeTabIdRef = useRef(INITIAL_TAB_ID);
+  const [documentIdentity] = useState(createDocumentIdentityState);
+  const readActiveTabId = useCallback(() => activeTabIdRef.current, []);
+  const setActiveTabId = useCallback((id: string) => {
+    activeTabIdRef.current = id;
+    _setActiveTabId(id);
+  }, []);
+  const setFullPlainEditActive = useCallback((active: boolean) => {
+    if (active) documentIdentity.openSource(activeTabIdRef.current);
+    else documentIdentity.closeSource();
+    _setFullPlainEditActive(active);
+  }, [documentIdentity]);
   const lineBreakPolicyApplyInProgressRef = useRef(false);
   const suppressNextDirtyRef = useRef(false);
   // null = 初回 mount（書字方向変化と見なさない）
   const prevEffectiveWritingModeRef = useRef<string | null>(null);
 
   const [rightPaneTab, setRightPaneTab] = useState<RightPaneTab>("outline");
-  const [headings, setHeadings] = useState<HeadingInfo[]>([]);
-  const [activeHeadingIndex, setActiveHeadingIndex] = useState(-1);
-  const [foldedHeadingPositions, setFoldedHeadingPositions] = useState<
-    Set<number>
-  >(() => new Set());
+  const [activeHeadingStore] = useState(createActiveHeadingStore);
+  const setActiveHeadingIndex = activeHeadingStore.set;
+  const outline = useOutlineHeadingTargets(coreRef, activeTabId, activeHeadingStore);
+  const { headings, foldedHeadingPositions, refreshHeadings, invalidateOutlineTargets, onOutlineCoreReady } = outline;
 
   const [theme, _setTheme] = useState(loadUiTheme);
   const [uiFont, _setUiFont] = useState<UiFont>(() => loadUiFont());
@@ -901,6 +919,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   /** PUBLIC-ENTRY1: strategy-neutral product opt-in. Load前も必ずOFF。 */
   const [experimentalLocalImeEnabled, _setExperimentalLocalImeEnabled] =
     useState<boolean>(() => DEFAULT_EXPERIMENTAL_LOCAL_IME_ENABLED);
+  const preeditDisplaySetting = useExperimentalInputSurfacePreeditDisplaySetting(); // PIS-S10-PREEDIT-DISPLAY1
 
   // 付箋 (Task 3A-3): 初回説明の確認済みフラグ。設定 UI なし。
   const [noteAnchorNoticeConfirmed, _setNoteAnchorNoticeConfirmed] =
@@ -1247,18 +1266,14 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   }, []);
 
   useEffect(() => {
-    activeTabIdRef.current = activeTabId;
-  }, [activeTabId]);
-
-  useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     document.documentElement.setAttribute("data-platform", platform);
+    coreRef.current?.refreshInputSurfaceDisplay();
     saveUiTheme(theme);
     if (settingsSyncReady) {
       void patchSettingsJson({ uiTheme: theme });
     }
-  }, [theme, platform, settingsSyncReady]);
-
+  }, [theme, platform, settingsSyncReady, coreRef]);
   useEffect(() => {
     const fontFamily = (() => {
       if (uiFont === "mincho") return "var(--font-stack-mincho)";
@@ -1637,6 +1652,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       "--editor-writing-mode",
       effectiveWritingMode,
     );
+    coreRef.current?.refreshInputSurfaceDisplay();
     // 書字方向が実際に変わった瞬間のみ Paragraph Plain を終了させる。
     // prevEffectiveWritingModeRef が null の間は初回 mount なので発火しない。
     // Source Mode (fullPlainEditActive) はここでは触らない。
@@ -1725,8 +1741,9 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       displaySettings.headingAlignHorizontal,
       displaySettings.headingAlignVertical,
     );
-  }, [displaySettings]);
-
+    coreRef.current?.refreshInputSurfaceDisplay();
+  }, [displaySettings, coreRef]);
+  useEditorHeadingScaleVariable(displaySettings.headingFontScale, coreRef);
   useEffect(() => {
     saveToolbarVisible(toolbarVisible);
   }, [toolbarVisible]);
@@ -1754,7 +1771,10 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   );
 
   const showEditorInlineHint = useCallback(
-    (message: string, durationMs = 2600) => {
+    (message: string, durationMs = 2600, options?: { coalesce?: boolean }) => {
+      // STICKY-NOTE-LIFECYCLE1: 同じ文が表示中なら出し直さない（キーの連打で App を再描画しない）。
+      if (options?.coalesce && editorInlineHintTimerRef.current !== null && editorInlineHintMessageRef.current === message) return;
+      editorInlineHintMessageRef.current = message;
       if (editorInlineHintTimerRef.current !== null) {
         window.clearTimeout(editorInlineHintTimerRef.current);
         editorInlineHintTimerRef.current = null;
@@ -1762,6 +1782,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       setEditorInlineHintMessage(message);
       editorInlineHintTimerRef.current = window.setTimeout(() => {
         setEditorInlineHintMessage(null);
+        editorInlineHintMessageRef.current = null;
         editorInlineHintTimerRef.current = null;
       }, durationMs);
     },
@@ -1806,26 +1827,27 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   }, []);
 
   const patchActiveTab = useCallback((patch: ActiveTabPatch) => {
+    const targetId = activeTabIdRef.current;
     setTabs((prev) =>
       prev.map((tab) =>
-        tab.id === activeTabIdRef.current ? { ...tab, ...patch } : tab,
+        tab.id === targetId ? { ...tab, ...patch } : tab,
       ),
     );
-  }, []);
+  }, [setTabs]);
 
   const addTab = useCallback((tab: EditorTab) => {
     setTabs((prev) => [...prev, tab]);
-  }, []);
+  }, [setTabs]);
 
   const removeTab = useCallback((tabId: string) => {
     setTabs((prev) => prev.filter((t) => t.id !== tabId));
-  }, []);
+  }, [setTabs]);
 
   const patchTab = useCallback((tabId: string, patch: ActiveTabPatch) => {
     setTabs((prev) =>
       prev.map((tab) => (tab.id === tabId ? { ...tab, ...patch } : tab)),
     );
-  }, []);
+  }, [setTabs]);
 
   const toggleWritingMode = useCallback(() => {
     const nextMode: WritingMode =
@@ -1843,35 +1865,20 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
 
   const setSuppressNextDirty = useCallback((value: boolean) => {
     suppressNextDirtyRef.current = value;
-    if (!value) return;
+    if (!value) { refreshHeadings(); return; }
+    invalidateOutlineTargets();
+    invalidateDeferredCoreUiSnapshot?.();
     queueMicrotask(() => {
       suppressNextDirtyRef.current = false;
     });
-  }, []);
+  }, [invalidateDeferredCoreUiSnapshot, invalidateOutlineTargets, refreshHeadings]);
 
   const closePlainEditModes = useCallback(() => {
     coreRef.current?.setParagraphPlainMode(false);
     setParagraphPlainModeActive(false);
     setFullPlainEditActive(false);
     setFullPlainEditError("");
-  }, [coreRef]);
-
-  const refreshHeadings = useCallback(() => {
-    const core = coreRef.current;
-    if (!core) return;
-    const snapshot = core.getHeadingSnapshot();
-    setHeadings((prev) =>
-      areHeadingListsEqual(prev, snapshot.headings) ? prev : snapshot.headings,
-    );
-    setActiveHeadingIndex((prev) =>
-      prev === snapshot.activeHeadingIndex ? prev : snapshot.activeHeadingIndex,
-    );
-    setFoldedHeadingPositions((prev) =>
-      arePositionSetsEqual(prev, snapshot.foldedHeadingPositions)
-        ? prev
-        : snapshot.foldedHeadingPositions,
-    );
-  }, [coreRef]);
+  }, [coreRef, setFullPlainEditActive]);
 
   const markDirtyFalse = useCallback(
     (markdown: string) => {
@@ -1908,10 +1915,11 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
         tab.id === activeId ? { ...tab, dirty: nextDirty } : tab,
       );
     });
-  }, [coreRef]);
-
+  }, [coreRef, setTabs]);
   const applyLineBreakPolicyWithImmediateConversion = useCallback(
     (nextTabPolicy: LineBreakPolicy) => {
+      if (!allowInputSurfaceDocumentMutation('line-break-policy-conversion')) return;
+      flushDeferredCoreUiSync?.('line-break-policy-conversion');
       const core = coreRef.current;
       if (!core) {
         patchActiveTab({ lineBreakPolicy: nextTabPolicy });
@@ -1922,7 +1930,6 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
       lineBreakPolicyApplyInProgressRef.current = true;
       try {
         patchActiveTab({ lineBreakPolicy: nextTabPolicy });
-
         // Compute effective: explicit frontmatter > type-derived > tab setting
         const currentEffective = effectiveLineBreakPolicy;
         const nextEffective = resolveEffectiveLineBreakPolicyForTab({
@@ -1968,6 +1975,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     },
     [
       coreRef,
+      flushDeferredCoreUiSync,
       activeTab,
       effectiveLineBreakPolicy,
       patchActiveTab,
@@ -2133,17 +2141,17 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
         );
       });
     },
-    [fullPlainEditError],
+    [fullPlainEditError, setTabs],
   );
 
   const onCoreLog = useCallback(
     (entry: LogEntry) => {
-      // Skip high-frequency IME events from React state to avoid unnecessary re-renders.
+      // Preserve the existing diagnostic filter and bounded history.
       // compositionupdate and input fire on every keystroke during IME composition.
       const isHighFrequencyEvent =
         entry.event === "compositionupdate" || entry.event === "input";
       if (!isHighFrequencyEvent) {
-        setLogs((prev) => [entry, ...prev].slice(0, MAX_LOGS));
+        logsRef.current = [entry, ...logsRef.current].slice(0, MAX_LOGS);
       }
       if (
         entry.event === "lineBreakGuard" &&
@@ -2161,10 +2169,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     [showEditorInlineHint],
   );
 
-  const onCoreSelectionUpdate = useCallback(() => {
-    const core = coreRef.current;
-    if (core) setActiveHeadingIndex(core.getActiveHeadingIndex());
-  }, [coreRef]);
+  const onCoreSelectionUpdate = outline.updateActiveHeading;
 
   const onCoreParagraphPlainModeChange = useCallback((active: boolean) => {
     setParagraphPlainModeActive(active);
@@ -2178,42 +2183,38 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
   }, []);
 
   const onCoreUpdateLight = useCallback(() => {
-    if (lineBreakPolicyApplyInProgressRef.current) {
-      return;
-    }
+    if (lineBreakPolicyApplyInProgressRef.current) return false;
     if (suppressNextDirtyRef.current) {
-      suppressNextDirtyRef.current = false;
-      return;
+      return false; // Let the immediate full sync consume this load guard.
     }
     setTabs((prev) => {
       const activeId = activeTabIdRef.current;
       const activeTab = prev.find((tab) => tab.id === activeId);
-      // Light sync runs only while IME composition is active.  Avoid full
-      // markdown serialization here and mark the doc dirty optimistically.
-      // Full sync on compositionend recomputes the exact dirty state.
+      // Light sync marks dirty; idle/boundary full sync computes the exact value.
       const nextDirty = resolveDirtyStateFromDocChangeSignal(activeTab);
       if (nextDirty === null) return prev;
       return prev.map((tab) =>
         tab.id === activeId ? { ...tab, dirty: nextDirty } : tab,
       );
     });
-  }, []);
+    return true;
+  }, [setTabs]);
 
   const onCoreUpdate = useCallback((currentMarkdownOverride?: string) => {
     if (lineBreakPolicyApplyInProgressRef.current) {
       refreshHeadings();
-      return;
+      return false;
     }
     if (suppressNextDirtyRef.current) {
       suppressNextDirtyRef.current = false;
       refreshHeadings();
-      return;
+      return false;
     }
     const currentMarkdown =
       currentMarkdownOverride ?? coreRef.current?.peekMarkdown();
     if (currentMarkdown === undefined) {
       refreshHeadings();
-      return;
+      return false;
     }
     setTabs((prev) => {
       const activeId = activeTabIdRef.current;
@@ -2224,20 +2225,19 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
         tab.id === activeId ? { ...tab, dirty: nextDirty } : tab,
       );
     });
-    refreshHeadings();
-  }, [coreRef, refreshHeadings]);
+    refreshHeadings(); return true;
+  }, [coreRef, refreshHeadings, setTabs]);
 
   const onCoreFoldChange = useCallback(() => {
     refreshHeadings();
   }, [refreshHeadings]);
 
   const onCoreReady = useCallback((core: EditorCoreHandle) => {
+    const initialTab = readTabs().find(tab => tab.id === readActiveTabId());
+    if (initialTab) documentIdentity.install(initialTab);
     setParagraphPlainModeActive(core.isParagraphPlainModeActive());
-    const snapshot = core.getHeadingSnapshot();
-    setHeadings(snapshot.headings);
-    setActiveHeadingIndex(snapshot.activeHeadingIndex);
-    setFoldedHeadingPositions(snapshot.foldedHeadingPositions);
-  }, []);
+    onOutlineCoreReady(core);
+  }, [onOutlineCoreReady, documentIdentity, readActiveTabId, readTabs]);
 
   // Phase5-H Slice1: theme studio API
 
@@ -2857,7 +2857,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     usesNativeWindowControls,
     initialLineBreakPolicy: initialLineBreakPolicy.current,
     activeTab,
-    logs,
+    logs: logsRef.current,
     editorInlineHintMessage,
     lineBreakPolicyNoticeMessage,
     lineBreakPolicyNoticeIsDirty,
@@ -2929,6 +2929,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     patchTab,
     patchActiveTab,
     markDirtyFalse,
+    readTabs, readActiveTabId, documentIdentity,
     markDirtyFalseForTab,
     recalcDirtyFromCore,
     setSuppressNextDirty,
@@ -2937,11 +2938,16 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     rightPaneTab,
     setRightPaneTab,
     headings,
-    setHeadings,
-    activeHeadingIndex,
+    activeHeadingIndex: activeHeadingStore.getSnapshot(),
+    activeHeadingStore,
     setActiveHeadingIndex,
     foldedHeadingPositions,
-    setFoldedHeadingPositions,
+    invalidateOutlineTargets,
+    getActiveOutlineTarget: outline.getActiveOutlineTarget,
+    toggleOutlineHeadingFold: outline.toggleOutlineHeadingFold,
+    scrollToOutlineHeading: outline.scrollToOutlineHeading,
+    requestOutlineHeadingPreview: outline.requestOutlineHeadingPreview,
+    watchOutlinePreview: outline.watchOutlinePreview,
     theme,
     setTheme,
     uiFont,
@@ -3019,6 +3025,7 @@ export function useAppUiState({ coreRef }: UseAppUiStateOptions) {
     setPseudoCaretBlinkEnabled,
     experimentalLocalImeEnabled,
     setExperimentalLocalImeEnabled,
+    ...preeditDisplaySetting,
     noteAnchorNoticeConfirmed,
     setNoteAnchorNoticeConfirmed,
     registeredFonts,

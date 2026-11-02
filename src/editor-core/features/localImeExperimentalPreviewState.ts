@@ -10,8 +10,8 @@
  * 1. **author pilot capability** — 非 packaged + `NYOZE_LOCAL_IME_PILOT=1`
  *    （`electron/localImePilotGate.ts`）。development HUD と perf diagnostics を持つ。
  * 2. **product Preview capability** — available platform の通常dev / packaged
- *    （`electron/localImeExperimentalPreviewGate.ts`）。mainからfixed read-only
- *    boolean だけが renderer へ渡る。Linux でも capable になり得るが公式サポートではない。
+ *    （`electron/inputStrategyGate.ts`の`productStrategy === 'local-window'`。PIS-S10-ENTRY1a以降は
+ *    非packagedの開発用の指定の起動だけ）。mainからfixed read-onlyな値だけが renderer へ渡る。Linux でも capable になり得るが公式サポートではない。
  * 3. **user preference** — settings.json `experimentalLocalImeEnabled`
  *    （既定 false、不正値も false）。
  * 4. **effective runtime enablement** — この module の `resolve...Decision()`。

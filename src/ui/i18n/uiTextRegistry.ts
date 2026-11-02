@@ -1893,6 +1893,12 @@ export const UI_TEXT_REGISTRY = {
       en: 'Delete this note?\nThe marker in the document and the note entry will be unlinked.',
     },
   },
+  'editor.noteAnchor.protectedRangeHint': {
+    label: {
+      ja: '付箋のマーカーを含む範囲は削除・切り取りできません。付箋を削除するには、マーカーを右クリックしてください。',
+      en: 'A range containing a sticky-note marker cannot be deleted or cut. To delete the note, right-click its marker.',
+    },
+  },
   'editor.noteAnchor.removeMarkerOnly': {
     label: { ja: 'マーカーのみ削除', en: 'Remove marker only' },
   },
@@ -2682,18 +2688,47 @@ export const UI_TEXT_REGISTRY = {
       ja: '長文編集モード（実験的）',
       en: 'Long document editing mode (Experimental)',
     },
+    // PIS-S10-ENTRY-UI1: 製品の入口がPISの起動の説明文（作者が承認した文言。3行）。
+    helper: {
+      ja:
+        '文字を専用の入力欄で受け取ってから本文へ入れる、新しい入力の方式です（既定はOFF）。\n' +
+        'ルビの直後や書式の境目でも、変換中の文字が詰まったり消えたりしにくくなります。\n' +
+        '通常の入力と一部の動きが異なります。問題が起きたときはOFFにすると、すぐに通常の入力へ戻ります。',
+      en:
+        'A new input method that receives text in a dedicated input field and then enters it into the document (off by default).\n' +
+        'Text being converted is less likely to stall or disappear, even right after ruby or at formatting boundaries.\n' +
+        'Some behavior differs from the standard input. If something goes wrong, turn it off to return to the standard input immediately.',
+    },
+  },
+  // PIS-S10-ENTRY1a: Local Windowの開発用の経路（`NYOZE_INPUT_STRATEGY=local-window`）だけで使う説明文。変えない。
+  // 従来どおり`helper`で読む（表示の言語が「混在」のときも日本語）。
+  'displaySettings.experimentalLocalIme.localWindowHelper': {
+    label: {
+      ja: '長文編集モード（実験的）',
+      en: 'Long document editing mode (Experimental)',
+    },
     helper: {
       ja:
         '実験的機能です。既定はOFFで、ONにしたときだけ有効になります。\n' +
-        '対応する本文位置では、自動的に長文編集モードを開始します。\n' +
-        'ルビや縦中横の境界、対象外の位置では通常のエディタへ安全に戻ります。\n' +
-        '設定はONのままなので、次の対応位置で自動的に再開できます。',
+        '本文への入力の方式を切り替えます。問題が起きた場合はOFFへ戻してください。',
       en:
         'Experimental. Off by default; it only takes effect while turned on.\n' +
-        'At supported text positions, long document editing mode starts automatically.\n' +
-        'At ruby/TCY boundaries and other unsupported positions, editing safely returns to the normal editor.\n' +
-        'The setting stays on, so it can resume automatically at the next supported position.',
+        'It switches how text is entered into the document. If something goes wrong, turn it off.',
     },
+  },
+  // PIS-S10-PREEDIT-DISPLAY1: 変換中の文字の表示（PISで長文編集モードがONのときだけ出す）。
+  'displaySettings.experimentalLocalIme.preeditDisplay': {
+    label: { ja: '変換中の文字の表示', en: 'Display of text being converted' },
+    helper: {
+      ja: '押し出す: 入力中の文字の分だけ、後ろの本文が動きます（通常の入力に近い表示）。重ねる: 後ろの本文は動かず、入力中の文字を本文の上に重ねて表示します。',
+      en: 'Push: the following text moves to make room for the text being converted (closer to the standard input). Overlay: the following text stays in place and the text being converted is drawn over it.',
+    },
+  },
+  'displaySettings.experimentalLocalIme.preeditDisplay.inline': {
+    label: { ja: '後ろの本文を押し出す', en: 'Push the following text' },
+  },
+  'displaySettings.experimentalLocalIme.preeditDisplay.overlay': {
+    label: { ja: '後ろの本文に重ねる', en: 'Overlay the following text' },
   },
   'displaySettings.experimentalLocalIme.linuxUnsupported': {
     label: {
@@ -2736,6 +2771,26 @@ export const UI_TEXT_REGISTRY = {
   },
   'displaySettings.experimentalLocalIme.copyDraft': {
     label: { ja: '下書きをコピー', en: 'Copy draft' },
+  },
+  'inputSurface.notice.awaitingSave': {
+    label: { ja: '変換中の文字を確定すると保存を続けます。', en: 'Confirm the composing text to continue saving.' },
+  },
+  'inputSurface.notice.awaitingComposition': {
+    label: { ja: '変換中の文字を確定してから、もう一度操作してください。', en: 'Confirm the composing text, then try again.' },
+  },
+  // PIS-S10-ENTRY-UI1: 作者が承認した文言。
+  'inputSurface.notice.retained': {
+    label: { ja: '確定できなかった文字が入力欄に残っています（本文には入っていません）。必要ならコピーしてから、破棄してください。', en: 'Uncommitted text remains in the input field (it has not been entered into the document). Copy it if needed, then discard it.' },
+  },
+  'inputSurface.notice.copy': { label: { ja: 'コピー', en: 'Copy' } },
+  'inputSurface.notice.discard': { label: { ja: '破棄…', en: 'Discard…' } },
+  'inputSurface.notice.confirmDiscard': {
+    label: { ja: '残った文字を破棄', en: 'Discard remaining text' },
+    helper: { ja: '入力欄に残った文字を破棄します。取り消せません。', en: 'Discards the text left in the input field. This cannot be undone.' },
+  },
+  // PIS-S10-ENTRY-UI1: 入力面の名前（画面読み上げなどが読む。画面には出ない）。
+  'inputSurface.accessibleName': {
+    label: { ja: '本文の入力', en: 'Document text input' },
   },
   'displaySettings.experimentalLocalIme.discard': {
     label: { ja: '下書きを破棄して停止…', en: 'Discard draft and stop…' },
@@ -2824,6 +2879,41 @@ export const UI_TEXT_REGISTRY = {
       en: 'Could not turn it off while committing. Please wait a moment and try again.',
     },
   },
+  // PIS-S10-ENTRY-UI1: 切り替えを止めたときの文（理由ごと。作者が承認した文言）。
+  'localImeExperimentalPreview.notice.switchBlocked.composing': {
+    label: {
+      ja: '変換中は切り替えられません。変換を確定してから、もう一度お試しください。',
+      en: "You can't switch while converting. Finish the conversion and try again.",
+    },
+  },
+  'localImeExperimentalPreview.notice.switchBlocked.hostPendingInput': {
+    label: {
+      ja: 'ルビ・縦中横の直後の入力が確定していないため、切り替えられません。Escキーを押してから、もう一度お試しください。',
+      en: "Input right after ruby or tate-chu-yoko has not been committed, so you can't switch. Press Esc and try again.",
+    },
+  },
+  'localImeExperimentalPreview.notice.switchBlocked.surfacePayload': {
+    label: {
+      ja: '入力欄に確定できなかった文字が残っているため、切り替えられません。コピーするか破棄してから、もう一度お試しください。',
+      en: "Uncommitted text remains in the input field, so you can't switch. Copy or discard it, then try again.",
+    },
+  },
+  'localImeExperimentalPreview.notice.switchBlocked.startFailed': {
+    label: {
+      ja: '長文編集モードを開始できませんでした。通常の入力のまま続けます。',
+      en: "Couldn't start long document editing mode. The standard input stays in use.",
+    },
+  },
+  // PIS-S10-ENTRY1b（E4）。ENTRY-UI1で作者が承認した文言（「本文に入りません」）。
+  'localImeExperimentalPreview.notice.confirmDiscardComposition': {
+    label: {
+      ja: '変換が終わっていません。変換中の文字を破棄して切り替えますか？（破棄した文字は本文に入りません）',
+      en: 'The conversion has not finished. Discard the text being converted and switch? (The discarded text will not be entered.)',
+    },
+  },
+  'localImeExperimentalPreview.notice.confirmDiscardComposition.confirm': {
+    label: { ja: '破棄して切り替える', en: 'Discard and switch' },
+  },
   'localImeExperimentalPreview.notice.dismiss': {
     label: { ja: '通知を閉じる', en: 'Dismiss notification' },
   },
@@ -2831,6 +2921,13 @@ export const UI_TEXT_REGISTRY = {
     label: {
       ja: '長文編集モード: オフ',
       en: 'Long document editing mode: Off',
+    },
+  },
+  // PIS-S10-ENTRY-UI1（D9）: 製品の入口がPISの起動で、長文編集モードがON。
+  'localImeExperimentalPreview.status.on': {
+    label: {
+      ja: '長文編集モード: オン',
+      en: 'Long document editing mode: On',
     },
   },
   'localImeExperimentalPreview.status.ready': {
@@ -2946,6 +3043,15 @@ export const UI_TEXT_REGISTRY = {
   },
   'displaySettings.headingMarginAfter': {
     label: { ja: '見出し後マージン', en: 'Space After Heading' },
+  },
+  'displaySettings.headingFontScale': {
+    label: { ja: '見出しの文字サイズ', en: 'Heading Size' },
+  },
+  'displaySettings.headingFontScaleDesc': {
+    label: {
+      ja: '本文の文字サイズに対する割合です。ページビューアと書き出しにも反映されます。',
+      en: 'Relative to the body text size. Also applies to the Page Viewer and exports.',
+    },
   },
   'displaySettings.headingDividers': {
     label: { ja: '見出し区切り線（レベル別）', en: 'Heading Dividers' },

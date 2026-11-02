@@ -24,6 +24,14 @@
  * unknown directive fallback (plain text 温存) として扱う。
  */
 
+import MarkdownIt from 'markdown-it'
+
+/**
+ * directive 検出のための fence 範囲の正本となる markdown-it。
+ * fence token の有無・範囲は preset に依らないため最小構成でよい。
+ */
+const directiveFenceMd = MarkdownIt('commonmark', { html: true })
+
 export const NYOZE_DIRECTIVE_NODE_NAME = 'nyozeDirectiveBlock'
 
 /** 改ページ block atom node 名。`nyozeDirectiveBlock` とは別の独立 node。 */
@@ -301,45 +309,51 @@ function findMatchingCloseIndex(lines: string[], openIndex: number, codeMask: bo
   return -1
 }
 
-const FENCED_CODE_OPEN_REGEX = /^ {0,3}(`{3,}|~{3,})/
-
-function escapeForRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * CommonMark の fenced code 開始行かを判定する唯一の正本。
+ * `` ``` `` / `~~~` (0-3 space indent) に一致し、backtick fence の info string に
+ * backtick を含む行は開始とみなさない (CommonMark 仕様)。
+ * parseMarkdown の isFencedCodeStart / readFencedCodeChunk で共有し、定義を2つ持たない。
+ * directive 検出のマスク (computeFencedCodeLineMask) は container 内の fence を
+ * 正しく扱うため markdown-it の fence token を正本にし、この helper は使わない。
+ */
+export function matchFencedCodeOpen(line: string): { fenceChar: '`' | '~'; fenceLength: number } | null {
+  const match = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+  if (!match) return null
+  const run = match[1]
+  const fenceChar = run[0] === '`' ? ('`' as const) : ('~' as const)
+  if (fenceChar === '`' && line.slice(match[0].length).includes('`')) return null
+  return { fenceChar, fenceLength: run.length }
 }
 
 /**
  * 各行が fenced code block の内側 (fence 区切り行を含む) かどうかを返す。
- * open fence は `` ``` `` / `~~~` (0-3 space indent)。close は同種 fence char の
- * 同長以上。close が無い場合は EOF まで code 扱い (CommonMark 準拠)。
- * indent code block は `:::` が列頭に来ないため別途考慮不要。
+ * 範囲の正本は markdown-it の fence token の map で、リスト項目内・引用内など
+ * container の内側の fence も正しく扱う。行単位の正規表現では、項目の close
+ * fence (`  ``` ` など) を open と誤認して後続の directive を殺すため使わない。
+ * `:::` を含まない文書では parse を省き全 false を返す (directive が無いため厳密)。
  */
 function computeFencedCodeLineMask(lines: string[]): boolean[] {
   const mask = new Array<boolean>(lines.length).fill(false)
-  let i = 0
-  while (i < lines.length) {
-    const open = FENCED_CODE_OPEN_REGEX.exec(lines[i] ?? '')
-    if (!open) {
-      i++
-      continue
+  let maybeDirective = false
+  for (const line of lines) {
+    if (line.includes(':::')) {
+      maybeDirective = true
+      break
     }
-    const fenceRun = open[1]
-    const fenceChar = fenceRun[0]
-    const minLen = fenceRun.length
-    const closeRegex = new RegExp(`^ {0,3}${escapeForRegex(fenceChar)}{${minLen},}[ \\t]*$`)
-
-    mask[i] = true
-    let j = i + 1
-    let closed = false
-    while (j < lines.length) {
-      mask[j] = true
-      if (closeRegex.test(lines[j] ?? '')) {
-        closed = true
-        j++
-        break
-      }
-      j++
+  }
+  if (!maybeDirective) return mask
+  let tokens: { type: string; map: [number, number] | null }[]
+  try {
+    tokens = directiveFenceMd.parse(lines.join('\n'), {})
+  } catch {
+    return mask
+  }
+  for (const tok of tokens) {
+    if (tok.type !== 'fence' || !tok.map) continue
+    for (let n = tok.map[0]; n < tok.map[1] && n < mask.length; n++) {
+      mask[n] = true
     }
-    i = closed ? j : lines.length
   }
   return mask
 }

@@ -1,3 +1,4 @@
+import { createDocumentInstanceId } from "../utils/saveTargetIdentity";
 import type { LineBreakPolicy } from "../../editor-core/types";
 import {
   parseFrontmatterFields,
@@ -116,6 +117,7 @@ export function buildRestoredEditorTabs(
     const frontmatterFields = parseFrontmatterFields(frontmatterPrefix);
     return {
       id: defaults.generateTabId(),
+      documentInstanceId: createDocumentInstanceId(),
       title: getPathBaseName(tab.filePath),
       dirty: false,
       filePath: tab.filePath,

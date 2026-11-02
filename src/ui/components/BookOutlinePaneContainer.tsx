@@ -1,3 +1,5 @@
+import type { ActiveHeadingStore } from '../hooks/activeHeadingStore'
+import { useSyncExternalStore } from 'react'
 import { useCallback, useEffect, useRef } from 'react'
 import type { UiLanguageMode } from '../../settings/types'
 import { useBookOutline } from '../hooks/useBookOutline'
@@ -47,7 +49,7 @@ type BookOutlinePaneContainerProps = {
   /** 現在 doc の見出し（PM doc 由来）。open 直後の jump 解決・現在位置照合に使う。 */
   getDocumentHeadings: () => DocumentHeading[]
   /** 現在 doc でキャレットが属する見出しの index（PM doc 順）。現在位置ハイライトに使う。 */
-  activeHeadingIndex: number
+  activeHeadingStore: ActiveHeadingStore
   /** 現在 doc 内の PM pos へ移動する（既存 outline と同じ経路）。 */
   scrollToPos: (pos: number) => void
   /** Paragraph Plain 編集中はナビゲーションを無効化（既存 document outline と同方針）。 */
@@ -69,11 +71,12 @@ export function BookOutlinePaneContainer({
   flushImeCompositionSideEffects,
   onTabLimit,
   getDocumentHeadings,
-  activeHeadingIndex,
+  activeHeadingStore,
   scrollToPos,
   navigationDisabled,
   projectRefreshNonce = 0,
 }: BookOutlinePaneContainerProps) {
+  const activeHeadingIndex = useSyncExternalStore(activeHeadingStore.subscribe, activeHeadingStore.getSnapshot)
   const { bookOutlineState, refreshBookOutline } = useBookOutline({
     getActiveFilePath,
     isInternalDoc,

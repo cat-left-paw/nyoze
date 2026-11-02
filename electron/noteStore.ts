@@ -38,6 +38,10 @@ import {
 import type { NyozeNotesStore } from "../src/project/noteStore";
 import { buildRelocatedNotesStore } from "../src/project/noteFileRelocation";
 import { buildProvisionalNoteCleanupPlan } from "../src/project/provisionalNoteCleanup";
+import {
+  buildTrackedNoteReconciliationStore,
+  type TrackedNoteReconciliationEntry,
+} from "../src/project/noteLifecycleTracking";
 import type { ProvisionalNoteCleanupEntry } from "../src/project/provisionalNoteCleanup";
 import { runExclusiveForNotes } from "./noteStoreLock";
 
@@ -171,6 +175,39 @@ export async function discardProvisionalNotesInProject(
     const written = await writeNotesStoreUnlocked(projectRoot, plan.store);
     if (!written.ok) return { ok: false, reason: written.reason };
     return { ok: true, removedIds: plan.removedIds };
+  });
+}
+
+export type NotesReconcileTrackedResult =
+  | {
+      ok: true;
+      deletedIds: string[];
+      reopenedIds: string[];
+      skipped: { id: string; reason: "missing" | "file-mismatch" | "status-mismatch" | "fingerprint-mismatch" }[];
+    }
+  | { ok: false; reason: "invalid" | "read-failed" | "not-a-project" | "existing-invalid" | "write-failed" };
+
+/**
+ * STICKY-NOTE-LIFECYCLE1: 追跡中の付箋の status を、保存した本文の anchor の有無へ
+ * project 単位 notes lock の中で合わせる（read → 再証明 → write を不可分に）。
+ * 再証明できない entry は書かず skipped へ返す。書くものが 0 件なら disk write を行わない。
+ */
+export async function reconcileTrackedNotesInProject(
+  projectRoot: string,
+  entries: readonly TrackedNoteReconciliationEntry[],
+): Promise<NotesReconcileTrackedResult> {
+  return runExclusiveForNotes(projectRoot, async () => {
+    const read = readNotesStore(projectRoot);
+    if (!read.ok) {
+      return { ok: false, reason: read.reason } as NotesReconcileTrackedResult;
+    }
+    const built = buildTrackedNoteReconciliationStore(read.store, entries, new Date().toISOString());
+    if (built.deletedIds.length === 0 && built.reopenedIds.length === 0) {
+      return { ok: true, deletedIds: [], reopenedIds: [], skipped: built.skipped };
+    }
+    const written = await writeNotesStoreUnlocked(projectRoot, built.store);
+    if (!written.ok) return { ok: false, reason: written.reason };
+    return { ok: true, deletedIds: built.deletedIds, reopenedIds: built.reopenedIds, skipped: built.skipped };
   });
 }
 

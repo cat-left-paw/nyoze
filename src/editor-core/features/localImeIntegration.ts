@@ -8,11 +8,6 @@ import type { Transaction } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import type { LineBreakPolicy, MarkdownDocumentOptions } from '../types'
 import type {
-  RubyPunctuationDomSyncCounts,
-  RubyPunctuationDomSyncToken,
-  RubyPunctuationNowrapApplyDiagnostics,
-} from '../extensions/rubyPunctuationNowrapState'
-import type {
   LocalImeEditMenuCommandResult,
   LocalImeEditMenuOperation,
 } from './localImeEditMenuCommandState'
@@ -41,6 +36,8 @@ import {
   readLocalImeNavigationPerformanceSelectionSnapshot,
   type LocalImeNavigationPerformanceSelectionSnapshot,
 } from './localImeNavigationPerformanceSnapshot'
+
+import { shouldAttachLocalWindowRuntime } from './inputSurface/inputPathRuntime'
 
 export type LocalImeAttachOptions = {
   view: EditorView
@@ -84,12 +81,6 @@ export type LocalImeIntegrationHandle = {
   }) => void
   beginFlushPerfSpan: (span: LocalImePerfSpan) => (() => void) | null
   runWithFlushPerfSpan: <T>(span: LocalImePerfSpan, run: () => T) => T
-  beginRubyDecorationApplyDiagnostics: () => RubyPunctuationNowrapApplyDiagnostics | null
-  readRubyDecorationDomSyncToken: () => RubyPunctuationDomSyncToken | null
-  reportRubyDecorationDomSync: (
-    token: RubyPunctuationDomSyncToken,
-    counts: RubyPunctuationDomSyncCounts,
-  ) => void
   joinPostFlushFrame: (consumer: LocalImePostFlushFrameConsumer) => (() => void) | null
   getPseudoCaretExternalGeometrySource: () => LocalImePseudoCaretGeometrySource | null
   attach: (options: LocalImeAttachOptions) => void
@@ -176,9 +167,6 @@ export function createLocalImeIntegration(): LocalImeIntegrationHandle {
     // this no-op port preserves existing editor instrumentation call sites.
     runWithFlushPerfSpan: (_span, run) => run(),
     beginFlushPerfSpan: () => null,
-    beginRubyDecorationApplyDiagnostics: () => null,
-    readRubyDecorationDomSyncToken: () => null,
-    reportRubyDecorationDomSync: () => undefined,
     joinPostFlushFrame: () => null,
     getPseudoCaretExternalGeometrySource: () =>
       selectLocalImePseudoCaretExternalGeometrySource({
@@ -187,6 +175,10 @@ export function createLocalImeIntegration(): LocalImeIntegrationHandle {
     attach(options) {
       if (hostView) return
       hostView = options.view
+      // PIS-S10-ENTRY1a: Local Windowのruntime（controller・AUTOARM・recovery port・barrierの参加者）は、
+      // 作者Pilotと、開発用の指定で製品の入口を戻した起動だけで作る。製品の入口がPISのときは、
+      // Hostのtransactionの集計だけを接続する（以下のmethodは、すべて既定の値を返す）。
+      if (!shouldAttachLocalWindowRuntime()) return
       localWindow.attach({
         view: options.view,
         editorSurface: options.editorSurface,

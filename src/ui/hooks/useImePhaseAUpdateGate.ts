@@ -1,85 +1,49 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createCoreUiSyncGate } from './coreUiSyncGate'
 import type { LogEntry } from '../../editor-core/types'
 
 type UseImePhaseAUpdateGateOptions = {
   enabled: boolean
   minSyncIntervalMs: number
-  onFullSync: () => void
-  onLightSync: () => void
+  onFullSync: () => number | undefined
+  onLightSync: () => boolean | void
+  onDeferredSyncStart?: () => void
 }
 
 type UseImePhaseAUpdateGateResult = {
   handleCoreLog: (entry: LogEntry) => void
-  handleCoreUpdate: () => void
-  flushDeferredSync: (reason: string) => void
+  handleCoreUpdate: (docChanged?: boolean) => void
+  flushDeferredSync: (reason: string) => number | undefined
+  hasPendingDeferredSync: () => boolean
+  fullSyncRevision: number
   /** Whether an IME composition session is currently active (Phase A tracking). */
   isComposingRef: React.RefObject<boolean>
 }
 
-function normalizeMinSyncIntervalMs(value: number): number {
-  if (!Number.isFinite(value)) return 400
-  return Math.min(500, Math.max(300, Math.round(value)))
-}
-
-export function useImePhaseAUpdateGate({
-  enabled,
-  minSyncIntervalMs,
-  onFullSync,
-  onLightSync,
-}: UseImePhaseAUpdateGateOptions): UseImePhaseAUpdateGateResult {
-  const isComposingRef = useRef(false)
-  const pendingHeavySyncRef = useRef(false)
-  const lastLightSyncAtRef = useRef(0)
-
-  const flushDeferredSync = useCallback((reason: string) => {
-    void reason
-    const hadPending = pendingHeavySyncRef.current
-    pendingHeavySyncRef.current = false
-    if (hadPending) {
-      onFullSync()
-    }
-  }, [onFullSync])
-
+export function useImePhaseAUpdateGate(options: UseImePhaseAUpdateGateOptions): UseImePhaseAUpdateGateResult {
+  const latest = useRef(options)
+  latest.current = options
+  const [fullSyncRevision, setFullSyncRevision] = useState(0)
+  const [gate] = useState(() => createCoreUiSyncGate(() => ({
+    ...latest.current,
+    onFullSync() {
+      const result = latest.current.onFullSync()
+      // Even a clean -> clean sync must acknowledge deferred main dirty.
+      setFullSyncRevision(revision => revision + 1)
+      return result
+    },
+  })))
+  useEffect(() => { gate.activate(); return () => gate.destroy() }, [gate])
   const handleCoreLog = useCallback((entry: LogEntry) => {
-    // Always track composition state so that consumers (e.g. handleCoreSelectionUpdate)
-    // can skip expensive work during IME input, even when Phase A gating is disabled.
-    if (entry.event === 'compositionstart') {
-      isComposingRef.current = true
-      if (!enabled) return
-      lastLightSyncAtRef.current = performance.now()
-      return
-    }
-    if (entry.event === 'compositionend') {
-      isComposingRef.current = false
-      if (!enabled) return
-      // Defer the full sync to the next macrotask so that EditorCore's
-      // isComposing flag (cleared via queueMicrotask in compositionHandlers)
-      // and ProseMirror's view.composing are both false before we re-evaluate
-      // command availability.  Without this, syncCommandAvailability reads
-      // composing=true and leaves canUndo/canRedo disabled after IME commit.
-      setTimeout(() => {
-        flushDeferredSync('compositionend')
-      }, 0)
-    }
-  }, [enabled, flushDeferredSync])
-
-  const handleCoreUpdate = useCallback(() => {
-    if (!enabled || !isComposingRef.current) {
-      onFullSync()
-      return
-    }
-    pendingHeavySyncRef.current = true
-    const now = performance.now()
-    const intervalMs = normalizeMinSyncIntervalMs(minSyncIntervalMs)
-    if (now - lastLightSyncAtRef.current < intervalMs) return
-    lastLightSyncAtRef.current = now
-    onLightSync()
-  }, [enabled, minSyncIntervalMs, onFullSync, onLightSync])
-
+    if (entry.event === 'compositionstart') gate.compositionStart()
+    if (entry.event === 'compositionend') gate.compositionEnd()
+  }, [gate])
   return {
     handleCoreLog,
-    handleCoreUpdate,
-    flushDeferredSync,
-    isComposingRef,
+    handleCoreUpdate: gate.update,
+    flushDeferredSync: gate.flush,
+    hasPendingDeferredSync: gate.hasPending,
+    fullSyncRevision,
+    isComposingRef: gate.isComposingRef,
   }
 }

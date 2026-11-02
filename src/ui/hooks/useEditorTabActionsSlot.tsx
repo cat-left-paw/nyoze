@@ -18,6 +18,7 @@ export type UseEditorTabActionsSlotOptions = {
   largeDocGuard: LargeDocumentGuard;
   localImeExperimentalPreview: LocalImeExperimentalPreviewView;
   activeDocumentCharacterCount: number;
+  flushCoreUiSync: (reason: string) => number | undefined;
   toggleParagraphPlainMode: () => void;
   toggleFullPlainEdit: () => void;
   handleToggleWritingMode: () => void;
@@ -38,6 +39,7 @@ export function useEditorTabActionsSlot({
   largeDocGuard,
   localImeExperimentalPreview,
   activeDocumentCharacterCount,
+  flushCoreUiSync,
   toggleParagraphPlainMode,
   toggleFullPlainEdit,
   handleToggleWritingMode,
@@ -63,8 +65,9 @@ export function useEditorTabActionsSlot({
         // 実行できなくなる（UI state だけ反転 → 確定後の再クリックで元へ戻り、
         // core と一致して何も起きない）。effect 側の barrier は防御として残す。
         if (!isLocalImeDocumentActionAllowed("ruby-visibility-toggle")) return;
+        const characterCount = flushCoreUiSync("ruby-visibility-toggle") ?? activeDocumentCharacterCount;
         largeDocGuard.requestGuardedAction(
-          activeDocumentCharacterCount,
+          characterCount,
           "ルビ表示の切替は、大きな文書では数秒かかる場合があります。続行しますか。",
           () => {
             // 大文書確認ダイアログの間に composition が始まることもあるため再確認する。

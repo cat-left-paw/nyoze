@@ -175,14 +175,15 @@ function dispatchWithFlag(
   view: EditorView,
   pos: number,
   dispatchTransaction: (transaction: Transaction) => void,
+  focusless?: HandleHomeEndOptions['focusless'],
 ): void {
   const tr = view.state.tr.setSelection(
-    TextSelection.create(view.state.doc, pos),
+    focusless?.selectionForTarget?.(pos) ?? TextSelection.create(view.state.doc, focusless?.extend ? view.state.selection.anchor : pos, pos),
   )
-  lastHomeEndSelectionFrom = pos
+  lastHomeEndSelectionFrom = tr.selection.from
   beginHomeEndSelectionMutation()
   try {
-    dispatchTransaction(tr.scrollIntoView())
+    dispatchTransaction(focusless ? tr.setMeta('addToHistory', false) : tr.scrollIntoView())
   } finally {
     endHomeEndSelectionMutation()
   }
@@ -220,7 +221,16 @@ export interface HandleHomeEndOptions {
   dispatchTransaction?: (transaction: Transaction) => void
   /** Local Windowはpost-proof/session confirm後の最終同期点までDOM affinityを遅延する。 */
   deferDomAffinity?: boolean
+  /** PIS: reuse this state machine without reading or writing DOM Selection. */
+  focusless?: {
+    extend: boolean
+    origin?: number
+    selectionForTarget?(pos: number): Selection
+    visualEdge(direction: HomeEndNavigationDirection, block: { start: number; end: number }): number | null
+  }
 }
+
+export type HomeEndKey = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey' | 'isComposing' | 'preventDefault'>
 
 /**
  * Home / End キーハンドラ。handled なら true を返す。
@@ -228,13 +238,13 @@ export interface HandleHomeEndOptions {
  */
 export function runHomeEndNavigationCommand(
   view: EditorView,
-  event: KeyboardEvent,
+  event: HomeEndKey,
   options: HandleHomeEndOptions,
 ): HomeEndNavigationCommandResult {
   if (event.key !== 'Home' && event.key !== 'End') return { handled: false }
 
   // 修飾キー付き（Shift / Ctrl / Alt / Meta）は標準挙動に委ねる
-  if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+  if ((event.shiftKey && !options.focusless) || event.ctrlKey || event.altKey || event.metaKey) {
     resetHomeEndState()
     return { handled: false }
   }
@@ -249,13 +259,13 @@ export function runHomeEndNavigationCommand(
   const { selection } = state
 
   // collapsed でなければ標準に委ねる
-  if (!selection.empty) {
+  if (!selection.empty && !options.focusless) {
     resetHomeEndState()
     return { handled: false }
   }
 
   const direction: HomeEndNavigationDirection = event.key === 'Home' ? 'home' : 'end'
-  const cursorPos = selection.from
+  const cursorPos = options.focusless ? options.focusless.origin ?? selection.head : selection.from
   const expectedDoc = state.doc
   const dispatchTransaction = options.dispatchTransaction ?? ((transaction) => view.dispatch(transaction))
 
@@ -265,16 +275,18 @@ export function runHomeEndNavigationCommand(
     logDetail: string,
     endAffinity: HomeEndNavigationDomAffinity = null,
   ): HomeEndNavigationCommandResult => {
-    const moved = targetPos !== cursorPos
-    const expectedSelection = moved
-      ? TextSelection.create(expectedDoc, targetPos)
-      : selection
-    if (moved) dispatchWithFlag(view, targetPos, dispatchTransaction)
-    else lastHomeEndSelectionFrom = cursorPos
+    // Host/Local Window preserve an existing non-TextSelection on a positional no-op.
+    const candidateSelection = options.focusless
+      ? options.focusless.selectionForTarget?.(targetPos) ?? TextSelection.create(expectedDoc, options.focusless.extend ? selection.anchor : targetPos, targetPos)
+      : targetPos !== cursorPos ? TextSelection.create(expectedDoc, targetPos) : selection
+    const moved = options.focusless ? !candidateSelection.eq(selection) : targetPos !== cursorPos
+    const expectedSelection = candidateSelection
+    if (moved) dispatchWithFlag(view, targetPos, dispatchTransaction, options.focusless)
+    else lastHomeEndSelectionFrom = selection.from
     lastStep = { direction, blockStart: block!.start, phase }
     event.preventDefault()
     options.pushLog('homeEnd', logDetail)
-    if (!options.deferDomAffinity) applyHomeEndNavigationDomAffinity(view, endAffinity)
+    if (!options.deferDomAffinity && !options.focusless) applyHomeEndNavigationDomAffinity(view, endAffinity)
     return {
       handled: true,
       expectedDoc,
@@ -294,7 +306,10 @@ export function runHomeEndNavigationCommand(
   }
 
   // 同じブロック・同じ方向で連続押下なら phase を進める
+  // B6 only resets a bare range command; extended selection keeps its existing path.
+  const startsBareRange = !!options.focusless && !options.focusless.extend && !selection.empty
   const isContinuation =
+    !startsBareRange &&
     lastStep !== null &&
     lastStep.direction === direction &&
     lastStep.blockStart === block.start &&
@@ -307,16 +322,16 @@ export function runHomeEndNavigationCommand(
   }
 
   // 1回目: 表示行頭/末
-  const visualPos =
-    resolveRubyAwareVisualLineEdge(view, direction, block.start, block.end) ??
-    resolveVisualLineEdge(view, direction)
+  const visualPos = options.focusless
+    ? options.focusless.visualEdge(direction, block)
+    : resolveRubyAwareVisualLineEdge(view, direction, block.start, block.end) ?? resolveVisualLineEdge(view, direction)
 
   if (visualPos != null) {
     // ブロック範囲内にクランプ
     const clamped = Math.max(block.start, Math.min(block.end, visualPos))
 
     // カーソルが既に表示行端にいる場合、すぐ論理行端へ
-    if (clamped === cursorPos) {
+    if (!startsBareRange && clamped === cursorPos) {
       const logicalPos = direction === 'home' ? block.start : block.end
       if (logicalPos !== cursorPos) {
         return complete(

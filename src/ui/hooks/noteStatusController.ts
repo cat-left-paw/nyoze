@@ -1,5 +1,6 @@
 import type { NoteStatus, NyozeNote, NyozeNotesStore } from '../../project/noteStore'
 import { toProjectRelativeFilePath } from '../../project/notePath'
+import { computeNoteEntryFingerprint } from '../../project/provisionalNoteCleanup'
 import type { NoteAnchorProjectBridge } from './noteAnchorInsertController'
 import {
   NOTE_ANCHOR_BRIDGE_UNAVAILABLE_MESSAGE,
@@ -34,7 +35,13 @@ export type NoteStatusPrepareResult =
   | { kind: 'blocked'; message: string }
 
 export type NoteStatusCommitResult =
-  | { kind: 'updated'; id: string; status: 'open' | 'resolved' }
+  | {
+      kind: 'updated'
+      id: string
+      status: 'open' | 'resolved'
+      /** STICKY-NOTE-LIFECYCLE1: 書き込んだ entry の fingerprint（provisional の record を更新する）。 */
+      fingerprint: string
+    }
   | { kind: 'failed'; message: string }
 
 function expectedStatusForTransition(transition: NoteStatusTransition): NoteStatus {
@@ -147,5 +154,10 @@ export async function commitNoteStatusUpdate(
     return { kind: 'failed', message: NOTE_STATUS_WRITE_ERROR_MESSAGE }
   }
 
-  return { kind: 'updated', id: options.id, status: nextStatus }
+  return {
+    kind: 'updated',
+    id: options.id,
+    status: nextStatus,
+    fingerprint: computeNoteEntryFingerprint(store.notes[options.id]!),
+  }
 }

@@ -1,15 +1,15 @@
 import type { HeadingInfo } from "../../editor-core/types";
 
-export type VisibleOutlineItem = {
-  heading: HeadingInfo;
+export type VisibleOutlineItem<T extends HeadingInfo = HeadingInfo> = {
+  heading: T;
   originalIndex: number;
 };
 
-export function resolveVisibleOutlineItems(
-  headings: readonly HeadingInfo[],
+export function resolveVisibleOutlineItems<T extends HeadingInfo>(
+  headings: readonly T[],
   foldedHeadingPositions: ReadonlySet<number>,
-): VisibleOutlineItem[] {
-  const visibleItems: VisibleOutlineItem[] = [];
+): VisibleOutlineItem<T>[] {
+  const visibleItems: VisibleOutlineItem<T>[] = [];
   const foldedAncestorLevels: number[] = [];
 
   headings.forEach((heading, originalIndex) => {

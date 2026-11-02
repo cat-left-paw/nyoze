@@ -43,6 +43,7 @@ import {
 } from 'react'
 import type { PageViewAnchor, PageViewItem, PageViewModel, PageViewSyntheticItem } from '../../editor-core/io/pageModelView'
 import { DEFAULT_DISPLAY_SETTINGS } from '../../settings/defaults'
+import { headingFontScaleToRatio } from '../../settings/headingFontScale'
 import {
   normalizePageViewerBreakBeforeHeading,
   normalizePageViewerBreakBeforeHeadingMaxLevel,
@@ -232,6 +233,8 @@ function buildPageViewerStyleVars(
     // PV-SET-1A: 見出し / ルビの shared appearance snapshot (Display Settings と parity)。
     '--pv-heading-font-family': payload.headingFontFamily ?? fontFamily,
     '--pv-heading-margin-after': `${payload.headingMarginAfter ?? DEFAULT_DISPLAY_SETTINGS.headingMarginAfter}em`,
+    // EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズの倍率 (本文比 % → 比)。省略時は 100% = 従来の見た目。
+    '--pv-heading-scale': `${headingFontScaleToRatio(payload.headingFontScale ?? DEFAULT_DISPLAY_SETTINGS.headingFontScale)}`,
     '--pv-heading-divider-h1': headingDividerLevels.h1 ? '1' : '0',
     '--pv-heading-divider-h2': headingDividerLevels.h2 ? '1' : '0',
     '--pv-heading-divider-h3': headingDividerLevels.h3 ? '1' : '0',

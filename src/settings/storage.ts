@@ -1,5 +1,6 @@
 import type { LineBreakPolicy } from '../editor-core/types'
 import { resolveAutoTcyDigitRange } from '../editor-core/features/autoTcy'
+import { normalizeHeadingFontScale } from './headingFontScale'
 import { migrateExperimentalLocalImeSettingForWrite } from './localImeExperimentalPreviewSettings'
 import {
   APP_TITLE_COLOR_STORAGE_KEY,
@@ -194,6 +195,7 @@ export function normalizeDisplaySettings(value: unknown): DisplaySettings {
       0,
       1.5,
     ),
+    headingFontScale: normalizeHeadingFontScale(parsed.headingFontScale),
     headingDividerLevels: normalizeHeadingDividerLevels(parsed.headingDividerLevels),
     headingAlignHorizontal: normalizeHeadingAlign(
       parsed.headingAlignHorizontal,

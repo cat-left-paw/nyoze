@@ -1,9 +1,32 @@
 import type { InternalDocId } from '../internalDocs/internalDocIds'
 
 export type DirtyTrackedTab = {
+  /** tab identity（STICKY-NOTE-LIFECYCLE1 の寄与の判定に使う。省略時は寄与を読まない）。 */
+  id?: string
   dirty: boolean
   cleanMarkdownSnapshot: string
   internalDocId?: InternalDocId
+}
+
+/**
+ * STICKY-NOTE-LIFECYCLE1: 本文の Markdown 以外の「未確定の操作」（付箋の仮の削除、
+ * durable でない付箋の追加）が tab を dirty にする寄与。正本は登録側（hook）の ref で、
+ * ここは同期に読むだけ。timer / polling は使わない。
+ */
+export type TabDirtyContributionContext = {
+  /** 本文が保存時の内容と同じか（REVIEWFIX2 R4: 同じなら、登録側は保存を待たずに確定してよい）。 */
+  readonly bodyMatchesClean: boolean
+  readonly cleanMarkdown: string
+}
+export type TabDirtyContributionProbe = (tabId: string, context: TabDirtyContributionContext) => boolean
+let tabDirtyContribution: TabDirtyContributionProbe | null = null
+
+export function setTabDirtyContribution(probe: TabDirtyContributionProbe | null): void {
+  tabDirtyContribution = probe
+}
+
+export function hasTabDirtyContribution(tabId: string, context: TabDirtyContributionContext): boolean {
+  return tabDirtyContribution?.(tabId, context) ?? false
 }
 
 export function isMarkdownDifferentFromClean(
@@ -27,10 +50,11 @@ export function resolveDirtyState(
     if (tab.dirty === nextDirty) return null
     return nextDirty
   }
-  const nextDirty = isMarkdownDifferentFromClean(
-    tab.cleanMarkdownSnapshot,
-    currentMarkdown,
-  )
+  const different = isMarkdownDifferentFromClean(tab.cleanMarkdownSnapshot, currentMarkdown)
+  const nextDirty =
+    different ||
+    (tab.id !== undefined &&
+      hasTabDirtyContribution(tab.id, { bodyMatchesClean: !different, cleanMarkdown: tab.cleanMarkdownSnapshot }))
   if (tab.dirty === nextDirty) return null
   return nextDirty
 }

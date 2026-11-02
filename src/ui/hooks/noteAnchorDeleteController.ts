@@ -1,4 +1,3 @@
-import type { NyozeNotesStore } from '../../project/noteStore'
 import type { NoteAnchorProjectBridge } from './noteAnchorInsertController'
 import {
   NOTE_ANCHOR_BRIDGE_UNAVAILABLE_MESSAGE,
@@ -6,19 +5,18 @@ import {
   NOTE_ANCHOR_NOT_IN_PROJECT_MESSAGE,
   NOTE_ANCHOR_UNSAVED_FILE_MESSAGE,
 } from './noteAnchorInsertController'
+import { toProjectRelativeFilePath } from '../../project/notePath'
 import { getPlainFormattingUnavailableMessage, type PlainModeKind } from '../utils/plainModeCommandGate'
 
 /**
- * 付箋専用削除の順序 (insert の逆):
- * 1. 本文 anchor 削除
- * 2. notes.json で status: 'deleted'
+ * 付箋専用削除（STICKY-NOTE-LIFECYCLE1 で「仮の削除」になった）:
+ * 1. notes.json の entry が open で現行文書に属することを確かめる（読むだけ）
+ * 2. 本文 anchor を削除する（meta 付き transaction 1、history 1）
  *
- * anchor 削除失敗時は notes.json に触れない。
- * write 失敗時は anchor は既に消えているがメモ本文は open のまま残る (許容 orphan)。
+ * notes.json は**ここでは書かない**。呼び出し側が削除の record を追跡し、本文の保存で
+ * 「保存した本文に anchor がなければ `deleted`」と確定する（`pendingNoteDeletion.ts`）。
+ * Undo で anchor が戻れば付箋も戻る。破棄では record を捨てるだけで、本文は disk のまま。
  */
-
-export const NOTE_ANCHOR_DELETE_WRITE_ERROR_MESSAGE =
-  '付箋データ (notes.json) を保存できませんでした。\n本文のマーカーは削除済みです。付箋データは変更していません。'
 
 export const NOTE_ANCHOR_DELETE_REMOVE_ERROR_MESSAGE =
   '本文の付箋マーカーを削除できませんでした。'
@@ -39,7 +37,12 @@ export type NoteAnchorDeletePrepareResult =
   | { kind: 'blocked'; message: string }
 
 export type NoteAnchorDeleteCommitResult =
-  | { kind: 'deleted'; id: string }
+  | {
+      kind: 'deleted'
+      id: string
+      /** 呼び出し側が tab identity を足して、仮の削除として追跡する。 */
+      tracking: { projectRoot: string; relativeFile: string }
+    }
   | { kind: 'failed'; message: string }
 
 export async function prepareNoteAnchorDelete(
@@ -86,13 +89,22 @@ export async function commitNoteAnchorDelete(
     return { kind: 'failed', message: NOTE_ANCHOR_BRIDGE_UNAVAILABLE_MESSAGE }
   }
 
+  const resolved = await bridge.resolveForFile(options.activeFilePath)
+  if (!resolved.ok || resolved.project === null) {
+    return { kind: 'failed', message: NOTE_ANCHOR_NOT_IN_PROJECT_MESSAGE }
+  }
+  const relativeFile = toProjectRelativeFilePath(resolved.project.projectRoot, options.activeFilePath)
+  if (relativeFile === null) {
+    return { kind: 'failed', message: NOTE_ANCHOR_NOT_IN_PROJECT_MESSAGE }
+  }
+
   const notes = await bridge.readNotes(options.activeFilePath)
   if (!notes.ok) {
     return { kind: 'failed', message: NOTE_ANCHOR_NOTES_READ_ERROR_MESSAGE }
   }
 
   const existing = notes.store.notes[options.id]
-  if (!existing || existing.status !== 'open') {
+  if (!existing || existing.status !== 'open' || existing.file !== relativeFile) {
     return { kind: 'failed', message: NOTE_ANCHOR_DELETE_NOT_FOUND_MESSAGE }
   }
 
@@ -100,25 +112,10 @@ export async function commitNoteAnchorDelete(
     return { kind: 'failed', message: NOTE_ANCHOR_DELETE_REMOVE_ERROR_MESSAGE }
   }
 
-  const now = new Date().toISOString()
-  // STICKY-NOTE-STORE-FIELD-PRESERVATION1: store 全体を保持して `notes` だけ更新する。
-  // `stickyNoteTags` 等の top-level field を落とすと、付箋削除が project のタグ定義を消す。
-  const store: NyozeNotesStore = {
-    ...notes.store,
-    notes: {
-      ...notes.store.notes,
-      [options.id]: {
-        ...existing,
-        status: 'deleted',
-        updatedAt: now,
-      },
-    },
+  // notes.json はここでは書かない（仮の削除。確定は本文の保存で行う）。
+  return {
+    kind: 'deleted',
+    id: options.id,
+    tracking: { projectRoot: resolved.project.projectRoot, relativeFile },
   }
-
-  const written = await bridge.writeNotes(options.activeFilePath, store)
-  if (!written.ok) {
-    return { kind: 'failed', message: NOTE_ANCHOR_DELETE_WRITE_ERROR_MESSAGE }
-  }
-
-  return { kind: 'deleted', id: options.id }
 }

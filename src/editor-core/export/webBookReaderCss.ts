@@ -8,6 +8,24 @@ const CHROME_FONT_FAMILY =
   '-apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif'
 
 /**
+ * EDITOR-HEADING-FONT-SCALE1: 本文見出し h1〜h6 の既定の大きさ（em）。ブラウザ既定と同じ値で、
+ * 倍率 1 のとき従来の計算値と一致する。synthetic タイトル（文書タイトル / 章タイトル / 目次の見出し）は対象外。
+ */
+const WEB_BOOK_HEADING_DEFAULT_EM = [
+  ['h1', '2em'],
+  ['h2', '1.5em'],
+  ['h3', '1.17em'],
+  ['h4', '1em'],
+  ['h5', '0.83em'],
+  ['h6', '0.67em'],
+] as const
+
+const WEB_BOOK_HEADING_FONT_SIZE_RULES: readonly string[] = WEB_BOOK_HEADING_DEFAULT_EM.map(
+  ([tag, em]) =>
+    `.nyoze-web-book-flow ${tag}:not(.nyoze-document-title):not(.nyoze-chapter-title):not(.nyoze-toc-title) { font-size: calc(${em} * var(--wb-heading-font-scale, 1)); }`,
+)
+
+/**
  * Web Book reader CSS（固定文字列のみ）。
  * - screen pagination は root geometry variables を読み、print は参照しない。
  * - reader chrome / Settings popover / Outline drawer / backdrop はすべて overlay で、
@@ -550,6 +568,10 @@ export function buildWebBookReaderCss(): string {
     '  border-block-end-width: 0;',
     '  border-block-end-color: color-mix(in srgb, var(--wb-heading) 34%, var(--wb-bg) 66%);',
     '}',
+    '/* EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズ（本文比）。段ごとの値はブラウザ既定',
+    '   （h1 2em / h2 1.5em / h3 1.17em / h4 1em / h5 0.83em / h6 0.67em）のまま、写しの倍率',
+    '   --wb-heading-font-scale（既定 1）を掛ける。倍率 1 のとき計算値は従来と同じ。 */',
+    ...WEB_BOOK_HEADING_FONT_SIZE_RULES,
     'body.nyoze-web-book-root[data-wb-writing-mode="horizontal-tb"] .nyoze-web-book-flow h1:not(.nyoze-document-title):not(.nyoze-chapter-title):not(.nyoze-toc-title),',
     'body.nyoze-web-book-root[data-wb-writing-mode="horizontal-tb"] .nyoze-web-book-flow h2:not(.nyoze-document-title):not(.nyoze-chapter-title):not(.nyoze-toc-title),',
     'body.nyoze-web-book-root[data-wb-writing-mode="horizontal-tb"] .nyoze-web-book-flow h3:not(.nyoze-document-title):not(.nyoze-chapter-title):not(.nyoze-toc-title),',

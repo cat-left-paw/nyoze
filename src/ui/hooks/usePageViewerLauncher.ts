@@ -48,6 +48,7 @@ export type PageViewerAppearanceSnapshot = Pick<
   | 'lineHeight'
   | 'headingFontFamily'
   | 'headingMarginAfter'
+  | 'headingFontScale'
   | 'headingDividerLevels'
   | 'headingAlignHorizontal'
   | 'headingAlignVertical'
@@ -70,6 +71,7 @@ type PageViewerAppearanceInput = {
     | 'fontSize'
     | 'lineHeight'
     | 'headingMarginAfter'
+    | 'headingFontScale'
     | 'headingDividerLevels'
     | 'headingAlignHorizontal'
     | 'headingAlignVertical'
@@ -83,6 +85,7 @@ type PageViewerAppearanceInput = {
 
 type UsePageViewerLauncherInput = {
   coreRef: RefObject<EditorCoreHandle | null>
+  flushDeferredUiSync?: (reason: string) => unknown
   activeTab: EditorTab
   internalDocActive: boolean
   writingMode: WritingMode
@@ -242,6 +245,7 @@ export function buildPageViewerAppearanceSnapshot({
     lineHeight: displaySettings.lineHeight,
     headingFontFamily: resolvePageViewerHeadingFontFamily(docHeadingFont, fontFamily),
     headingMarginAfter: displaySettings.headingMarginAfter,
+    headingFontScale: displaySettings.headingFontScale,
     headingDividerLevels: displaySettings.headingDividerLevels,
     headingAlignHorizontal: displaySettings.headingAlignHorizontal,
     headingAlignVertical: displaySettings.headingAlignVertical,
@@ -264,6 +268,7 @@ export function buildPageViewerAppearanceSnapshot({
  */
 export function usePageViewerLauncher({
   coreRef,
+  flushDeferredUiSync,
   activeTab,
   internalDocActive,
   writingMode,
@@ -281,6 +286,7 @@ export function usePageViewerLauncher({
     if (internalDocActive) return
     const bridge = window.nyozeBridge?.pageViewer?.openSnapshot
     if (!bridge) return
+    flushDeferredUiSync?.('page-viewer-open')
     const markdown = coreRef.current?.peekMarkdown()
     if (markdown === undefined) return
 
@@ -298,6 +304,7 @@ export function usePageViewerLauncher({
         fontSize: displaySettings.fontSize,
         lineHeight: displaySettings.lineHeight,
         headingMarginAfter: displaySettings.headingMarginAfter,
+        headingFontScale: displaySettings.headingFontScale,
         headingDividerLevels: displaySettings.headingDividerLevels,
         headingAlignHorizontal: displaySettings.headingAlignHorizontal,
         headingAlignVertical: displaySettings.headingAlignVertical,
@@ -336,12 +343,14 @@ export function usePageViewerLauncher({
       uiTheme: capturePageViewerUiThemeSnapshotFromMainWindow(),
     })
   }, [
+    flushDeferredUiSync,
     activeTab.frontmatterFields,
     activeTab.title,
     coreRef,
     displaySettings.fontSize,
     displaySettings.lineHeight,
     displaySettings.headingMarginAfter,
+    displaySettings.headingFontScale,
     displaySettings.headingDividerLevels,
     displaySettings.headingAlignHorizontal,
     displaySettings.headingAlignVertical,

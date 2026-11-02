@@ -1,9 +1,14 @@
+import { createParagraphPlainPendingChangesNotifier, type ParagraphPlainPendingChangesListener } from './paragraphPlainPendingChanges'
 import { Editor } from '@tiptap/core'
+import { hasPendingSpecialInlineBoundaryInput } from '../extensions/specialInlineBoundarySentinel'
 import { Plugin, PluginKey, Selection, TextSelection } from '@tiptap/pm/state'
-import type { EditorState } from '@tiptap/pm/state'
+import type { EditorState, Transaction } from '@tiptap/pm/state'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import { Decoration, DecorationSet, EditorView } from '@tiptap/pm/view'
 import { parseMarkdown } from '../io/parseMarkdown'
+import { NOTE_ANCHOR_PARAGRAPH_PLAIN_COMMIT_META_KEY, collectNoteAnchorIdsInDoc } from './noteAnchorProtection'
+import { notifyNoteAnchorsDetachedByEdit } from './noteAnchorProtectionNotice'
+import { noteAnchorIdsRemoved } from '../../project/noteLifecycleTracking'
 import type {
   LineBreakPolicy,
   ParagraphPlainModeListener,
@@ -51,6 +56,7 @@ import {
   resolveParagraphPlainReservedStepPx,
   type ParagraphPlainReservedStepPxCache,
 } from './paragraphPlainReservedLayout'
+import { createParagraphPlainReservedRule } from './paragraphPlainReservedRule'
 import {
   createHorizontalEditorSurfaceWheelApplier,
   createVerticalWheelScrollController,
@@ -289,6 +295,8 @@ export interface ParagraphPlainModeController {
   redoOverlay(): void
   /** Select the full contents of the paragraph plain overlay textarea. */
   selectAllOverlay(): void
+  discardIfActive(): void
+  onPendingChanges(listener: ParagraphPlainPendingChangesListener): () => void
   onModeChange(listener: ParagraphPlainModeListener): () => void
   destroy(): void
 }
@@ -378,8 +386,11 @@ export function createParagraphPlainModeController(
   let paragraphPlainOverlayEl: HTMLTextAreaElement | null = null
   let paragraphPlainOverlayHost: HTMLElement | null = null
   let paragraphPlainCurrent: ParagraphPlainContext | null = null
+  const pendingChanges = createParagraphPlainPendingChangesNotifier(hasPendingOverlayChanges)
   let paragraphPlainActivePos: number | null = null
   let paragraphPlainApplying = false
+  /** STICKY-NOTE-LIFECYCLE1（N4）: 直前の確定の transaction が filterTransaction に拒否されたか。 */
+  let lastParagraphPlainCommitRejected = false
   let paragraphPlainComposing = false
   let paragraphPlainLastView: EditorView | null = null
   let paragraphPlainScrollSource: HTMLElement | null = null
@@ -419,9 +430,9 @@ export function createParagraphPlainModeController(
    * 同期レイアウトとブロックする時間を減らす（PP click-switch focus 遅延スライス）。
    */
   let paragraphPlainOverlayFocusDeferred = false
-  // CSS variable name set on the overlay host (outside ProseMirror's DOM)
-  // to avoid triggering ProseMirror's MutationObserver infinite loop.
-  const PP_RESERVED_BLOCK_SIZE_VAR = '--pp-reserved-block-size'
+  // PARAGRAPH-PLAIN-RESERVED-STYLE1: 予約は専用の <style> の規則で書く（ProseMirror の DOM に触れず
+  // MutationObserver を起こさない。`.editor-surface` へ継承される値も書かない）。
+  const reservedRule = createParagraphPlainReservedRule(() => paragraphPlainOverlayHost?.ownerDocument)
   let paragraphPlainLayoutReuseEpoch = 0
   const paragraphPlainLayoutReuseSnapshots = new Map<
     string,
@@ -455,7 +466,7 @@ export function createParagraphPlainModeController(
     const pending = pendingComfortableReservedHostPx
     pendingComfortableReservedHostPx = null
     if (pending != null) {
-      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, `${pending}px`)
+      reservedRule.write(`${pending}px`)
       lastComfortableReservedHostPx = pending
     }
   }
@@ -477,7 +488,7 @@ export function createParagraphPlainModeController(
       ) {
         return
       }
-      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, `${target}px`)
+      reservedRule.write(`${target}px`)
       lastComfortableReservedHostPx = target
     })
   }
@@ -486,7 +497,7 @@ export function createParagraphPlainModeController(
   function applyComfortableReservedHostImmediate(hostTargetPx: number): void {
     cancelComfortableReservedHostAnimation()
     if (isParagraphPlainReservedBlockSizeDisabled() || !paragraphPlainOverlayHost) return
-    paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, `${hostTargetPx}px`)
+    reservedRule.write(`${hostTargetPx}px`)
     lastComfortableReservedHostPx = hostTargetPx
   }
 
@@ -593,7 +604,7 @@ export function createParagraphPlainModeController(
     cancelScheduledParagraphPlainOverlayUpdate()
     cancelComfortableReservedHostAnimation()
     invalidateParagraphPlainLayoutReuseSnapshots()
-    paragraphPlainOverlayHost?.style.removeProperty(PP_RESERVED_BLOCK_SIZE_VAR)
+    reservedRule.write(null)
     lastComfortableReservedHostPx = null
     if (!paragraphPlainOverlayEl) return
     paragraphPlainOverlayEl.style.display = 'none'
@@ -647,29 +658,31 @@ export function createParagraphPlainModeController(
   }
 
   function destroyParagraphPlainOverlay(): void {
-    paragraphPlainOverlayFocusDeferred = false
-    cancelScheduledParagraphPlainOverlayUpdate()
-    cancelComfortableReservedHostAnimation()
-    invalidateParagraphPlainLayoutReuseSnapshots()
-    paragraphPlainOverlayHost?.style.removeProperty(PP_RESERVED_BLOCK_SIZE_VAR)
-    lastComfortableReservedHostPx = null
-    comfortableReservedStepPxCache = null
-    if (paragraphPlainScrollSource && paragraphPlainScrollHandler) {
-      paragraphPlainScrollSource.removeEventListener('scroll', paragraphPlainScrollHandler)
-    }
-    teardownParagraphPlainHostResizeTracking()
-    paragraphPlainScrollSource = null
-    paragraphPlainScrollHandler = null
+    try {
+      paragraphPlainOverlayFocusDeferred = false
+      cancelScheduledParagraphPlainOverlayUpdate()
+      cancelComfortableReservedHostAnimation()
+      invalidateParagraphPlainLayoutReuseSnapshots()
+      reservedRule.write(null)
+      lastComfortableReservedHostPx = null
+      comfortableReservedStepPxCache = null
+      if (paragraphPlainScrollSource && paragraphPlainScrollHandler) {
+        paragraphPlainScrollSource.removeEventListener('scroll', paragraphPlainScrollHandler)
+      }
+      teardownParagraphPlainHostResizeTracking()
+      paragraphPlainScrollSource = null
+      paragraphPlainScrollHandler = null
 
-    paragraphPlainOverlayWheelCleanup?.()
-    paragraphPlainOverlayWheelCleanup = null
-    paragraphPlainOverlayWheelViewDom = null
+      paragraphPlainOverlayWheelCleanup?.()
+      paragraphPlainOverlayWheelCleanup = null
+      paragraphPlainOverlayWheelViewDom = null
 
-    if (!paragraphPlainOverlayEl) return
-    paragraphPlainOverlayEl.remove()
-    paragraphPlainOverlayEl = null
-    paragraphPlainOverlayHost = null
-    resetParagraphPlainOverlayLayoutCache()
+      if (!paragraphPlainOverlayEl) return
+      paragraphPlainOverlayEl.remove()
+      paragraphPlainOverlayEl = null
+      paragraphPlainOverlayHost = null
+      resetParagraphPlainOverlayLayoutCache()
+    } finally { pendingChanges.check() }
   }
 
   function ensureParagraphPlainOverlayWheelBound(
@@ -755,15 +768,18 @@ export function createParagraphPlainModeController(
     })
     overlay.addEventListener('compositionstart', () => {
       paragraphPlainComposing = true
+      pendingChanges.check()
     })
     overlay.addEventListener('compositionupdate', () => {
       scheduleParagraphPlainOverlayUpdateForReason('compositionupdate')
     })
     overlay.addEventListener('compositionend', () => {
       paragraphPlainComposing = false
+      pendingChanges.check()
       scheduleParagraphPlainOverlayUpdateForReason('compositionend')
     })
     overlay.addEventListener('input', () => {
+      pendingChanges.check()
       scheduleParagraphPlainOverlayUpdateForReason('input')
     })
     overlay.addEventListener('keydown', (event) => {
@@ -948,10 +964,10 @@ export function createParagraphPlainModeController(
   } | null {
     if (!paragraphPlainOverlayHost) return null
     const rect = paragraphPlainProfilerRunPhase('positionParagraphPlainOverlay.blockRect', () => {
-      // Temporarily clear reserved space (via CSS variable on host, outside PM DOM)
+      // Temporarily clear reserved space (via the dedicated <style> rule, outside PM DOM)
       // so getBoundingClientRect returns the block's natural size.
       if (!isParagraphPlainReservedBlockSizeDisabled()) {
-        paragraphPlainOverlayHost!.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
+        reservedRule.write('auto')
       }
       return blockElement.getBoundingClientRect()
     })
@@ -1009,7 +1025,7 @@ export function createParagraphPlainModeController(
     flushComfortableReservedHostPendingSync()
     if (!isParagraphPlainReservedBlockSizeDisabled()) {
       cancelComfortableReservedHostAnimation()
-      paragraphPlainOverlayHost.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
+      reservedRule.write('auto')
       lastComfortableReservedHostPx = null
     }
     const blockElement = paragraphPlainProfilerRunPhase(
@@ -1097,7 +1113,7 @@ export function createParagraphPlainModeController(
           applyComfortableReservedHostImmediate(reservedPxWritten)
         } else {
           cancelComfortableReservedHostAnimation()
-          paragraphPlainOverlayHost!.style.setProperty(PP_RESERVED_BLOCK_SIZE_VAR, 'auto')
+          reservedRule.write('auto')
           lastComfortableReservedHostPx = null
         }
       }
@@ -1245,15 +1261,31 @@ export function createParagraphPlainModeController(
     return true
   }
 
-  /** PP-L4 / click-switch: overlay の focus と選択範囲（markdown はこの時点のブロックソース）。 */
-  function paragraphPlainOverlayRunFocusAndSelection(markdown: string): void {
+  /**
+   * PP-L4 / click-switch: overlay の focus と選択範囲（markdown はこの時点のブロックソース）。
+   * `preserveExternalFocus` は保存の付け直し専用。入力欄が active でないときは
+   * focus せず、遅延 focus も立てない。選択位置の付け直しだけ行う。
+   */
+  function paragraphPlainOverlayRunFocusAndSelection(
+    markdown: string,
+    options?: { preserveExternalFocus?: boolean },
+  ): void {
     if (!paragraphPlainOverlayEl) return
     const el = paragraphPlainOverlayEl
     const skipFocus = paragraphPlainProfilerRunPhase(
       'startParagraphPlain.overlayDom.beforeFocus',
       () => typeof document !== 'undefined' && document.activeElement === el,
     )
+    const keepExternalFocus = options?.preserveExternalFocus === true && !skipFocus
+    if (keepExternalFocus) paragraphPlainOverlayFocusDeferred = false
     paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.focus', () => {
+      if (keepExternalFocus) {
+        paragraphPlainProfilerMark(
+          'startParagraphPlain.overlayDom.focus',
+          'skipped-external-focus',
+        )
+        return
+      }
       if (!skipFocus) {
         el.focus({ preventScroll: true })
       } else {
@@ -1493,60 +1525,66 @@ export function createParagraphPlainModeController(
     view: EditorView,
     pos: number,
     typeName: string,
-    options?: { deferOverlayFocus?: boolean },
+    options?: { deferOverlayFocus?: boolean; preserveExternalFocus?: boolean },
   ): void {
-    const node = view.state.doc.nodeAt(pos)
-    if (!node || node.type.name !== typeName) {
-      paragraphPlainCurrent = null
-      paragraphPlainActivePos = null
-      hideParagraphPlainOverlay()
-      return
-    }
-
-    paragraphPlainProfilerRunPhase('startParagraphPlain', () => {
-      const markdown = paragraphPlainProfilerRunPhase('serializeBlockNode', () =>
-        serializeBlockNode(view.state, node, pos, getLineBreakPolicy()),
-      )
-      paragraphPlainCurrent = {
-        from: pos,
-        to: pos + node.nodeSize,
-        typeName,
-        originalMarkdown: markdown,
-      }
-      paragraphPlainActivePos = pos
-
-      if (paragraphPlainScrollIntoViewPending) {
-        paragraphPlainScrollIntoViewPending = false
-        const targetEl = resolveBlockElementAtPos(view, pos, typeName)
-        if (targetEl) {
-          try {
-            targetEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-          } catch {
-            // Non-fatal: older engines may reject the options bag.
-          }
-        }
+    try {
+      const node = view.state.doc.nodeAt(pos)
+      if (!node || node.type.name !== typeName) {
+        paragraphPlainCurrent = null
+        paragraphPlainActivePos = null
+        hideParagraphPlainOverlay()
+        return
       }
 
-      paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom', () => {
-        if (!paragraphPlainOverlayEl) return
-        const el = paragraphPlainOverlayEl
-        paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setValue', () => {
-          if (el.value !== markdown) {
-            el.value = markdown
-          }
-        })
-        paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setDisplay', () => {
-          if (el.style.display === 'none') {
-            el.style.display = ''
-          }
-        })
-        if (options?.deferOverlayFocus) {
-          paragraphPlainOverlayFocusDeferred = true
-          return
+      paragraphPlainProfilerRunPhase('startParagraphPlain', () => {
+        const markdown = paragraphPlainProfilerRunPhase('serializeBlockNode', () =>
+          serializeBlockNode(view.state, node, pos, getLineBreakPolicy()),
+        )
+        paragraphPlainCurrent = {
+          from: pos,
+          to: pos + node.nodeSize,
+          typeName,
+          originalMarkdown: markdown,
         }
-        paragraphPlainOverlayRunFocusAndSelection(markdown)
+        paragraphPlainActivePos = pos
+
+        if (paragraphPlainScrollIntoViewPending) {
+          paragraphPlainScrollIntoViewPending = false
+          const targetEl = resolveBlockElementAtPos(view, pos, typeName)
+          if (targetEl) {
+            try {
+              targetEl.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+            } catch {
+              // Non-fatal: older engines may reject the options bag.
+            }
+          }
+        }
+
+        paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom', () => {
+          if (!paragraphPlainOverlayEl) return
+          const el = paragraphPlainOverlayEl
+          paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setValue', () => {
+            if (el.value !== markdown) {
+              el.value = markdown
+            }
+          })
+          paragraphPlainProfilerRunPhase('startParagraphPlain.overlayDom.setDisplay', () => {
+            if (el.style.display === 'none') {
+              el.style.display = ''
+            }
+          })
+          if (options?.deferOverlayFocus) {
+            paragraphPlainOverlayFocusDeferred = true
+            return
+          }
+          // preserveExternalFocus は遅延 focus を立てない（flush で後から奪わない）。
+          paragraphPlainOverlayRunFocusAndSelection(
+            markdown,
+            options?.preserveExternalFocus ? { preserveExternalFocus: true } : undefined,
+          )
+        })
       })
-    })
+    } finally { pendingChanges.check() }
   }
 
   function replaceBlockNodeInternal(
@@ -1593,50 +1631,75 @@ export function createParagraphPlainModeController(
       tr.setSelection(Selection.near(tr.doc.resolve(safePos), 1))
     }
     paragraphPlainProfilerMark('dispatch.before', 'replaceBlock')
-    paragraphPlainProfilerRunPhase('dispatch', () => {
-      editor.view.dispatch(tr)
-    }, 'replaceBlock')
+    const applied = paragraphPlainProfilerRunPhase('dispatch', () => dispatchParagraphPlainCommit(tr), 'replaceBlock')
+    if (!applied) {
+      // STICKY-NOTE-LIFECYCLE1（N4）: filterTransaction に拒否された。「適用した」と返さず、
+      // overlay と編集中の文字を保つ（黙って捨てない）。
+      pushLog('sourceEdit', `replaceBlock rejected: transaction filtered for ${context.typeName}`)
+      return false
+    }
     pushLog('sourceEdit', `replaceBlock applied (${context.typeName})`)
     return true
+  }
+
+  /**
+   * STICKY-NOTE-LIFECYCLE1（N4）: Paragraph Plain の確定の transaction は専用の meta を付けて出し、
+   * 付箋のコメントが消えても通す（Source Mode と同じ扱い）。dispatch の後に適用されたことを
+   * 確かめ、ほかの plugin に拒否されたら false を返す。
+   */
+  function dispatchParagraphPlainCommit(tr: Transaction): boolean {
+    tr.setMeta(NOTE_ANCHOR_PARAGRAPH_PLAIN_COMMIT_META_KEY, true)
+    const before = editor.state.doc
+    // REVIEWFIX2 R3: 確定の前後の anchor の id の差で、文字の編集で消えた付箋を知らせる（索引を使う。全文の走査を足さない）。
+    const anchorsBefore = tr.docChanged ? collectNoteAnchorIdsInDoc(before) : []
+    editor.view.dispatch(tr)
+    const applied = !tr.docChanged || editor.state.doc !== before
+    if (!applied) lastParagraphPlainCommitRejected = true
+    else if (tr.docChanged) notifyNoteAnchorsDetachedByEdit(editor.view, noteAnchorIdsRemoved(anchorsBefore, collectNoteAnchorIdsInDoc(editor.state.doc)))
+    return applied
   }
 
   function commitCurrentParagraphPlain(
     save: boolean,
     options?: { preserveSelection?: boolean; allowMarkdownBlockReparse?: boolean },
   ): boolean {
-    flushComfortableReservedHostPendingSync()
+    try {
+      flushComfortableReservedHostPendingSync()
 
-    if (!paragraphPlainCurrent) {
-      paragraphPlainActivePos = null
-      return true
-    }
+      if (!paragraphPlainCurrent) {
+        paragraphPlainActivePos = null
+        return true
+      }
 
-    if (save && paragraphPlainOverlayEl) {
-      const nextMarkdown = paragraphPlainOverlayEl.value
-      if (nextMarkdown !== paragraphPlainCurrent.originalMarkdown) {
-        paragraphPlainApplying = true
-        try {
-          const applied = paragraphPlainProfilerRunPhase('commitCurrentParagraphPlain', () =>
-            replaceBlockNodeInternal(
-              nextMarkdown,
-              paragraphPlainCurrent!,
-              options,
-            ),
-          )
-          if (!applied) {
-            pushLog('sourceEdit', `replaceBlock kept editing (${paragraphPlainCurrent.typeName})`)
-            return false
+      if (save && paragraphPlainOverlayEl) {
+        const nextMarkdown = paragraphPlainOverlayEl.value
+        if (nextMarkdown !== paragraphPlainCurrent.originalMarkdown) {
+          lastParagraphPlainCommitRejected = false
+          paragraphPlainApplying = true
+          try {
+            const applied = paragraphPlainProfilerRunPhase('commitCurrentParagraphPlain', () =>
+              replaceBlockNodeInternal(
+                nextMarkdown,
+                paragraphPlainCurrent!,
+                options,
+              ),
+            )
+            if (!applied) {
+              pushLog('sourceEdit', `replaceBlock kept editing (${paragraphPlainCurrent.typeName})`)
+              return false
+            }
+            invalidateParagraphPlainLayoutReuseSnapshots()
+          } finally {
+            paragraphPlainApplying = false
           }
-          invalidateParagraphPlainLayoutReuseSnapshots()
-        } finally {
-          paragraphPlainApplying = false
         }
       }
-    }
 
-    paragraphPlainCurrent = null
-    paragraphPlainActivePos = null
-    return true
+      paragraphPlainCurrent = null
+      paragraphPlainActivePos = null
+      pendingChanges.check()
+      return true
+    } finally { pendingChanges.check() }
   }
 
   function isImeCompositionKey(event: KeyboardEvent): boolean {
@@ -1836,28 +1899,32 @@ export function createParagraphPlainModeController(
     const from = paragraphPlainCurrent.from
     const to = paragraphPlainCurrent.to
 
-    paragraphPlainCurrent = null
-    paragraphPlainActivePos = null
-    hideParagraphPlainOverlay()
-    paragraphPlainPendingSelection = {
-      kind: 'absolute',
-      start: 0,
-      end: 0,
-    }
-
     paragraphPlainApplying = true
     try {
       const tr = state.tr.replaceWith(from, to, [beforeNode, afterNode])
       const selectionPos = from + beforeNode.nodeSize + 1
       tr.setSelection(TextSelection.create(tr.doc, selectionPos))
       paragraphPlainProfilerMark('dispatch.before', 'enter-split')
-      paragraphPlainProfilerRunPhase('dispatch', () => {
-        editor.view.dispatch(tr)
-      }, 'enter-split')
+      const applied = paragraphPlainProfilerRunPhase('dispatch', () => dispatchParagraphPlainCommit(tr), 'enter-split')
       paragraphPlainProfilerMark('dispatch.after', 'enter-split')
+      if (!applied) {
+        // STICKY-NOTE-LIFECYCLE1（N4）: 拒否されたら overlay と編集中の文字を保つ。
+        paragraphPlainProfilerCancelSession('split-rejected')
+        pushLog('sourceEdit', `enterKey split rejected (${typeName})`)
+        return
+      }
       pushLog('sourceEdit', `enterKey split (${typeName})`)
     } finally {
       paragraphPlainApplying = false
+    }
+    paragraphPlainCurrent = null
+    paragraphPlainActivePos = null
+    pendingChanges.check()
+    hideParagraphPlainOverlay()
+    paragraphPlainPendingSelection = {
+      kind: 'absolute',
+      start: 0,
+      end: 0,
     }
 
     // Request scroll follow-through for the re-entry into Paragraph Plain on
@@ -1909,15 +1976,6 @@ export function createParagraphPlainModeController(
       mergedNode = paragraphType.create(null, mergedMarkdown ? [state.schema.text(mergedMarkdown)] : undefined)
     }
 
-    paragraphPlainCurrent = null
-    paragraphPlainActivePos = null
-
-    paragraphPlainPendingSelection = {
-      kind: 'absolute',
-      start: prevMarkdown.length,
-      end: prevMarkdown.length,
-    }
-
     paragraphPlainApplying = true
     try {
       const from = prevPos
@@ -1925,11 +1983,24 @@ export function createParagraphPlainModeController(
       const tr = state.tr.replaceWith(from, to, mergedNode)
       const selectionPos = prevPos + 1
       tr.setSelection(TextSelection.create(tr.doc, selectionPos))
-      editor.view.dispatch(tr)
+      if (!dispatchParagraphPlainCommit(tr)) {
+        // STICKY-NOTE-LIFECYCLE1（N4）: 拒否されたら overlay と編集中の文字を保つ。
+        pushLog('sourceEdit', 'backspaceAtStart merge rejected')
+        return
+      }
       invalidateParagraphPlainLayoutReuseSnapshots()
       pushLog('sourceEdit', 'backspaceAtStart merge')
     } finally {
       paragraphPlainApplying = false
+    }
+    paragraphPlainCurrent = null
+    paragraphPlainActivePos = null
+    pendingChanges.check()
+
+    paragraphPlainPendingSelection = {
+      kind: 'absolute',
+      start: prevMarkdown.length,
+      end: prevMarkdown.length,
     }
 
     requestAnimationFrame(() => {
@@ -2086,43 +2157,58 @@ export function createParagraphPlainModeController(
   }
 
   function setMode(enabled: boolean): boolean {
-    if (enabled === paragraphPlainActive) return paragraphPlainActive
+    try {
+      if (enabled === paragraphPlainActive) return paragraphPlainActive
 
-    if (enabled) {
-      if (editor.state && !findActiveBlockPos(editor.state)) {
-        pushLog('plainParagraph', 'enable skipped: unsupported block')
-        return false
+      if (enabled) {
+        if (editor.state && !findActiveBlockPos(editor.state)) {
+          pushLog('plainParagraph', 'enable skipped: unsupported block')
+          return false
+        }
+        // PIS-S10-ENTRY1b: plugin の登録は PM の plugin view をすべて作り直し、sentinel の帳簿を消す。
+        // Host に保留の入力（変換中の記録、位置を証明できずに保持している確定文字）が残っている間は入らない。
+        // 止めるのは入るときだけ（出るときは止めない。Paragraph Plain へ閉じ込めない）。
+        if (editor.view && hasPendingSpecialInlineBoundaryInput(editor.view)) {
+          pushLog('plainParagraph', 'enable skipped: pending special-inline boundary input')
+          return false
+        }
+        paragraphPlainActive = true
+        paragraphPlainPlugin = createParagraphPlainPlugin()
+        editor.registerPlugin(paragraphPlainPlugin)
+        emitParagraphPlainModeChange(true)
+        pushLog('plainParagraph', 'enabled')
+        return true
       }
-      paragraphPlainActive = true
-      paragraphPlainPlugin = createParagraphPlainPlugin()
-      editor.registerPlugin(paragraphPlainPlugin)
-      emitParagraphPlainModeChange(true)
-      pushLog('plainParagraph', 'enabled')
-      return true
-    }
 
-    // Paragraph Plain 解除時は overlay の Markdown を block 記法として再解釈する。
-    // 通常 commit / 隣接 block 移動 / click target preserve からは
-    // allowMarkdownBlockReparse を渡さないので影響しない。
-    const committed = commitCurrentParagraphPlain(true, {
-      allowMarkdownBlockReparse: true,
-    })
-    if (!committed) {
-      // Never trap the editor in Paragraph Plain. If the current block markdown
-      // is no longer representable, discard the in-overlay edits and exit.
-      commitCurrentParagraphPlain(false)
-      pushLog('plainParagraph', 'disable fallback: discarded unresolved block markdown')
-    }
-    if (paragraphPlainPlugin) {
-      editor.unregisterPlugin(paragraphPlainPluginKey)
-      paragraphPlainPlugin = null
-    }
-    destroyParagraphPlainOverlay()
-    paragraphPlainScrollIntoViewPending = false
-    paragraphPlainActive = false
-    emitParagraphPlainModeChange(false)
-    pushLog('plainParagraph', 'disabled')
-    return false
+      // Paragraph Plain 解除時は overlay の Markdown を block 記法として再解釈する。
+      // 通常 commit / 隣接 block 移動 / click target preserve からは
+      // allowMarkdownBlockReparse を渡さないので影響しない。
+      const committed = commitCurrentParagraphPlain(true, {
+        allowMarkdownBlockReparse: true,
+      })
+      if (!committed && lastParagraphPlainCommitRejected) {
+        // STICKY-NOTE-LIFECYCLE1（N4）: 確定の transaction が拒否された。編集中の文字を捨てず、
+        // overlay を開いたまま Paragraph Plain に留まる（拒否の理由は filterTransaction 側）。
+        pushLog('plainParagraph', 'disable blocked: commit transaction rejected')
+        return true
+      }
+      if (!committed) {
+        // Never trap the editor in Paragraph Plain. If the current block markdown
+        // is no longer representable, discard the in-overlay edits and exit.
+        commitCurrentParagraphPlain(false)
+        pushLog('plainParagraph', 'disable fallback: discarded unresolved block markdown')
+      }
+      if (paragraphPlainPlugin) {
+        editor.unregisterPlugin(paragraphPlainPluginKey)
+        paragraphPlainPlugin = null
+      }
+      destroyParagraphPlainOverlay()
+      paragraphPlainScrollIntoViewPending = false
+      paragraphPlainActive = false
+      emitParagraphPlainModeChange(false)
+      pushLog('plainParagraph', 'disabled')
+      return false
+    } finally { pendingChanges.check() }
   }
 
   function toggleMode(): boolean {
@@ -2134,10 +2220,27 @@ export function createParagraphPlainModeController(
   }
 
   function commitIfActive(): boolean {
-    return commitParagraphPlainIfActive({
+    const current = paragraphPlainCurrent
+    const selection: PendingOverlaySelection | null = paragraphPlainOverlayEl
+      ? { kind: 'absolute', start: paragraphPlainOverlayEl.selectionStart, end: paragraphPlainOverlayEl.selectionEnd }
+      : null
+    const committed = commitParagraphPlainIfActive({
       active: paragraphPlainActive,
       commitCurrentParagraphPlain,
     })
+    // Save leaves the textarea open. Re-establish its comparison baseline now,
+    // so typing after that commit is observable before any later view update.
+    // Use the just-committed block: replacement may map PM's selection to the
+    // adjacent block. This reload changes no transaction or history.
+    if (committed && current && paragraphPlainActive && paragraphPlainLastView) {
+      paragraphPlainPendingSelection = selection
+      // 入力欄に focus があるときだけ従来どおり復元する。別の入力欄にいるときは
+      // 比較元・値・選択位置だけ付け直し、focus も遅延 focus も動かさない。
+      startParagraphPlain(paragraphPlainLastView, current.from, current.typeName, {
+        preserveExternalFocus: true,
+      })
+    }
+    return committed
   }
 
   function hasPendingOverlayChanges(): boolean {
@@ -2155,9 +2258,31 @@ export function createParagraphPlainModeController(
     }
   }
 
+  function discardIfActive(): void {
+    if (!paragraphPlainActive) return
+    // Explicit discard after successful note cleanup. Never call the committing setMode(false).
+    paragraphPlainCurrent = null
+    paragraphPlainActivePos = null
+    pendingChanges.check()
+    paragraphPlainComposing = false
+    paragraphPlainActive = false
+    if (paragraphPlainPlugin) {
+      editor.unregisterPlugin(paragraphPlainPluginKey)
+      paragraphPlainPlugin = null
+    }
+    destroyParagraphPlainOverlay()
+    paragraphPlainScrollIntoViewPending = false
+    pendingChanges.check()
+    emitParagraphPlainModeChange(false)
+    pushLog('plainParagraph', 'discarded')
+  }
+
   function destroy(): void {
     setMode(false)
     destroyParagraphPlainOverlay()
+    reservedRule.dispose()
+    pendingChanges.check()
+    pendingChanges.clear()
     paragraphPlainModeListeners.clear()
   }
 
@@ -2165,6 +2290,7 @@ export function createParagraphPlainModeController(
     if (!paragraphPlainActive || !paragraphPlainOverlayEl) return
     paragraphPlainOverlayEl.focus()
     document.execCommand('undo')
+    pendingChanges.check()
     scheduleParagraphPlainOverlayUpdateForReason('undo')
   }
 
@@ -2172,6 +2298,7 @@ export function createParagraphPlainModeController(
     if (!paragraphPlainActive || !paragraphPlainOverlayEl) return
     paragraphPlainOverlayEl.focus()
     document.execCommand('redo')
+    pendingChanges.check()
     scheduleParagraphPlainOverlayUpdateForReason('redo')
   }
 
@@ -2191,6 +2318,8 @@ export function createParagraphPlainModeController(
     redoOverlay,
     selectAllOverlay,
     onModeChange,
+    onPendingChanges: pendingChanges.subscribe,
+    discardIfActive,
     destroy,
   }
 }

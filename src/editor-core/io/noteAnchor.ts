@@ -38,6 +38,26 @@ export function matchNoteAnchorComment(raw: string): string | null {
   return match ? match[1] : null
 }
 
+/**
+ * 行頭が付箋アンカー comment のとき、その ID と残りの文字列を返す。
+ * 行頭の半角空白・タブは CommonMark の HTML block と同じく最大3文字まで許す。
+ * 判定は既存 matchNoteAnchorComment だけで行い、新しい正規表現は持たない。
+ */
+export function splitLeadingNoteAnchorComment(line: string): { id: string; rest: string } | null {
+  let rest = line
+  let stripped = 0
+  while (stripped < 3 && (rest.startsWith(' ') || rest.startsWith('\t'))) {
+    rest = rest.slice(1)
+    stripped++
+  }
+  if (!rest.startsWith('<!--')) return null
+  const end = rest.indexOf('-->')
+  if (end < 0) return null
+  const id = matchNoteAnchorComment(rest.slice(0, end + 3))
+  if (id === null) return null
+  return { id, rest: rest.slice(end + 3) }
+}
+
 /** noteAnchor node の ID として受け入れる文字列かどうか。 */
 export function isValidNoteAnchorId(id: string): boolean {
   return NOTE_ANCHOR_ID_REGEX.test(id)

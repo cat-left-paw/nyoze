@@ -257,7 +257,7 @@ export function classifyEditMenuKeyboardOperation(event: {
   if (event.cancelable === false) return null
   // AltGr はすべての Edit menu shortcut より先に拒否する。
   if (event.altGraphKey === true) return null
-  // Undo / Redo（`Ctrl+Z` / `Cmd+Z` / `Mod+Shift+Z` / Windows の `Ctrl+Y`）は共有正本。
+  // Undo / Redo（`Ctrl+Z` / `Cmd+Z` / `Mod+Shift+Z` / `Ctrl+Y`）はplatform共通の正本。
   const history = classifyLocalImeHistoryChord(event)
   if (history) return history
   const mod = event.metaKey || event.ctrlKey

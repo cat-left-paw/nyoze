@@ -263,7 +263,7 @@ export function resolveBoundedDocumentPath(
   if (!validPath) return null;
   let realPath: string;
   try {
-    realPath = fs.realpathSync(path.resolve(validPath));
+    realPath = fs.realpathSync.native(path.resolve(validPath));
   } catch {
     return null;
   }

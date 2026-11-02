@@ -1,7 +1,11 @@
+import { useOutlinePreviewInvalidation } from '../hooks/useOutlinePreviewInvalidation';
+import type { OutlineHeadingRow, OutlineHeadingTarget } from '../../editor-core/features/outlineTargetReference';
+import type { ActiveHeadingStore } from '../hooks/activeHeadingStore'
+import { useSyncExternalStore } from 'react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import type { HeadingInfo, LineBreakPolicy } from "../../editor-core/types";
+import type { LineBreakPolicy } from "../../editor-core/types";
 import type { FrontmatterFields } from "../../editor-core/io/frontmatter";
 import type {
   DocumentColorSettings,
@@ -26,6 +30,7 @@ import { createUiTextGetter } from "../i18n/uiText";
 import type { SourceModeController } from "../hooks/useSourceModeController";
 import type { TypewriterRuntimeRef } from "../hooks/typewriterRuntimeRef";
 import { resolveVisibleOutlineItems } from "../utils/outlineVisibility";
+import { useEditorSurfaceHeightSync } from "../hooks/useEditorSurfaceHeightSync";
 import { OutlineModeToggle, type OutlineMode } from "./OutlineModeToggle";
 import { FileExplorerPane } from "./FileExplorerPane";
 import type { LocalImeLocalEditingPresentationSource } from "../../editor-core/features/localImeLocalEditingPresentationStatus";
@@ -40,6 +45,7 @@ import { SourceModeEditor } from "./SourceModeEditor";
 import { RightPaneTabBar } from "./RightPaneTabBar";
 import type { FileExplorerRole } from "../../project/fileExplorerRoles";
 import { EditorTabStrip } from "./EditorTabStrip";
+import { useCollapsedPaneExclusion } from "../hooks/useCollapsedPaneExclusion";
 
 type RightPaneTab = "outline" | "document" | "notes" | "project" | "theme";
 type ActiveDocumentInfo = {
@@ -62,7 +68,7 @@ type OutlinePreviewState = {
   text: string;
   x: number;
   y: number;
-  headingPos: number;
+  headingTarget: OutlineHeadingTarget;
   mode: OutlinePreviewMode;
 };
 
@@ -94,7 +100,7 @@ type WorkspaceProps = {
   activeDocumentInfo: ActiveDocumentInfo;
   localImeStatusPresentation: LocalImeLocalEditingPresentationSource;
   canFileExplorerPaste: boolean;
-  tabs: EditorTab[];
+  tabs: EditorTab[]; paragraphPlainDraftDirtyTabId?: string | null;
   /**
    * `filePath -> FileExplorerRole` の display-only map（`.nyoze/books.json` v3 正本）。
    * タブアイコン表示にだけ使い、`EditorTab` の保存状態には持たせない。
@@ -125,8 +131,8 @@ type WorkspaceProps = {
   docColorSettings: DocumentColorSettings;
   selectedFont: string | null;
   rightPaneTab: RightPaneTab;
-  headings: HeadingInfo[];
-  activeHeadingIndex: number;
+  headings: OutlineHeadingRow[];
+  activeHeadingStore: ActiveHeadingStore;
   foldedHeadingPositions: Set<number>;
   onDividerMouseDown: (side: "left" | "right", e: ReactMouseEvent) => void;
   /**
@@ -134,6 +140,8 @@ type WorkspaceProps = {
    * 既存 `schedulePseudoCaretUpdate()` へ通知する。表示専用。第二schedulerは作らない。
    */
   onPaneGeometryCommitted?: () => void;
+  /** S7a: pane以外の組版変更では入力面だけを再配置する。 */
+  onInputSurfaceDisplayChanged?: () => void;
   onFileExplorerCreateNote: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerCreateFolder: (entry: FileExplorerVisibleEntry | null) => void;
   onFileExplorerCreateProjectForFolder: (entry: FileExplorerVisibleEntry | null) => void;
@@ -158,9 +166,11 @@ type WorkspaceProps = {
   onApplyFullPlainEdit: () => void;
   onCloseFullPlainEdit: () => void;
   onSetRightPaneTab: (tab: RightPaneTab) => void;
-  onToggleHeadingFold: (pos: number) => void;
-  onRequestHeadingPreview: (pos: number) => string;
-  onScrollToPos: (pos: number) => void;
+  onToggleHeadingFold: (target: OutlineHeadingTarget) => void;
+  onRequestHeadingPreview: (target: OutlineHeadingTarget) => string;
+  onScrollToOutlineHeading: (target: OutlineHeadingTarget) => void;
+  getActiveOutlineTarget: (index: number) => OutlineHeadingTarget | null;
+  onWatchOutlinePreview: (close: () => void) => () => void;
   frontmatterFields: FrontmatterFields;
   /**
    * EDITOR-SURFACE-DOCUMENT-END-CARET1: 本文末尾以降の編集面余白を bare primary
@@ -217,7 +227,7 @@ export function Workspace({
   activeDocumentInfo,
   localImeStatusPresentation,
   canFileExplorerPaste,
-  tabs,
+  tabs, paragraphPlainDraftDirtyTabId,
   tabRoles,
   activeTabId,
   fullPlainEditActive,
@@ -242,10 +252,11 @@ export function Workspace({
   selectedFont,
   rightPaneTab,
   headings,
-  activeHeadingIndex,
+  activeHeadingStore,
   foldedHeadingPositions,
   onDividerMouseDown,
   onPaneGeometryCommitted,
+  onInputSurfaceDisplayChanged,
   onFileExplorerCreateNote,
   onFileExplorerCreateFolder,
   onFileExplorerCreateProjectForFolder,
@@ -270,7 +281,9 @@ export function Workspace({
   onSetRightPaneTab,
   onToggleHeadingFold,
   onRequestHeadingPreview,
-  onScrollToPos,
+  onScrollToOutlineHeading,
+  getActiveOutlineTarget,
+  onWatchOutlinePreview,
   frontmatterFields,
   onEditorSurfaceWhitespaceClick,
   caretColor,
@@ -289,7 +302,24 @@ export function Workspace({
   useLayoutEffect(() => {
     onPaneGeometryCommitted?.();
   }, [leftPaneOpen, rightPaneOpen, leftWidth, rightWidth, onPaneGeometryCommitted]);
+  useLayoutEffect(() => onInputSurfaceDisplayChanged?.(), [writingMode, docFontPreset, docHeadingFont, documentTheme, docColorSettings, selectedFont, rubyVisible, onInputSurfaceDisplayChanged]);
+  const leftPaneRef = useRef<HTMLElement | null>(null);
+  const rightPaneRef = useRef<HTMLElement | null>(null);
+  // EDITOR-VERTICAL-LAYOUT-FIX1: panel の content box 高さを外枠へ px で写す（hook 側）。
+  const editorPanelRef = useEditorSurfaceHeightSync(onPaneGeometryCommitted);
+  useCollapsedPaneExclusion(
+    leftPaneOpen,
+    leftPaneRef,
+    '[data-pane-toggle="left"]',
+  );
+  useCollapsedPaneExclusion(
+    rightPaneOpen,
+    rightPaneRef,
+    '[data-pane-toggle="right"]',
+  );
 
+  const activeHeadingIndex = useSyncExternalStore(activeHeadingStore.subscribe, activeHeadingStore.getSnapshot);
+  const activeOutlineTarget = getActiveOutlineTarget(activeHeadingIndex);
   const t = createUiTextGetter(uiLanguageMode);
   const hideDocumentStartOverlays = paragraphPlainModeActive;
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0];
@@ -353,7 +383,7 @@ export function Workspace({
   const openOutlinePreviewAt = useCallback(
     (
       mode: OutlinePreviewMode,
-      headingPos: number,
+      headingTarget: OutlineHeadingTarget,
       text: string,
       x: number,
       y: number,
@@ -363,17 +393,17 @@ export function Workspace({
         setOutlinePreview(null);
         return;
       }
-      setOutlinePreview({ text: normalized, x, y, headingPos, mode });
+      setOutlinePreview({ text: normalized, x, y, headingTarget, mode });
     },
     [],
   );
 
   const openOutlineContextPreviewFromEvent = useCallback(
-    (pos: number, event: ReactMouseEvent<HTMLElement>) => {
-      const text = onRequestHeadingPreview(pos);
+    (target: OutlineHeadingTarget, event: ReactMouseEvent<HTMLElement>) => {
+      const text = onRequestHeadingPreview(target);
       openOutlinePreviewAt(
         "context",
-        pos,
+        target,
         text,
         event.clientX + 8,
         event.clientY + 8,
@@ -383,12 +413,12 @@ export function Workspace({
   );
 
   const openOutlineHoverPreviewFromEvent = useCallback(
-    (pos: number, event: ReactMouseEvent<HTMLElement>) => {
+    (target: OutlineHeadingTarget, event: ReactMouseEvent<HTMLElement>) => {
       if (hoverCloseTimerRef.current !== null) {
         window.clearTimeout(hoverCloseTimerRef.current);
         hoverCloseTimerRef.current = null;
       }
-      const text = onRequestHeadingPreview(pos);
+      const text = onRequestHeadingPreview(target);
       const preferredX = event.clientX + HOVER_OFFSET_PX;
       const clampedX = Math.max(
         8,
@@ -396,7 +426,7 @@ export function Workspace({
       );
       openOutlinePreviewAt(
         "hover",
-        pos,
+        target,
         text,
         clampedX,
         event.clientY + HOVER_OFFSET_PX,
@@ -405,7 +435,7 @@ export function Workspace({
     [onRequestHeadingPreview, openOutlinePreviewAt],
   );
 
-  const scheduleCloseOutlineHoverPreview = useCallback((pos: number) => {
+  const scheduleCloseOutlineHoverPreview = useCallback((target: OutlineHeadingTarget) => {
     if (hoverCloseTimerRef.current !== null) {
       window.clearTimeout(hoverCloseTimerRef.current);
       hoverCloseTimerRef.current = null;
@@ -414,7 +444,7 @@ export function Workspace({
       setOutlinePreview((current) => {
         if (!current) return current;
         if (current.mode !== "hover") return current;
-        if (current.headingPos !== pos) return current;
+        if (current.headingTarget !== target) return current;
         return null;
       });
       hoverCloseTimerRef.current = null;
@@ -439,10 +469,12 @@ export function Workspace({
   );
 
   const isContextPreviewOpenFor = useCallback(
-    (pos: number): boolean =>
-      outlinePreview?.mode === "context" && outlinePreview.headingPos === pos,
+    (target: OutlineHeadingTarget): boolean =>
+      outlinePreview?.mode === "context" && outlinePreview.headingTarget === target,
     [outlinePreview],
   );
+
+  useOutlinePreviewInvalidation(Boolean(outlinePreview), headings, onWatchOutlinePreview, closeOutlinePreview);
 
   useEffect(() => {
     if (!outlinePreview) return;
@@ -512,8 +544,10 @@ export function Workspace({
   return (
     <section ref={workspaceRef} className="workspace">
       <aside
+        ref={leftPaneRef}
         className={`pane-left${leftPaneOpen ? "" : " collapsed"}`}
         style={{ width: leftPaneOpen ? leftWidth : 0 }}
+        aria-hidden={!leftPaneOpen}
       >
         <FileExplorerPane
           uiLanguageMode={uiLanguageMode}
@@ -561,7 +595,7 @@ export function Workspace({
 
       <div className="pane-center">
         <EditorTabStrip
-          tabs={tabs}
+          tabs={tabs} paragraphPlainDraftDirtyTabId={paragraphPlainDraftDirtyTabId}
           tabRoles={tabRoles}
           activeTabId={activeTab?.id}
           onSetActiveTab={onSetActiveTab}
@@ -571,7 +605,8 @@ export function Workspace({
           editorTabActionsSlot={editorTabActionsSlot}
         />
         <div
-          className="editor-panel"
+          ref={editorPanelRef}
+          className={effectiveLineBreakPolicy === "commonmark-strict" ? "editor-panel editor-line-break-commonmark-strict" : "editor-panel"}
           data-ruby-visible={rubyVisible ? "1" : "0"}
           data-writing-mode={writingMode}
           data-editor-pointer-mode={useEditorArrowPointer ? "arrow" : "text"}
@@ -611,6 +646,7 @@ export function Workspace({
               {editorInlineHintMessage}
             </div>
           )}
+          <div className="editor-surface-frame">
           <div
             className={`editor-surface${fullPlainEditActive ? " is-hidden-for-plain" : ""}`}
             onPointerDown={(e) => {
@@ -658,6 +694,7 @@ export function Workspace({
             />
             <div ref={editorDivRef} className="editor-core-host" />
           </div>
+          </div>
 
           {fullPlainEditActive && (
             <>
@@ -687,8 +724,10 @@ export function Workspace({
       )}
 
       <aside
+        ref={rightPaneRef}
         className={`pane-right${rightPaneOpen ? "" : " collapsed"}`}
         style={{ width: rightPaneOpen ? rightWidth : 0 }}
+        aria-hidden={!rightPaneOpen}
       >
         <div className="pane-inner pane-inner-right">
           <RightPaneTabBar
@@ -706,25 +745,25 @@ export function Workspace({
               ) : (
                 visibleOutlineItems.map(({ heading: h, originalIndex }) => {
                   const isFolded = foldedHeadingPositions.has(h.pos);
-                  const isActive = originalIndex === activeHeadingIndex;
+                  const isActive = h.target === activeOutlineTarget;
                   return (
                     <div
                       key={`${h.pos}-${originalIndex}`}
                       className={`outline-row${isActive ? " active" : ""}${isFolded ? " folded" : ""}`}
                       onContextMenu={(event) => {
                         event.preventDefault();
-                        if (isContextPreviewOpenFor(h.pos)) {
+                        if (isContextPreviewOpenFor(h.target)) {
                           closeOutlinePreview();
                           return;
                         }
-                        openOutlineContextPreviewFromEvent(h.pos, event);
+                        openOutlineContextPreviewFromEvent(h.target, event);
                       }}
                     >
                       <button
                         className={`outline-fold-btn${isFolded ? " folded" : ""}`}
                         type="button"
                         disabled={fullPlainEditActive}
-                        onClick={() => onToggleHeadingFold(h.pos)}
+                        onClick={() => onToggleHeadingFold(h.target)}
                         title={isFolded ? t("workspace.outline.expand") : t("workspace.outline.collapse")}
                       >
                         <svg
@@ -752,7 +791,7 @@ export function Workspace({
                         onClick={(event) => {
                           event.stopPropagation();
                           closeOutlinePreview();
-                          onScrollToPos(h.pos);
+                          onScrollToOutlineHeading(h.target);
                         }}
                         title={h.text}
                       >
@@ -764,11 +803,11 @@ export function Workspace({
                         title={t("workspace.outline.preview")}
                         onMouseEnter={(event) => {
                           event.stopPropagation();
-                          openOutlineHoverPreviewFromEvent(h.pos, event);
+                          openOutlineHoverPreviewFromEvent(h.target, event);
                         }}
                         onMouseLeave={(event) => {
                           event.stopPropagation();
-                          scheduleCloseOutlineHoverPreview(h.pos);
+                          scheduleCloseOutlineHoverPreview(h.target);
                         }}
                       >
                         <svg

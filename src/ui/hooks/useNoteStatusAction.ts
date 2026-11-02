@@ -19,6 +19,8 @@ type UseNoteStatusActionOptions = {
   getPlainModeKind: () => PlainModeKind | null
   getBridge: () => NoteAnchorProjectBridge | null
   onSaved: () => void
+  /** STICKY-NOTE-LIFECYCLE1: 書き込んだ entry の id と fingerprint（provisional の record の更新用）。 */
+  onNoteEntrySaved?: (saved: { id: string; fingerprint: string }) => void
 }
 
 export function useNoteStatusAction(options: UseNoteStatusActionOptions) {
@@ -52,6 +54,7 @@ export function useNoteStatusAction(options: UseNoteStatusActionOptions) {
         return { kind: 'failed', message: result.message }
       }
 
+      o.onNoteEntrySaved?.({ id, fingerprint: result.fingerprint })
       o.onSaved()
       return { kind: 'updated' }
     },

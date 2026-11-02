@@ -1,3 +1,4 @@
+import { createDocumentInstanceId, matchesDocumentIdentity } from "../utils/saveTargetIdentity";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type {
@@ -26,6 +27,7 @@ import {
 } from "./tabLeaveSnapshot";
 import {
   deferTabLeaveSnapshotApplyForE2e,
+  consumeRestoreTabFailureForE2e,
 } from "../utils/savedStatPatchLatchForE2e";
 import {
   shouldGuardSourceModeBeforeTabClose,
@@ -63,7 +65,10 @@ import type { ShortcutBundleKey } from "../internalDocs/resolveShortcutBundleKey
 
 export type TabManagerDeps = {
   coreRef: RefObject<EditorCoreHandle | null>;
+  documentIdentity: import("../utils/saveTargetIdentity").DocumentIdentityState;
+  readActiveTabId: () => string;
   tabs: EditorTab[];
+  readSynchronizedTabs?: () => EditorTab[];
   activeTabId: string;
   activeTab: EditorTab;
   setActiveTabId: (id: string) => void;
@@ -128,6 +133,7 @@ export type TabManagerDeps = {
     reason: LocalImeDocumentLeaveOperation,
   ) => { readonly status: string };
   isLocalImeDocumentActionPending: () => boolean;
+  flushDeferredUiSync?: (reason: string) => unknown;
 };
 
 /** Maximum number of simultaneously open tabs. */
@@ -158,6 +164,7 @@ function makeEmptyTab(
 ): EditorTab {
   return {
     id: generateTabId(),
+    documentInstanceId: createDocumentInstanceId(),
     title: generateUntitledName(),
     dirty: false,
     filePath: null,
@@ -222,7 +229,7 @@ export function useTabManager(deps: TabManagerDeps) {
       activeTabId: d.activeTabId,
       dirtyOwnerTabId: d.localImeDraftDirtyOwnerTabId,
       dirtyNotice: d.readLocalImeDraftDirtyNotice(),
-      tabs: d.tabs,
+      tabs: d.readSynchronizedTabs?.() ?? d.tabs,
       documentActionPending: d.isLocalImeDocumentActionPending(),
     };
   }, []);
@@ -232,6 +239,7 @@ export function useTabManager(deps: TabManagerDeps) {
       operation: LocalImeDocumentLeaveOperation,
     ): LocalImeDocumentLeaveProof<EditorTab> => {
       const d = depsRef.current;
+      d.flushDeferredUiSync?.(operation);
       return prepareLocalImeDocumentLeave({
         operation,
         readBeforeBarrier: () => ({
@@ -262,7 +270,7 @@ export function useTabManager(deps: TabManagerDeps) {
     const core = d.coreRef.current;
     if (!core) return null;
     const proofBeforeSnapshot = reproveDocumentLeave(capture);
-    if (!proofBeforeSnapshot.ok) return null;
+    if (!proofBeforeSnapshot.ok || !matchesDocumentIdentity(d.documentIdentity.readEditor(), proofBeforeSnapshot.activeTab)) return null;
 
     const paragraphPlainOverlayChanged =
       core.hasParagraphPlainPendingOverlayChanges();
@@ -276,6 +284,13 @@ export function useTabManager(deps: TabManagerDeps) {
     }
     const proofAfterSnapshot = reproveDocumentLeave(capture);
     if (!proofAfterSnapshot.ok) return null;
+    // EDITOR-TAB-HISTORY1: 同じ Doc・同じ prefix・同じ方針で直列化した `markdown` と一緒に、履歴つきの
+    // state を保持する（保持できない場面では false。戻るときは従来の読み込み直し）。
+    core.captureDocumentState(
+      proofAfterSnapshot.activeTab.id,
+      markdown,
+      proofAfterSnapshot.activeTab.filePath ?? null,
+    );
     const { frontmatterFields, characterCount } =
       buildTabLeaveContentFields(markdown);
     const canonicalDirty = resolveTabLeaveDirtyState({
@@ -350,18 +365,29 @@ export function useTabManager(deps: TabManagerDeps) {
     const d = depsRef.current;
     const core = d.coreRef.current;
     if (!core) return false;
+    // E2E-only: 離脱の取り消し（離れる側の capsule が残る場面）を作る。production は常に false。
+    if (consumeRestoreTabFailureForE2e()) return false;
     const previousPath = d.activeTab.filePath ?? null;
     d.notifyActiveDocumentPath?.(tab.filePath ?? null);
     d.setSuppressNextDirty(true);
     d.ensureSafeLineBreakPolicyBeforeDocumentLoad({
       targetTabSnapshot: tab,
     });
-    if (!core.loadMarkdown(tab.markdownSnapshot)) {
-      d.setSuppressNextDirty(false);
-      d.notifyActiveDocumentPath?.(previousPath);
-      return false;
+    // EDITOR-TAB-HISTORY1: 離れたときの履歴つき state を、現在の入力と `markdownSnapshot` で検証して戻す。
+    // 戻せないときは従来どおり Markdown を読み込み直す（履歴なし）。どちらの経路も、この後の
+    // read-only / plain mode / 見出し / 文字数 / scroll の同期は同じ。
+    d.documentIdentity.invalidate();
+    if (!core.restoreDocumentState(tab.id, tab.markdownSnapshot, tab.filePath ?? null)) {
+      if (!core.loadMarkdown(tab.markdownSnapshot)) {
+        d.setSuppressNextDirty(false);
+        d.notifyActiveDocumentPath?.(previousPath);
+        // 離脱の取り消し。離れる側の capsule を残さない（同じタブへ別の文書を読み込んでも使われない）。
+        core.discardDocumentState(d.activeTab.id);
+        return false;
+      }
+      core.clearHistory();
     }
-    core.clearHistory();
+    d.documentIdentity.install(tab);
     core.setReadOnly(Boolean(tab.internalDocId));
     d.closePlainEditModes();
     d.refreshHeadings();
@@ -442,11 +468,14 @@ export function useTabManager(deps: TabManagerDeps) {
       if (core) {
         d.notifyActiveDocumentPath?.(newTab.filePath ?? null);
         d.setSuppressNextDirty(true);
+        const previousEditorDocument = d.documentIdentity.beginLoad();
         if (!core.loadMarkdown(newTab.markdownSnapshot)) {
+          d.documentIdentity.loadRefused(previousEditorDocument);
           d.setSuppressNextDirty(false);
           d.notifyActiveDocumentPath?.(d.activeTab.filePath ?? null);
           return "cancelled";
         }
+        d.documentIdentity.install(newTab);
         core.clearHistory();
         core.setReadOnly(false);
         d.closePlainEditModes();
@@ -476,17 +505,34 @@ export function useTabManager(deps: TabManagerDeps) {
       if (switchingRef.current) return;
       switchingRef.current = true;
       try {
-        const d = depsRef.current;
+        let d = depsRef.current;
+        const originalActiveTabId = d.readActiveTabId();
+        const startingTabs = d.readSynchronizedTabs?.() ?? d.tabs;
 
         // Last tab cannot be closed
-        if (d.tabs.length <= 1) return;
+        if (startingTabs.length <= 1) return;
 
-        const tabToClose = d.tabs.find((t) => t.id === tabId);
+        const tabToClose = startingTabs.find((t) => t.id === tabId);
         if (!tabToClose) return;
-        const wasActiveTab = tabId === d.activeTabId;
+        const wasActiveTab = tabId === originalActiveTabId;
         const shouldTemporarilyActivateDirtyTab =
           !wasActiveTab && tabToClose.dirty;
         let previousActiveTabSnapshot: EditorTab | null = null;
+        const returnToOriginal = () => {
+          d = depsRef.current;
+          const original = (d.readSynchronizedTabs?.() ?? d.tabs).find(tab => tab.id === originalActiveTabId);
+          if (original && restoreTab(original)) d.setActiveTabId(original.id);
+        };
+        const refreshAfterAwait = (expectedActiveId: string) => {
+          d = depsRef.current;
+          const rows = d.readSynchronizedTabs?.() ?? d.tabs;
+          const closing = rows.find(tab => tab.id === tabId);
+          if (!closing || closing.documentInstanceId !== tabToClose.documentInstanceId || d.readActiveTabId() !== expectedActiveId) {
+            returnToOriginal();
+            return false;
+          }
+          return true;
+        };
         const prepared =
           wasActiveTab || shouldTemporarilyActivateDirtyTab
             ? beginDocumentLeave(
@@ -500,7 +546,7 @@ export function useTabManager(deps: TabManagerDeps) {
         let smResult: GuardResult = "proceed";
         if (
           shouldGuardSourceModeBeforeTabClose({
-            activeTabId: d.activeTabId,
+            activeTabId: originalActiveTabId,
             closingTabId: tabId,
             closingTabDirty: tabToClose.dirty,
           })
@@ -514,7 +560,7 @@ export function useTabManager(deps: TabManagerDeps) {
               ? () => reproveDocumentLeave(prepared.capture).ok
               : undefined,
           });
-          if (smResult === "cancelled") return;
+          if (!refreshAfterAwait(originalActiveTabId) || smResult === "cancelled") return;
         }
 
         const activeTabLeaveSnapshot =
@@ -555,7 +601,7 @@ export function useTabManager(deps: TabManagerDeps) {
               ? () => reproveDocumentLeave(prepared.capture).ok
               : () => false,
           });
-          if (!canProceed) return;
+          if (!refreshAfterAwait(tabId) || !canProceed) return;
           if (
             !prepared?.ok ||
             !reproveDocumentLeave(prepared.capture).ok
@@ -580,29 +626,33 @@ export function useTabManager(deps: TabManagerDeps) {
               eol: tabToClose.eol,
             },
           });
+          if (!refreshAfterAwait(tabId)) return;
           if (!canProceed) {
-            if (!restoreTab(previousActiveTabSnapshot)) return;
-            d.setActiveTabId(previousActiveTabSnapshot.id);
+            returnToOriginal();
             return;
           }
         }
 
-        const remainingTabs = d.tabs.filter((t) => t.id !== tabId);
+        const currentTabs = d.readSynchronizedTabs?.() ?? d.tabs;
+        const remainingTabs = currentTabs.filter((t) => t.id !== tabId);
 
         if (wasActiveTab) {
           if (!prepared?.ok || !reproveDocumentLeave(prepared.capture).ok) return;
           // Find adjacent tab to switch to
-          const closedIndex = d.tabs.findIndex((t) => t.id === tabId);
+          const closedIndex = currentTabs.findIndex((t) => t.id === tabId);
           const nextTab =
             remainingTabs[Math.min(closedIndex, remainingTabs.length - 1)];
           if (!restoreTab(nextTab)) return;
+          d.coreRef.current?.discardDocumentState(tabId);
           d.removeTab(tabId);
           d.setActiveTabId(nextTab.id);
         } else if (previousActiveTabSnapshot) {
           if (!restoreTab(previousActiveTabSnapshot)) return;
+          d.coreRef.current?.discardDocumentState(tabId);
           d.removeTab(tabId);
           d.setActiveTabId(previousActiveTabSnapshot.id);
         } else {
+          d.coreRef.current?.discardDocumentState(tabId);
           d.removeTab(tabId);
         }
       } finally {
@@ -667,6 +717,7 @@ export function useTabManager(deps: TabManagerDeps) {
 
       const newTab: EditorTab = {
         id: generateTabId(),
+        documentInstanceId: createDocumentInstanceId(),
         title,
         dirty: false,
         filePath: resolvedPath,
@@ -696,11 +747,14 @@ export function useTabManager(deps: TabManagerDeps) {
         d.ensureSafeLineBreakPolicyBeforeDocumentLoad({
           targetTabSnapshot: newTab,
         });
+        const previousEditorDocument = d.documentIdentity.beginLoad();
         if (!core.loadMarkdown(content)) {
+          d.documentIdentity.loadRefused(previousEditorDocument);
           d.setSuppressNextDirty(false);
           d.notifyActiveDocumentPath?.(d.activeTab.filePath ?? null);
           return "cancelled";
         }
+        d.documentIdentity.install(newTab);
         core.clearHistory();
         core.setReadOnly(false);
         d.closePlainEditModes();
@@ -802,6 +856,11 @@ export function useTabManager(deps: TabManagerDeps) {
       const eol = detectEol(content);
 
       // Load into editor
+      const previousDocument = (d.readSynchronizedTabs?.() ?? d.tabs).find(tab => tab.id === d.readActiveTabId());
+      if (!previousDocument) return "cancelled";
+      const documentInstanceId = resolvedPath !== null && previousDocument.filePath === resolvedPath
+        ? previousDocument.documentInstanceId : createDocumentInstanceId();
+      const loadedDocument = { id: d.readActiveTabId(), documentInstanceId };
       const core = d.coreRef.current;
       if (core) {
         d.notifyActiveDocumentPath?.(resolvedPath);
@@ -818,13 +877,18 @@ export function useTabManager(deps: TabManagerDeps) {
         // Save As / Source Mode ガードの取消はこの行に来ないので token は作られず、
         // 起動直後の initial load とも typed に分かれる（continuity 未成立なら false）。
         core.beginLocalImeLocalWindowTransition("document-switch");
+        const previousEditorDocument = d.documentIdentity.beginLoad();
         if (!core.loadMarkdown(content)) {
+          d.documentIdentity.loadRefused(previousEditorDocument);
           core.cancelLocalImeLocalWindowTransition("document-switch");
           d.setSuppressNextDirty(false);
           d.notifyActiveDocumentPath?.(d.activeTab.filePath ?? null);
           return "cancelled";
         }
+        d.documentIdentity.install(loadedDocument);
         core.clearHistory();
+        // 同じタブへ別の文書を読み込んだ。前の文書の capsule（離脱の取り消しで残り得る）は使わない。
+        core.discardDocumentState(d.activeTab.id);
         core.setReadOnly(false);
         d.closePlainEditModes();
         d.refreshHeadings();
@@ -838,6 +902,7 @@ export function useTabManager(deps: TabManagerDeps) {
       }
       // Editor replacement succeeded. Only now publish the new path/tab metadata.
       d.patchActiveTab({
+        documentInstanceId,
         title,
         filePath: resolvedPath,
         dirty: false,
@@ -1047,10 +1112,13 @@ export function useTabManager(deps: TabManagerDeps) {
         if (core) {
           d.notifyActiveDocumentPath?.(newTab.filePath ?? null);
           d.setSuppressNextDirty(true);
+          const previousEditorDocument = d.documentIdentity.beginLoad();
           if (!core.loadMarkdown(newTab.markdownSnapshot)) {
+            d.documentIdentity.loadRefused(previousEditorDocument);
             d.setSuppressNextDirty(false);
             return { ok: false };
           }
+          d.documentIdentity.install(newTab);
           core.clearHistory();
           core.setReadOnly(false);
           d.closePlainEditModes();
@@ -1126,6 +1194,9 @@ export function useTabManager(deps: TabManagerDeps) {
         }
 
         const appliedNewTab = newTab;
+        for (const closedTabId of finalizePlan.closeTabIds) {
+          d.coreRef.current?.discardDocumentState(closedTabId);
+        }
         d.setTabs((tabs) => {
           const next = applyFileExplorerDeleteTabFinalizePlan(
             tabs,

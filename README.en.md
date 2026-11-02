@@ -9,6 +9,8 @@ Published by Left Paw Studio.
 
 The current GitHub Latest release and Microsoft Store version are both `0.4.0-beta.2`.
 
+A trial version, `0.5.0-alpha.1`, is available as a pre-release on GitHub Releases. It is for trying the new input method of the long document editing mode (Experimental). See [RELEASE_NOTES.md](./RELEASE_NOTES.md) (Japanese) for details and cautions.
+
 The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable was fixed in `0.3.0-beta.2`. Later versions include the same fix.
 
 - Write novels and essays directly in vertical writing

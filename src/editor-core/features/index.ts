@@ -114,6 +114,8 @@ export {
   buildRemoveNoteAnchorTransactionAtDom,
 } from './noteAnchorDelete'
 export { handleNoteAnchorDeleteKey, wouldDeleteNoteAnchorWithKey } from './noteAnchorDeleteKey'
+export { registerNoteAnchorProtectionNoticeSink, notifyNoteAnchorProtection, registerNoteAnchorEditDetachListener, notifyNoteAnchorsDetachedByEdit } from './noteAnchorProtectionNotice'
+export type { NoteAnchorProtectionNoticeKind } from './noteAnchorProtectionNotice'
 export { createCompositionEventHandlers } from './compositionHandlers'
 export { bindEditorDomEvents } from './domEventBindings'
 export { createEditorLifecycleCallbacks } from './editorLifecycleCallbacks'
@@ -132,6 +134,7 @@ export {
   editorClipboardCopyCutDOMHandlers,
   handleEditorClipboardCopyOrCut,
 } from './editorPropsClipboardCopy'
+export { clipboardNodeCodecEditorProps } from './clipboardNodeCodec'
 export {
   createEditorSurfaceWheelController,
   createHorizontalEditorSurfaceWheelApplier,
@@ -217,7 +220,6 @@ export type {
 export { isProseMirrorHistoryTransaction } from './localImeHistoryTransaction'
 export { createLocalImeHostTransactionNotifier } from './localImeHostTransactionNotice'
 export { createLocalImeHostInputDomWiring } from './localImeHostInputDomWiring'
-export { buildLocalImeRubyPunctuationWiring } from './localImeRubyDecorationWiring'
 export { scheduleMacosArrowScrollClampForView } from './macosArrowScrollClampForView'
 export { createBareArrowNavigationDisplayHandoff } from './bareArrowNavigationDisplayHandoff'
 export { notifyLocalImeHomeEndNavigationHandoff } from './localImeHomeEndNavigationHandoff'
@@ -255,3 +257,11 @@ export type {
 } from './localImeEditMenuCommandState'
 export { notifyLocalImePointerSelectionHandoff } from './localImePointerSelectionHandoff'
 export type { EditorMarkShortcutName } from './editorMarkShortcutClassification'
+export { createInputSurfaceIntegration, isInputSurfaceCapable, isInputSurfacePathActive } from './inputSurface/inputSurfaceIntegration'
+export { connectLazyInputSurface } from './inputSurface/inputPathController'
+export { selectSinglePseudoCaretExternalGeometrySource } from './localImePseudoCaretGeometrySource'
+export { createInputSurfaceDisplayCallbacks } from './inputSurface/pseudoCaretWiring'
+export { getInputSurfaceFocusPort } from './inputSurface/focusOwner'
+// EDITOR-TAB-HISTORY1: タブごとの履歴つき state の保持・復元・破棄（判定は documentStateCapsule、順序は controller）。
+export { createDocumentStateController, type DocumentStateController, type DocumentStateControllerPorts } from './documentStateController'
+export type { DocumentStateCapsule, DocumentStateDiagnostics } from './documentStateCapsule'

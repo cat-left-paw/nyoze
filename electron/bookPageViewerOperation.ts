@@ -38,6 +38,8 @@ export type BookPageViewerAppearanceSnapshot = {
   /** PV-SET-1A: 見出し / ルビの見た目 snapshot (§ pageViewerTypes.ts と同じ意味論)。 */
   headingFontFamily?: string;
   headingMarginAfter?: number;
+  /** EDITOR-HEADING-FONT-SCALE1: 見出しの文字サイズ（本文比 %）。 */
+  headingFontScale?: number;
   headingDividerLevels?: HeadingDividerLevels;
   headingAlignHorizontal?: HeadingAlign;
   headingAlignVertical?: HeadingAlign;
@@ -115,7 +117,7 @@ function resolveBoundedDocumentPath(
   if (!validPath) return null;
   let realPath: string;
   try {
-    realPath = fs.realpathSync(path.resolve(validPath));
+    realPath = fs.realpathSync.native(path.resolve(validPath));
   } catch {
     return null;
   }
@@ -157,6 +159,7 @@ function parseBookPageViewerAppearance(raw: unknown): BookPageViewerAppearanceSn
   if (typeof raw.headingColor === "string") appearance.headingColor = raw.headingColor;
   if (typeof raw.headingFontFamily === "string") appearance.headingFontFamily = raw.headingFontFamily;
   if (typeof raw.headingMarginAfter === "number") appearance.headingMarginAfter = raw.headingMarginAfter;
+  if (typeof raw.headingFontScale === "number") appearance.headingFontScale = raw.headingFontScale;
   if (isPlainObject(raw.headingDividerLevels)) {
     appearance.headingDividerLevels = raw.headingDividerLevels as HeadingDividerLevels;
   }
@@ -345,6 +348,7 @@ export async function runBookPageViewerOperation(
     headingColor: request.appearance?.headingColor,
     headingFontFamily: request.appearance?.headingFontFamily,
     headingMarginAfter: request.appearance?.headingMarginAfter,
+    headingFontScale: request.appearance?.headingFontScale,
     headingDividerLevels: request.appearance?.headingDividerLevels,
     headingAlignHorizontal: request.appearance?.headingAlignHorizontal,
     headingAlignVertical: request.appearance?.headingAlignVertical,

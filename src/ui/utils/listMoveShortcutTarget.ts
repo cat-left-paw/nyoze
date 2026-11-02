@@ -16,6 +16,7 @@
  */
 
 import { isProseMirrorFocused } from './selectAllShortcutRouting'
+import { isInputSurfaceFocusOwner } from '../../editor-core/features/inputSurface/focusOwner'
 export type ListMoveShortcutTargetKind = 'prosemirror' | 'local-window' | 'other'
 
 export function classifyListMoveShortcutTarget(
@@ -24,6 +25,6 @@ export function classifyListMoveShortcutTarget(
   if (target?.closest('[data-nyoze-local-window-editor="true"]')) {
     return 'local-window'
   }
-  if (isProseMirrorFocused(target)) return 'prosemirror'
+  if (isProseMirrorFocused(target) || isInputSurfaceFocusOwner(target)) return 'prosemirror'
   return 'other'
 }

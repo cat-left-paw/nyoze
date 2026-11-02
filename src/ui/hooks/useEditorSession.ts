@@ -35,6 +35,7 @@ type UseEditorSessionOptions = {
   coreReady: boolean;
   settingsReady: boolean;
   coreRef: RefObject<EditorCoreHandle | null>;
+  documentIdentity: import("../utils/saveTargetIdentity").DocumentIdentityState;
   tabs: EditorTab[];
   activeTabId: string;
   setTabs: React.Dispatch<React.SetStateAction<EditorTab[]>>;
@@ -57,7 +58,7 @@ export function useEditorSession(options: UseEditorSessionOptions) {
   const {
     coreReady,
     settingsReady,
-    coreRef,
+    coreRef, documentIdentity,
     tabs,
     activeTabId,
     setTabs,
@@ -87,7 +88,7 @@ export function useEditorSession(options: UseEditorSessionOptions) {
   const statusRef = useRef(status);
   statusRef.current = status;
   const hydrationRuntimeRef = useRef({
-    coreRef,
+    coreRef, documentIdentity,
     defaultWritingMode,
     defaultLineBreakPolicy,
     setTabs,
@@ -101,7 +102,7 @@ export function useEditorSession(options: UseEditorSessionOptions) {
     onActiveContentLoaded,
   });
   hydrationRuntimeRef.current = {
-    coreRef,
+    coreRef, documentIdentity,
     defaultWritingMode,
     defaultLineBreakPolicy,
     setTabs,
@@ -224,11 +225,13 @@ export function useEditorSession(options: UseEditorSessionOptions) {
           });
           // Startup hydration is intentionally not a document-switch transition.
           // This keeps saved Local Window ON in enabled-waiting with no auto Start.
+          const previousEditorDocument = runtime.documentIdentity.beginLoad();
           const loaded = loadRestoredMarkdownWithDirtySuppression({
             load: () => core.loadMarkdown(activeTab.markdownSnapshot),
             setSuppressNextDirty: runtime.setSuppressNextDirty,
           });
           if (loaded) {
+            runtime.documentIdentity.install(activeTab);
             core.clearHistory();
             core.setReadOnly(false);
             runtime.closePlainEditModes();
@@ -245,6 +248,7 @@ export function useEditorSession(options: UseEditorSessionOptions) {
             core.schedulePseudoCaretUpdate();
             didRestore = true;
           } else {
+            runtime.documentIdentity.loadRefused(previousEditorDocument);
             runtime.notifyActiveDocumentPath(null);
           }
         }

@@ -24,6 +24,8 @@ type UseNoteEditActionOptions = {
   getBridge: () => NoteAnchorProjectBridge | null
   /** 保存成功後に document notes / hover preview / missing-file を refresh する。 */
   onSaved: () => void
+  /** STICKY-NOTE-LIFECYCLE1: 書き込んだ entry の id と fingerprint（provisional の record の更新用）。 */
+  onNoteEntrySaved?: (saved: { id: string; fingerprint: string }) => void
 }
 
 export function useNoteEditAction(options: UseNoteEditActionOptions) {
@@ -57,6 +59,7 @@ export function useNoteEditAction(options: UseNoteEditActionOptions) {
         return { kind: 'failed', message: result.message }
       }
 
+      o.onNoteEntrySaved?.({ id, fingerprint: result.fingerprint })
       o.onSaved()
       return { kind: 'edited' }
     },

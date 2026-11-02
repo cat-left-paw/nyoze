@@ -1,5 +1,7 @@
 import { useEffect } from "react";
-import { snapshotSpecialInlineBoundaryCompositionPendingForE2e } from "../../editor-core/extensions/specialInlineBoundarySentinel";
+import { getInputPath, readInputPathDiagnostics, readInputStrategyCapability } from '../../editor-core/features/inputSurface/inputPathRuntime'
+import { listLocalImeDocumentActionParticipantIdsForE2e } from '../../editor-core/features/localImeDocumentActionBarrier'
+import { hasPendingSpecialInlineBoundaryInput, snapshotSpecialInlineBoundaryCompositionPendingForE2e } from "../../editor-core/extensions/specialInlineBoundarySentinel";
 import {
   consumeSpecialInlineDiagLines,
   setSpecialInlineBoundaryDiagEnabled,
@@ -42,12 +44,15 @@ import { getUiText } from "../i18n/uiText";
 import { getShortcutReferenceContent } from "../internalDocs/getShortcutReferenceContent";
 import { setChapterBoundaryHideDelayMsForE2e } from "../utils/editorChapterBoundaryVisibility";
 import {
+  armSaveCompletionHoldForE2e, releaseSaveCompletionHoldForE2e, snapshotSaveCompletionHoldForE2e,
+  armSaveCompletionMarkdownMeasurementForE2e, snapshotSaveCompletionMarkdownMeasurementForE2e,
   armSavedStatPatchHoldForE2e,
   armTabLeaveSnapshotApplyHoldForE2e,
   releaseSavedStatPatchHoldForE2e,
   releaseTabLeaveSnapshotApplyHoldForE2e,
   snapshotSavedStatPatchHoldForE2e,
   snapshotTabLeaveSnapshotApplyHoldForE2e,
+  armRestoreTabFailureForE2e,
 } from "../utils/savedStatPatchLatchForE2e";
 import {
   armExplorerTrashHoldForE2e,
@@ -142,6 +147,9 @@ type UseE2eBridgeOptions = {
     close: (tabId: string) => Promise<void>;
   };
   getEditorSessionStatusForE2e?: () => EditorSessionHydrationStatus;
+  /** EDITOR-TAB-HISTORY1: capsule の診断と、戻すときの post-check の失敗の注入（試験専用）。 */
+  readDocumentStateDiagnosticsForE2e?: () => import('../../editor-core/features/documentStateCapsule').DocumentStateDiagnostics | null;
+  injectDocumentStateRestoreFailureForE2e?: (kind: 'post-check' | null) => void;
 };
 
 export function useE2eBridge({
@@ -170,6 +178,8 @@ export function useE2eBridge({
   setPseudoCaretBlinkEnabledForE2e,
   injectLocalImeLocalWindowRestartStartFailureForE2e,
   getEditorSessionStatusForE2e,
+  readDocumentStateDiagnosticsForE2e,
+  injectDocumentStateRestoreFailureForE2e,
 }: UseE2eBridgeOptions) {
   useEffect(() => {
     const bridge = window.nyozeBridge?.e2e;
@@ -208,6 +218,17 @@ export function useE2eBridge({
         routeLocalImeEditMenuCommandForE2e?.(operation) ?? null,
       runEditorUndoRedo: (operation: 'undo' | 'redo') =>
         runEditorUndoRedoForE2e?.(operation) ?? false,
+      // PIS-S10-ENTRY1a: 入力の方式の読み取り（試験専用。製品のport・bridgeへは載せない）。
+      inputPath: {
+        capability: () => ({ ...readInputStrategyCapability() }),
+        current: () => getInputPath(),
+        documentActionParticipants: () => listLocalImeDocumentActionParticipantIdsForE2e(),
+        diagnostics: () => readInputPathDiagnostics(),
+        hostPendingInput: () => {
+          const host = document.querySelector('.editor-core-host > .ProseMirror') as (HTMLElement & { editor?: { view: import('@tiptap/pm/view').EditorView } }) | null
+          return host?.editor ? hasPendingSpecialInlineBoundaryInput(host.editor.view) : false
+        },
+      },
       localImeLocalWindow: {
         snapshot: () => getLocalImeLocalWindowSnapshotForE2e?.() ?? null,
         setFailure: (failure) => setLocalImeLocalWindowFailureForE2e?.(failure),
@@ -269,6 +290,8 @@ export function useE2eBridge({
       setChapterBoundaryHideDelayMsForE2e: (delayMs: number) => {
         setChapterBoundaryHideDelayMsForE2e(delayMs);
       },
+      saveCompletionHold: { arm: armSaveCompletionHoldForE2e, release: releaseSaveCompletionHoldForE2e, snapshot: snapshotSaveCompletionHoldForE2e,
+        measureNextMarkdown: armSaveCompletionMarkdownMeasurementForE2e, markdownMeasurement: snapshotSaveCompletionMarkdownMeasurementForE2e },
       savedStatPatchHold: {
         arm: () => armSavedStatPatchHoldForE2e(),
         release: () => releaseSavedStatPatchHoldForE2e(),
@@ -368,6 +391,8 @@ export function useE2eBridge({
       documentLeaveTabs: {
         snapshot: () => (documentLeaveTabsForE2e?.tabs ?? []).map((tab) => ({
           id: tab.id,
+          documentInstanceId: tab.documentInstanceId,
+          cleanMarkdownSnapshot: tab.cleanMarkdownSnapshot,
           title: tab.title,
           dirty: tab.dirty,
           filePath: tab.filePath,
@@ -394,6 +419,14 @@ export function useE2eBridge({
             restoredTabCount: 0,
             lastPersistedRevision: 0,
           },
+      },
+      // EDITOR-TAB-HISTORY1: 試験専用の診断と失敗の注入。製品の判断に使わない。
+      documentState: {
+        snapshot: () => readDocumentStateDiagnosticsForE2e?.() ?? null,
+        injectRestoreFailure: (kind: 'post-check' | null) => {
+          injectDocumentStateRestoreFailureForE2e?.(kind);
+        },
+        armRestoreTabFailure: () => armRestoreTabFailureForE2e(),
       },
       // Slice 0: baseline / 将来 PoC 共通の IME composition latency probe。
       // 起動されるまで listener / PerformanceObserver / rAF / timer を作らない。
@@ -473,5 +506,7 @@ export function useE2eBridge({
     setPseudoCaretBlinkEnabledForE2e,
     showTabLimitNotice,
     getEditorSessionStatusForE2e,
+    readDocumentStateDiagnosticsForE2e,
+    injectDocumentStateRestoreFailureForE2e,
   ]);
 }

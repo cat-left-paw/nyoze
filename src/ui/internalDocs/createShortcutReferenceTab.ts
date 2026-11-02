@@ -1,3 +1,4 @@
+import { createDocumentInstanceId } from "../utils/saveTargetIdentity";
 import {
   parseFrontmatterFields,
   splitLeadingFrontmatter,
@@ -66,6 +67,7 @@ export function createShortcutReferenceEditorTab(
 
   return {
     id: generateTabId(),
+    documentInstanceId: createDocumentInstanceId(),
     dirty: false,
     filePath: null,
     savedStat: null,
