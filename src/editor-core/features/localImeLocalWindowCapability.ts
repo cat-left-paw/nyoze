@@ -25,6 +25,8 @@ export const LOCAL_IME_LOCAL_WINDOW_SUPPORTED_MARKS = [
   'underline',
   'code',
   'link',
+  // MD-ESCAPE-EXPLICIT1: 文字の元の綴り（`\*` `&amp;`）を覚える mark。attrs は `raw` だけで、schema の契約で検証する。
+  'sourceSpelling',
 ] as const
 
 export type LocalImeLocalWindowSupportedMarkName =

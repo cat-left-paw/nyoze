@@ -9,6 +9,7 @@ import { resolveSelectedTcyRanges } from './tcyFormatting'
 import { isPageBreakNodeSelected, resolveCurrentDirectiveDescriptor } from '../commands/customBlockDirectiveCommands'
 import { formatDirectiveToken } from '../io/customBlockDirective'
 import { hasDocumentText } from './documentTextPresence'
+import { canReparseParagraphAtSelection } from './paragraphReparse/reparseCommand'
 
 type ActiveMarksSnapshot = {
   isBold: boolean
@@ -138,6 +139,8 @@ export function buildCommandAvailability({
     isBlockquote: active.isBlockquote,
     isCodeBlock: active.isCodeBlock,
     canBlockDirective: !composing,
+    // EDITOR-PARAGRAPH-REPARSE1: 構造だけの判定（段落・見出しの中の選択）。実行できない場面は command が 'unavailable' を返す。
+    canReparseParagraph: !composing && canReparseParagraphAtSelection(state),
     blockDirectiveToken,
     canDeletePageBreak: !composing && isPageBreakNodeSelected(state),
     noteAnchorContextId,

@@ -1,5 +1,5 @@
 /**
- * 「長文編集モード（実験的）」の製品の入口。
+ * 入力方式の設定の入口。製品の互換設定と、開発用Local Windowの旧設定を方式ごとのadapterへ渡す。
  *
  * PIS-S10-ENTRY1a: 入口の枠（設定UIへ渡すview）は1つで、中身は製品の入口の方式ごとのadapterが持つ。
  * - `input-surface`: Persistent Input Surface（`useInputSurfaceProductEntry`）。
@@ -8,6 +8,7 @@
  * 製品の入口がない起動（利用できないplatform、作者Pilot）は、どちらのadapterも設定UIを出さない。
  */
 
+import { useClassicInputSetting } from './useClassicInputSetting'
 import { readInputStrategyCapability } from '../../editor-core/features/inputSurface/inputPathRuntime'
 import type { LocalImeExperimentalPreviewView, ProductEntryOptions } from './localImeExperimentalPreviewView'
 import { useInputSurfaceProductEntry } from './useInputSurfaceProductEntry'
@@ -27,5 +28,11 @@ const useProductEntryAdapter = () =>
     : useInputSurfaceProductEntry
 
 export function useLocalImeExperimentalPreview(options: ProductEntryOptions): LocalImeExperimentalPreviewView {
-  return useProductEntryAdapter()(options)
+  const classicInput = useClassicInputSetting()
+  const productInput = readInputStrategyCapability().productStrategy === 'input-surface'
+  return useProductEntryAdapter()({
+    ...options,
+    preferenceEnabled: productInput ? !classicInput.classicInputEnabled : options.preferenceEnabled,
+    setPreferenceEnabled: productInput ? classicInput.setInputSurfaceEnabled : options.setPreferenceEnabled,
+  })
 }

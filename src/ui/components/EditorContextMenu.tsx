@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import {
+  resolveIndentStepAvailability,
+  type IndentStepDirection,
+} from '../../editor-core/io/customBlockDirective'
 import type { CommandAvailability, SelectionRange } from '../../editor-core/types'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
 import {
@@ -26,7 +30,9 @@ import {
   IconHeading,
   IconHeadingOff,
   IconHighlight,
+  IconIndentDecrease,
   IconIndentIncrease,
+  IconMarkdown,
   IconItalic,
   IconLayoutDistributeHorizontal,
   IconLetterCase,
@@ -94,12 +100,16 @@ type EditorContextMenuProps = {
   onRuby: () => void
   onTcy: () => void
   onClearFormat: () => void
+  /** EDITOR-PARAGRAPH-REPARSE1: この段落の記法を反映（Cmd/Ctrl+Shift+M）。 */
+  onReparseParagraph: () => void
   onMoveListUp: () => void
   onMoveListDown: () => void
   /** 独自ブロック装飾 (align-center / indent-3 / style-letter 等) を適用 / 置換する。 */
   onApplyBlockDirective: (token: string) => void
   /** 独自ブロック装飾を解除する。 */
   onRemoveBlockDirective: () => void
+  /** 字下げを 1 段増やす / 減らす（一番内側の装飾が対象。上限 20 段）。 */
+  onStepBlockIndent: (direction: IndentStepDirection) => void
   /** 改ページ marker (`nyozePageBreak`) を挿入する。 */
   onInsertPageBreak: () => void
   /** selection が改ページ marker のときだけ有効な削除 action。 */
@@ -143,10 +153,12 @@ export function EditorContextMenu({
   onRuby,
   onTcy,
   onClearFormat,
+  onReparseParagraph,
   onMoveListUp,
   onMoveListDown,
   onApplyBlockDirective,
   onRemoveBlockDirective,
+  onStepBlockIndent,
   onInsertPageBreak,
   onDeletePageBreak,
   onInsertBlankPage,
@@ -307,20 +319,42 @@ export function EditorContextMenu({
   // 同じ token / command / availability を使う。page-break の挿入・削除は
   // `nyozeDirectiveBlock` の apply/remove とは別の独立 action のため、
   // token 系 item とは data attr (`data-directive-token` 等) で区別する。
+  // BLOCK-INDENT-LEVELS1: 字下げは 1〜6 段の直接指定ではなく、「1 段増やす / 減らす」の 2 項目（上限 20 段）。
+  // 使える・使えないは、一番内側の装飾の token（`blockDirectiveToken`）から純粋に決める（toolbar と同じ関数）。
+  const indentStep = resolveIndentStepAvailability(a.blockDirectiveToken)
+  const indentCurrentSuffix =
+    indentStep.currentLevel === null
+      ? ''
+      : t('editor.blockDecoration.indentCurrent').replace('{level}', String(indentStep.currentLevel))
   const directiveTokenGroups: Array<
-    Array<{ id: string; token: string; label: string; icon: typeof IconAlignCenter }>
+    Array<{
+      id: string
+      token?: string
+      step?: IndentStepDirection
+      disabled?: boolean
+      label: string
+      icon: typeof IconAlignCenter
+    }>
   > = [
     [
       { id: 'ctx-align-center', token: 'align-center', label: t('editor.blockDecoration.center'), icon: IconAlignCenter },
       { id: 'ctx-align-end', token: 'align-end', label: t('editor.blockDecoration.end'), icon: IconAlignRight },
     ],
     [
-      { id: 'ctx-indent1', token: 'indent-1', label: t('editor.blockDecoration.indent1'), icon: IconIndentIncrease },
-      { id: 'ctx-indent2', token: 'indent-2', label: t('editor.blockDecoration.indent2'), icon: IconIndentIncrease },
-      { id: 'ctx-indent3', token: 'indent-3', label: t('editor.blockDecoration.indent3'), icon: IconIndentIncrease },
-      { id: 'ctx-indent4', token: 'indent-4', label: t('editor.blockDecoration.indent4'), icon: IconIndentIncrease },
-      { id: 'ctx-indent5', token: 'indent-5', label: t('editor.blockDecoration.indent5'), icon: IconIndentIncrease },
-      { id: 'ctx-indent6', token: 'indent-6', label: t('editor.blockDecoration.indent6'), icon: IconIndentIncrease },
+      {
+        id: 'ctx-indent-increase',
+        step: 'increase',
+        disabled: !indentStep.canIncrease,
+        label: `${t('editor.blockDecoration.indentIncrease')}${indentCurrentSuffix}`,
+        icon: IconIndentIncrease,
+      },
+      {
+        id: 'ctx-indent-decrease',
+        step: 'decrease',
+        disabled: !indentStep.canDecrease,
+        label: `${t('editor.blockDecoration.indentDecrease')}${indentCurrentSuffix}`,
+        icon: IconIndentDecrease,
+      },
     ],
     [
       { id: 'ctx-styleLetter', token: 'style-letter', label: t('editor.blockDecoration.styleLetter'), icon: IconLetterCase },
@@ -346,15 +380,22 @@ export function EditorContextMenu({
   const blockDecorationEntries: MenuEntry[] = [
     ...directiveTokenGroups.flatMap((group, groupIndex): MenuEntry[] => [
       ...(groupIndex > 0 ? [{ separator: true, id: `ctx-directive-sep-${groupIndex}` } as SeparatorItem] : []),
-      ...group.map((item): MenuItem => ({
-        id: item.id,
-        label: item.label,
-        icon: <item.icon size={ICON_SIZE} stroke={ICON_STROKE} />,
-        disabled: !a.canBlockDirective,
-        active: a.blockDirectiveToken === item.token,
-        action: wrap(() => onApplyBlockDirective(item.token)),
-        dataAttrs: { 'data-directive-token': item.token },
-      })),
+      ...group.map((item): MenuItem => {
+        const step = item.step
+        const token = item.token
+        return {
+          id: item.id,
+          label: item.label,
+          icon: <item.icon size={ICON_SIZE} stroke={ICON_STROKE} />,
+          disabled: !a.canBlockDirective || item.disabled === true,
+          active: token !== undefined && a.blockDirectiveToken === token,
+          action: wrap(() => {
+            if (step) onStepBlockIndent(step)
+            else if (token) onApplyBlockDirective(token)
+          }),
+          dataAttrs: step ? { 'data-indent-step': step } : { 'data-directive-token': token ?? '' },
+        }
+      }),
     ]),
     { separator: true, id: 'ctx-directive-sep-clear' },
     {
@@ -609,6 +650,14 @@ export function EditorContextMenu({
       disabled: !a.canClearFormat,
       action: wrap(onClearFormat),
       shortcut: `${mod}+Shift+C`,
+    },
+    {
+      id: 'reparseParagraph',
+      label: t('editor.paragraphReparse'),
+      icon: <IconMarkdown size={ICON_SIZE} stroke={ICON_STROKE} />,
+      disabled: !a.canReparseParagraph,
+      action: wrap(onReparseParagraph),
+      shortcut: `${mod}+Shift+M`,
     },
   ]
 

@@ -3,21 +3,17 @@ import type { CommandAvailability } from "../../editor-core/types";
 import { EditorTabUtilityActions } from "../components/EditorTabUtilityActions";
 import type { useAppUiState } from "./useAppUiState";
 import type { useSearchUiState } from "./useSearchUiState";
-import type { useLargeDocumentGuard } from "./useLargeDocumentGuard";
 import type { BookPageViewerToolbarAvailability } from "./useBookExportMenuAvailability";
 import { isLocalImeDocumentActionAllowed } from "../../editor-core/features/localImeDocumentActionBarrier";
 import type { LocalImeExperimentalPreviewView } from "./useLocalImeExperimentalPreview";
 
 type UiState = ReturnType<typeof useAppUiState>;
 type SearchUiState = ReturnType<typeof useSearchUiState>;
-type LargeDocumentGuard = ReturnType<typeof useLargeDocumentGuard>;
 
 export type UseEditorTabActionsSlotOptions = {
   ui: UiState;
   search: SearchUiState;
-  largeDocGuard: LargeDocumentGuard;
   localImeExperimentalPreview: LocalImeExperimentalPreviewView;
-  activeDocumentCharacterCount: number;
   flushCoreUiSync: (reason: string) => number | undefined;
   toggleParagraphPlainMode: () => void;
   toggleFullPlainEdit: () => void;
@@ -36,9 +32,7 @@ export type UseEditorTabActionsSlotOptions = {
 export function useEditorTabActionsSlot({
   ui,
   search,
-  largeDocGuard,
   localImeExperimentalPreview,
-  activeDocumentCharacterCount,
   flushCoreUiSync,
   toggleParagraphPlainMode,
   toggleFullPlainEdit,
@@ -65,22 +59,16 @@ export function useEditorTabActionsSlot({
         // 実行できなくなる（UI state だけ反転 → 確定後の再クリックで元へ戻り、
         // core と一致して何も起きない）。effect 側の barrier は防御として残す。
         if (!isLocalImeDocumentActionAllowed("ruby-visibility-toggle")) return;
-        const characterCount = flushCoreUiSync("ruby-visibility-toggle") ?? activeDocumentCharacterCount;
-        largeDocGuard.requestGuardedAction(
-          characterCount,
-          "ルビ表示の切替は、大きな文書では数秒かかる場合があります。続行しますか。",
-          () => {
-            // 大文書確認ダイアログの間に composition が始まることもあるため再確認する。
-            if (!isLocalImeDocumentActionAllowed("ruby-visibility-toggle")) return;
-            ui.setRubyVisible((v) => !v);
-          },
-        );
+        // 全文の同期と変換中の処理の後始末を済ませてから切り替える。
+        // EDITOR-LARGE-DOC-GUARD-REMOVE1: 大きな文書の「数秒かかる」確認は撤去済み。
+        flushCoreUiSync("ruby-visibility-toggle");
+        ui.setRubyVisible((v) => !v);
       }}
       paragraphPlainModeActive={ui.paragraphPlainModeActive}
       onToggleParagraphPlainMode={toggleParagraphPlainMode}
       canParagraphPlain={headerCommandAvailability.canParagraphPlain}
       onToggleFullPlainEdit={toggleFullPlainEdit}
-      localImeExperimentalPreviewVisible={localImeExperimentalPreview.settingVisible}
+      localImeExperimentalPreviewVisible={localImeExperimentalPreview.settingVisible && !localImeExperimentalPreview.inputSurface}
       localImeExperimentalPreviewInteractive={localImeExperimentalPreview.settingInteractive}
       localImeExperimentalPreviewToggleOn={localImeExperimentalPreview.toggleOn}
       localImeExperimentalPreviewNeedsAttention={

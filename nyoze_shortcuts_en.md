@@ -52,6 +52,7 @@ If Japanese IME input rarely becomes stuck just after ruby text or explicit TCY,
 - `Cmd/Ctrl + K` — Set or edit a link
 - `Cmd/Ctrl + Alt/Option + R` — Open the Ruby / Emphasis Dot dialog
 - `Cmd/Ctrl + Shift + C` — Clear formatting
+- `Cmd/Ctrl + Shift + M` — Apply Markdown in this paragraph (turns notation left as symbols, such as `**bold**`, ruby, or links, into the display you get after saving and reopening)
 - `Cmd/Ctrl + Z` — Undo
 - `Cmd/Ctrl + Shift + Z` — Redo
 
@@ -204,6 +205,13 @@ The left and right arrow directions depend on the writing direction.
 
 - Horizontal writing: `ArrowLeft` moves to the previous page and `ArrowRight` moves to the next page
 - Vertical writing: `ArrowLeft` moves to the next page and `ArrowRight` moves to the previous page
+
+The mouse wheel and the trackpad also move pages over the reading surface (one page per gesture).
+
+- Vertical scroll (wheel down / swipe down) — Next page. Scrolling up moves to the previous page (both writing directions)
+- Horizontal scroll (a horizontal trackpad swipe, or `Shift + wheel` on Windows) — follows the OS scroll direction. In vertical writing, moving right goes to the next page; in horizontal writing, moving left goes to the next page
+- A fast spin of the wheel, or the inertia of a trackpad flick, counts as one gesture and moves exactly one page. Turning the wheel slowly one notch at a time moves one page per notch
+- A wheel with `Ctrl` / `Cmd` / `Option (Alt)` held (including pinch) does not move pages. Neither does the wheel over panels such as the outline, the scrubber, or Settings
 
 When the bottom page scrubber has focus, use the left and right arrow keys to move one page at a time, and `Home` / `End` to move to the first / last page. The up and down arrow keys are also available in vertical writing.
 

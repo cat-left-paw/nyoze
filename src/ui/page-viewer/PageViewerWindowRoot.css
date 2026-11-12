@@ -1217,6 +1217,16 @@
 .page-viewer-window__page-flow {
   box-sizing: border-box;
   column-fill: auto;
+  /* PAGE-VIEWER-PAGE-GAP1: 段落の最初・最後の 1 行だけが段（ページ）をまたぐことを許す。
+     既定の `orphans: 2; widows: 2` では、残りが 1 行ぶんしかない段の末尾へ段落の最初の
+     1 行を置かず、段落の最後の 1 行だけが次の段へ出るときは手前の行ごと次の段へ送るため、
+     ページの末尾に 1 行以上の空きができていた。日本語の組版は版面を最後の行まで埋めるのが
+     普通なので 1 にする。継承プロパティなので、段組みの容器 1 か所で paragraph / list /
+     blockquote などすべてに及ぶ。見出しの後ろで改ページを避ける指定は足さない
+     （`break-after: avoid` も空きを作るため。見出しが段の最後の行に来ることは許す）。
+     画像を分割しない `break-inside: avoid` による画像の前の空きは仕様として残す。 */
+  orphans: 1;
+  widows: 1;
   line-break: strict;
   word-break: normal;
   overflow-wrap: break-word;
@@ -1341,6 +1351,12 @@
 .page-viewer-window__heading {
   margin: 0;
   margin-block-end: var(--pv-heading-margin-after, 0.45em);
+  /* PAGE-VIEWER-PAGE-GAP1: 本文の段落は `.page-viewer-window__page-flow` で orphans / widows を 1 にしたが、
+     見出しは変更前の値（2）のままにする。複数行の見出しの最初・最後の 1 行だけがページをまたがない
+     （2〜3 行の見出しは割れず、4 行以上は 2 行ずつ）。`break-inside: avoid` は、見出しの前の空きが
+     増えるので使わない。 */
+  orphans: 2;
+  widows: 2;
   font-weight: 700;
   line-height: 1.35;
   font-family: var(--pv-heading-font-family, var(--pv-font-family));

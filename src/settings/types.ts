@@ -294,6 +294,8 @@ export type SettingsJson = {
    * field is accepted only as an idempotent read-time migration source.
    */
   experimentalLocalImeEnabled?: boolean
+  /** PIS-DEFAULT-ON1: trueのときだけ従来の入力を使う。旧設定から移行しない。 */
+  classicInputEnabled?: boolean
   /**
    * PIS-S10-PREEDIT-DISPLAY1: 長文編集モード（入力の方式がPIS）の、変換中の文字の表示。
    * `inline`（既定）は後ろの本文を押し出す、`overlay`は後ろの本文に重ねる。

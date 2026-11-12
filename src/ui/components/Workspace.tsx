@@ -44,7 +44,7 @@ import { ProjectDocumentStartViews } from "./ProjectDocumentStartViews";
 import { SourceModeEditor } from "./SourceModeEditor";
 import { RightPaneTabBar } from "./RightPaneTabBar";
 import type { FileExplorerRole } from "../../project/fileExplorerRoles";
-import { EditorTabStrip } from "./EditorTabStrip";
+import { EditorTabStrip, type EditorTabStripProps } from "./EditorTabStrip";
 import { useCollapsedPaneExclusion } from "../hooks/useCollapsedPaneExclusion";
 
 type RightPaneTab = "outline" | "document" | "notes" | "project" | "theme";
@@ -160,6 +160,7 @@ type WorkspaceProps = {
   onDismissFileExplorerError: () => void;
   onSetActiveTab: (tabId: string) => void;
   onAddTab: () => void;
+  onReorderTab: EditorTabStripProps["onReorderTab"];
   onCloseTab: (tabId: string) => void;
   tabLimitReached: boolean;
   onFullPlainEditChange: (value: string) => void;
@@ -273,6 +274,7 @@ export function Workspace({
   onDismissFileExplorerError,
   onSetActiveTab,
   onAddTab,
+  onReorderTab,
   onCloseTab,
   tabLimitReached,
   onFullPlainEditChange,
@@ -601,6 +603,7 @@ export function Workspace({
           onSetActiveTab={onSetActiveTab}
           onCloseTab={onCloseTab}
           onAddTab={onAddTab}
+          onReorderTab={onReorderTab}
           tabLimitReached={tabLimitReached}
           editorTabActionsSlot={editorTabActionsSlot}
         />

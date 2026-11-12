@@ -7,9 +7,7 @@ Official website: [Nyoze](https://cat-left-paw.github.io/nyoze/)
 Nyoze is an editor that lets you **write vertically as-is**.
 Published by Left Paw Studio.
 
-The current GitHub Latest release and Microsoft Store version are both `0.4.0-beta.2`.
-
-A trial version, `0.5.0-alpha.1`, is available as a pre-release on GitHub Releases. It is for trying the new input method of the long document editing mode (Experimental). See [RELEASE_NOTES.md](./RELEASE_NOTES.md) (Japanese) for details and cautions.
+The current GitHub Latest release and Microsoft Store version are both `0.5.0-beta.1` (the Microsoft Store version is updated after review).
 
 The renderer CPU issue found in `0.3.0-beta.1` while chapter-boundary navigation was unavailable was fixed in `0.3.0-beta.2`. Later versions include the same fix.
 
@@ -42,7 +40,7 @@ For detailed usage, see [MANUAL.md](./MANUAL.md).
 - Direct vertical writing editing
 - A WYSIWYG editing surface
 - Typewriter scroll, Visual Focus, and a pseudo caret to help you stay oriented around the current writing position
-- An opt-in **Long document editing mode (Experimental)** for lighter continuous input in long documents
+- Text is received in a dedicated input field by default, for steadier input after ruby or at formatting boundaries (you can switch to the previous input method in View Settings)
 - Ruby text and tate-chu-yoko support
 - Opens and saves `.txt` as well as `.md`
 - Prioritizes safe manuscript round-tripping
@@ -59,7 +57,7 @@ For detailed usage, see [MANUAL.md](./MANUAL.md).
 
 - Switch between vertical and horizontal writing
 - WYSIWYG editing
-- Long document editing mode (Experimental; off by default; supported on macOS / Windows, unsupported trial use on Linux)
+- Input method (the default dedicated input field, or the previous input method; not guaranteed on Linux)
 - Writing aids such as Typewriter scroll, edit-block highlight, current-line highlight, and a pseudo caret
 - Project-based sticky notes attached to text positions, with titles, multi-line Markdown notes, resolved status, and a Notes pane
 - A Project pane with Books, Materials, multi-role filters, Markdown preview, and lightweight in-pane material editing (textarea with explicit save)
@@ -180,7 +178,7 @@ For supported keys, source-of-truth boundaries (standalone vs Project files), YA
 
 ## Supported Environments
 
-The official distribution targets for `0.4.0-beta.2` are listed below.
+The official distribution targets for `0.5.0-beta.1` are listed below.
 
 - macOS:
   - DMG for Apple Silicon (`arm64`)
@@ -191,7 +189,7 @@ The official distribution targets for `0.4.0-beta.2` are listed below.
 - Linux: no official package in the current beta
 
 Windows is 64-bit (`x64`) only. 32-bit Windows is not supported in the current beta.
-On Windows, `0.4.0-beta.2` is available through Microsoft Store and as a GitHub x64 zip. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
+On Windows, `0.5.0-beta.1` is available through Microsoft Store and as a GitHub x64 zip. Prefer the Store for normal installation; the GitHub zip remains an alternative when the Store cannot be used.
 
 macOS has two variants:
 
@@ -200,7 +198,7 @@ macOS has two variants:
 
 Installing the wrong one may prevent launch or cause significant slowdown.
 
-On Linux, you can try the source with `npm install` / `npm run dev` / `npm run build`. Long document editing mode (Experimental) can also be used on Linux as an opt-in trial; it is off by default and is not officially supported or guaranteed. No official Linux package or artifact publication is provided or approved in this beta. If you are comfortable with Electron / Linux, you can also build your own Linux package with `electron-builder`, but that is not an official distribution.
+On Linux, you can try the source with `npm install` / `npm run dev` / `npm run build`. Linux also starts with the default input method, but it is not officially supported or guaranteed. If you have input problems, try the previous input method. No official Linux package or artifact publication is provided or approved in this beta. If you are comfortable with Electron / Linux, you can also build your own Linux package with `electron-builder`, but that is not an official distribution.
 
 ## Downloads and Installation
 
@@ -308,7 +306,7 @@ To build the Windows `x64` zip explicitly:
 npm run package:win:x64
 ```
 
-Packages are written to `release/<version>/`. The official scope for `0.4.0-beta.2` includes macOS DMGs, the Windows zip, and Microsoft Store; no official Linux package is provided. DMGs and the zip are GitHub Release assets, while the Store AppX is submitted separately through Partner Center. `npm run package` normally builds the package for the current environment. macOS DMGs include the architecture in the file name. Windows zip output includes a folder like `Nyoze-Windows-<version>-x64/` so extracted files stay organized.
+Packages are written to `release/<version>/`. The official scope for `0.5.0-beta.1` includes macOS DMGs, the Windows zip, and Microsoft Store; no official Linux package is provided. DMGs and the zip are GitHub Release assets, while the Store AppX is submitted separately through Partner Center. `npm run package` normally builds the package for the current environment. macOS DMGs include the architecture in the file name. Windows zip output includes a folder like `Nyoze-Windows-<version>-x64/` so extracted files stay organized.
 
 - `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - `Nyoze-Mac-<version>-x64-Installer.dmg`
@@ -321,21 +319,19 @@ Packages are written to `release/<version>/`. The official scope for `0.4.0-beta
 - drag and drop is not supported
 - `Open With` is not supported
 - OS-wide `.md` association is not supported
-- No official Linux package is provided in the current beta. Long document editing mode (Experimental) can be tried from source / `npm run dev`; it is off by default and not officially supported
+- No official Linux package is provided in the current beta. You can use it from source / `npm run dev`, but it is not officially supported, including the input method
 - No general frontmatter editing UI
 - Complex YAML editing is expected to be done in `Source Mode`
 - No advanced conflict resolution or merge UI
 - Code block syntax highlighting is WYSIWYG-only; unsupported or unspecified languages fall back to plain display
 - Document links open externally with `Cmd/Ctrl + Click`; normal click does not open them
 - External open is limited to absolute `https://` URLs without credentials; `http://`, `mailto:`, `tel:`, relative links, and document anchors are not opened from normal editing
-- While the localized editing surface is active, some display and editing assistance features, including Typewriter Mode, cannot be used at the same time. Disable Long Document Editing when you need these features
-- If Long Document Editing cannot safely keep the localized editing surface active, it may enter a Recovery state while preserving uncommitted draft content. From this state, you can retry, copy the draft, or discard it after confirmation. This state could not be reproduced naturally on macOS or Windows hardware, so real-device behavior in the Recovery state remains unverified
-- When starting Japanese IME input immediately after ruby text or explicit TCY, some environments may rarely stall on the second typed character right after the first one goes through; pressing `Escape` discards the unfinished input and returns to normal editing
+- With the previous input method, when starting Japanese IME input immediately after ruby text or explicit TCY, some environments may rarely stall on the second typed character right after the first one goes through; pressing `Escape` discards the unfinished input and returns to normal editing
 - On some Windows environments using AMD GPUs with Chromium-based rendering, the I-beam cursor over the editor or `Source Mode` may appear white and hard to see. In that case, enable `View Settings > Document Theme > Use arrow pointer in editor` as a workaround for the editor area
 - In some Windows environments, editing may become severely slow while DeepL or another resident application is running. Enabling `Display Settings > Windows Compatibility > Disable Chromium accessibility` and restarting Nyoze may help. Do not enable it when using a screen reader or other assistive technology
 - Around 100,000 characters, some environments may become slow for input or rendering; vertical writing, visible ruby, search ON, and Japanese IME input make this more likely
 - With very large documents containing extensive ruby or similar rich inline content, a click or drag immediately after switching documents may take several seconds and the app may temporarily appear unresponsive. How easily this occurs depends on the computer's performance and the document's content and structure
-- If performance feels heavy, first try turning Long Editing Mode or ruby display OFF, using `Paragraph Plain`, or splitting the manuscript into separate files by chapter
+- If performance feels heavy, first try turning ruby display OFF, using `Paragraph Plain`, or splitting the manuscript into separate files by chapter
 - Opening and immediately saving in beta is not guaranteed to preserve the exact original Markdown spelling; content may be normalized to Nyoze’s Markdown representation
 - Typical examples not fully preserved in beta include GFM tables, reference-style links / link definitions, footnotes, definition lists, complex lists / blockquotes, code fence marker details / blank lines, and softbreak / hardbreak spelling differences
 - `Source Mode` is not a raw-save-only path in beta; Apply / Save still pass through Nyoze’s parser / serializer, so unsupported constructs or spelling differences may be normalized

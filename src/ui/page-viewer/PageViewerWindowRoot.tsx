@@ -127,6 +127,7 @@ import type { PageViewerImageScope, PageViewerSnapshotPayload } from './pageView
 import type { PageViewerUiThemeSnapshot } from './pageViewerUiTheme'
 import { usePageViewerColumnLayout } from './usePageViewerColumnLayout'
 import { usePageViewerPageSequence } from './usePageViewerPageSequence'
+import { usePageViewerWheelNavigation } from './usePageViewerWheelNavigation'
 import { PageViewerSimpleCoverFrame } from './pageViewerSimpleCoverFrame'
 import './PageViewerWindowRoot.css'
 
@@ -1510,6 +1511,10 @@ export function PageViewerWindowRoot({ payloadId }: Props) {
       body.removeEventListener('keydown', handleKeyDown)
     }
   }, [state.kind, writingMode, pageCount, navigateToPage, navigateByPage])
+
+  // マウスのホイール・トラックパッドのページ移動（PAGE-VIEWER-WHEEL1）。1 回の操作で 1 ページ。
+  // 判定は pure な controller、ここは本文の領域への接続だけ。移動はキーボードと同じ `navigateByPage`。
+  usePageViewerWheelNavigation({ bodyRef, enabled: state.kind === 'ready', writingMode, navigateByPage })
 
   // Track click と thumb drag は同じ経路: pointer の画面上位置を最寄り
   // page index へ snap して移動する (任意 scroll offset へは変換しない)。

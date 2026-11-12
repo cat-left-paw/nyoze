@@ -91,7 +91,7 @@ import {
 } from "./displaySettingsSectionState";
 import { formatNativeSelectOptionLabel } from "../utils/nativeSelectOptionLabel";
 import { ThemeSwatchSelect } from "./ThemeSwatchSelect";
-import { InputSurfacePreeditDisplaySetting } from "./InputSurfacePreeditDisplaySetting";
+import { InputSettingsSection } from "./InputSettingsSection";
 import {
   getDocumentPresetSwatches,
   getDocumentThemeSwatches,
@@ -2713,7 +2713,19 @@ export function DisplaySettingsModal({
           </div>
 
           {/* ── PUBLIC-ENTRY1: available platform の Local Window Experimental ── */}
-          {localImeExperimentalPreview?.settingVisible ? (
+          {localImeExperimentalPreview?.settingVisible ? localImeExperimentalPreview.inputSurface ? (
+            <InputSettingsSection
+              heading={<SectionHeading title={t("displaySettings.section.input")} icon={IconCursorText} isOpen={sectionOpenState.input} onToggle={() => toggleSection("input")} />}
+              isOpen={sectionOpenState.input}
+              classicInputOn={localImeExperimentalPreview.inputSurface.classicInputOn}
+              onChangeClassicInput={localImeExperimentalPreview.inputSurface.onChangeClassicInput}
+              interactive={localImeExperimentalPreview.settingInteractive}
+              preeditDisplay={localImeExperimentalPreview.inputSurface.preeditDisplay}
+              onChangePreeditDisplay={localImeExperimentalPreview.inputSurface.onChangePreeditDisplay}
+              platform={platform}
+              t={t}
+            />
+          ) : (
             <div className="settings-section">
               <SectionHeading
                 title={t("displaySettings.section.experimental")}
@@ -2759,14 +2771,6 @@ export function DisplaySettingsModal({
                       )}
                     </div>
                   </div>
-                  {localImeExperimentalPreview.inputSurface &&
-                    localImeExperimentalPreview.toggleOn && (
-                      <InputSurfacePreeditDisplaySetting
-                        value={localImeExperimentalPreview.inputSurface.preeditDisplay}
-                        onChange={localImeExperimentalPreview.inputSurface.onChangePreeditDisplay}
-                        t={t}
-                      />
-                    )}
                   {/* ENTRY-UI1: 「状態」の行は、Local Windowの開発用の経路だけ（PISはcheckboxと本文の上の通知が正本）。 */}
                   {!localImeExperimentalPreview.inputSurface &&
                     localImeExperimentalPreview.effectiveEnabled && (

@@ -20,6 +20,7 @@ export function clampCommandAvailabilityForInternalDoc(
     canBlockTransforms: false,
     canBlockDirective: false,
     blockDirectiveToken: null,
+    canReparseParagraph: false,
     canDeletePageBreak: false,
     canUndo: false,
     canRedo: false,

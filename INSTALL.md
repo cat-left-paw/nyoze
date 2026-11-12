@@ -13,9 +13,9 @@
 Apple Silicon Mac では `arm64`、Intel Mac では `x64` を使ってください。
 Windows 版は 64bit (`x64`) 環境向けです。32bit Windows は現行 beta の対象外です。
 
-現在のGitHub LatestとMicrosoft Store版は、いずれも`0.4.0-beta.2`です。
+現在のGitHub LatestとMicrosoft Store版は、いずれも`0.5.0-beta.1`です（Microsoft Store版は審査の後に更新されます）。
 
-試用版の`0.5.0-alpha.1`は、GitHub Releasesのプレリリースとして公開しています（Microsoft Store版はありません）。前の版へ戻すときの注意は、[RELEASE_NOTES.md](./RELEASE_NOTES.md)を参照してください。
+前の版へ戻すときの注意は、[RELEASE_NOTES.md](./RELEASE_NOTES.md)を参照してください。
 
 ## macOS
 

@@ -10,7 +10,16 @@ import { validateDocumentLinkHref } from './linkHrefSafety'
 import { INLINE_PATTERN_WITH_EMPHASIS_REGEX } from './fallbackEmphasis'
 import { matchNoteAnchorComment, splitLeadingNoteAnchorComment, NOTE_ANCHOR_NODE_NAME } from './noteAnchor'
 import { rescueOrphanDelimiters } from './rescueOrphanDelimiters'
-import { registerEscapedCharMask, unmaskEscapedChars, type EscapedCharEnv } from './escapedStarMask'
+import { REFERENCE_DEFINITION_TOKEN_TYPE, registerVisibleReferenceDefinition } from './referenceDefinitionLine'
+import type { SourceRecorder } from './sourcePreservation'
+import {
+  SOURCE_SPELLING_MARK_NAME,
+  hasSourceSpellings,
+  registerSourceSpellingMask,
+  splitSourceSpelledText,
+  unmaskSourceSpellings,
+  type SourceSpellingEnv,
+} from './sourceSpelling'
 import {
   NYOZE_BLANK_PAGE_NODE_NAME,
   NYOZE_DIRECTIVE_NODE_NAME,
@@ -55,8 +64,20 @@ md.normalizeLink = (url: string): string => url
 export function isMarkdownLinkDestinationAllowed(url: string): boolean {
   return md.validateLink(md.normalizeLink(url))
 }
-// MD-ROUNDTRIP-ESCAPE1: ファイルの `\*` を Nyoze の救済の正規表現に区切りとして見せない。
-registerEscapedCharMask(md)
+// MD-ESCAPE-EXPLICIT1: ファイルの `\*` `\#` `&amp;` などの綴りを、文字＋元の綴り（`sourceSpelling` mark）として
+// 読む。Nyoze の救済の正規表現にも、綴りのある文字を区切りとして見せない（`io/sourceSpelling.ts`）。
+registerSourceSpellingMask(md)
+// MD-ESCAPE-EXPLICIT1: リンクの定義の行（`[注]: 説明`）を文書から消さず、元の文字のまま持つ段落にする。
+registerVisibleReferenceDefinition(md)
+
+/**
+ * `text`（1行）が、markdown-it がリンクの定義として読む行か（定義の行の表示用。`[注]:` を薄くする判定）。
+ * parse と同じ instance の rule で決める。
+ */
+export function isReferenceDefinitionLineText(text: string): boolean {
+  const tokens = md.parse(text, {})
+  return tokens.length === 1 && tokens[0].type === REFERENCE_DEFINITION_TOKEN_TYPE
+}
 
 type MarkAttrs = Record<string, unknown>
 
@@ -70,6 +91,12 @@ export type ParseMarkdownOptions = {
   enableRuby?: boolean
   /** Preserve extra blank lines between top-level paragraph / heading blocks. */
   preserveEmptyParagraphs?: boolean
+  /**
+   * MD-SOURCE-PRESERVE1: 文書直下の子を足す単位（まとまり）ごとの、元の文字列の範囲と子の数を渡す記録先。
+   * `obsidian-paragraph` の文書直下だけが記録する（装飾・引用・リストの中の再帰 parse には渡さない）。
+   * 渡さない呼び出しは、今と同じ動き・同じ費用。
+   */
+  sourceRecorder?: SourceRecorder
 }
 
 export function parseMarkdown(
@@ -79,6 +106,10 @@ export function parseMarkdown(
   options?: ParseMarkdownOptions,
 ): PMNode {
   const normalized = normalizeLineEndings(markdown)
+  // MD-SOURCE-PRESERVE1: 記録するのは obsidian-paragraph の文書直下だけ。下の再帰 parse・fallback には渡さない。
+  const recorder = lineBreakPolicy === 'obsidian-paragraph' ? options?.sourceRecorder : undefined
+  if (options?.sourceRecorder !== undefined) options = { ...options, sourceRecorder: undefined }
+  recorder?.begin(normalized)
 
   // Nyoze 独自ブロック装飾 (`:::align-center` 等 / `:::page-break`) が含まれる場合だけ
   // directive 分割を行う。directive も page-break も無い文書は従来の per-policy parser
@@ -93,12 +124,12 @@ export function parseMarkdown(
           segment.type === 'blank-page',
       )
     ) {
-      return buildDocFromDirectiveSegments(schema, segments, lineBreakPolicy, options)
+      return buildDocFromDirectiveSegments(schema, segments, lineBreakPolicy, options, recorder)
     }
   }
 
   if (lineBreakPolicy === 'obsidian-paragraph') {
-    return parseObsidianParagraphMarkdown(schema, normalized, options)
+    return parseObsidianParagraphMarkdown(schema, normalized, options, recorder)
   }
   return parseCommonmarkMarkdown(schema, normalized, options)
 }
@@ -113,36 +144,50 @@ function buildDocFromDirectiveSegments(
   segments: DirectiveSegment[],
   lineBreakPolicy: LineBreakPolicy,
   options?: ParseMarkdownOptions,
+  recorder?: SourceRecorder,
 ): PMNode {
   const children: PMNode[] = []
 
   for (const segment of segments) {
     if (segment.type === 'plain') {
       const chunk = segment.lines.join('\n')
-      const parsed = lineBreakPolicy === 'obsidian-paragraph'
-        ? parseObsidianParagraphMarkdown(schema, chunk, options)
-        : parseCommonmarkMarkdown(schema, chunk, options)
-      parsed.forEach((child) => children.push(child))
+      if (lineBreakPolicy === 'obsidian-paragraph') {
+        const mark = recorder?.mark()
+        const parsed = readObsidianParagraphChildren(schema, chunk, options, recorder, segment.startLine)
+        if (parsed.length === 0) {
+          // 子を1つも作らない plain segment（参照の定義の行だけなど）は、従来どおり空段落を1つ足す。
+          // その子は元の行から作ったものではないので、segment 全体を1つの synthetic chunk として記録する。
+          if (recorder) {
+            recorder.rewind(mark ?? 0)
+            recorder.addChunk(segment.startLine, segment.endLine, 1, true)
+          }
+          children.push(createParagraphNode(schema, ''))
+        } else {
+          parsed.forEach((child) => children.push(child))
+        }
+      } else {
+        const parsed = parseCommonmarkMarkdown(schema, chunk, options)
+        parsed.forEach((child) => children.push(child))
+      }
       continue
     }
 
+    const before = children.length
     if (segment.type === 'page-break') {
       for (const node of buildPageBreakNode(schema, lineBreakPolicy, options)) {
         children.push(node)
       }
-      continue
-    }
-
-    if (segment.type === 'blank-page') {
+    } else if (segment.type === 'blank-page') {
       for (const node of buildBlankPageNode(schema, segment.count, lineBreakPolicy, options)) {
         children.push(node)
       }
-      continue
+    } else {
+      for (const node of buildDirectiveNodes(schema, segment, lineBreakPolicy, options)) {
+        children.push(node)
+      }
     }
-
-    for (const node of buildDirectiveNodes(schema, segment, lineBreakPolicy, options)) {
-      children.push(node)
-    }
+    // 装飾・改ページ・白紙のページは、開きの行から閉じの行までを1つのまとまりにする。
+    recorder?.addChunk(segment.startLine, segment.endLine, children.length - before)
   }
 
   return createDocNode(schema, children)
@@ -232,7 +277,7 @@ function buildDirectiveNodes(
 }
 
 function parseCommonmarkMarkdown(schema: Schema, markdown: string, options?: ParseMarkdownOptions): PMNode {
-  const env: EscapedCharEnv = { source: markdown }
+  const env: SourceSpellingEnv = { source: markdown }
   const tokens = md.parse(markdown, env)
   const builder = new DocBuilder(schema, markdown, options, env)
   builder.processTokens(tokens)
@@ -332,76 +377,112 @@ function isTableLikeLine(line: string): boolean {
   return /^\|.*\|$/.test(line.trimStart())
 }
 
-function parseObsidianParagraphMarkdown(schema: Schema, markdown: string, options?: ParseMarkdownOptions): PMNode {
+function parseObsidianParagraphMarkdown(
+  schema: Schema,
+  markdown: string,
+  options?: ParseMarkdownOptions,
+  recorder?: SourceRecorder,
+): PMNode {
+  return createDocNode(schema, readObsidianParagraphChildren(schema, markdown, options, recorder, 0))
+}
+
+/**
+ * 行の loop。1回で読んだ行の範囲（まとまり）と、足した子の数を `recorder` へ渡す（MD-SOURCE-PRESERVE1）。
+ * `baseLine` は、装飾の segment の中の plain segment が元の文書の何行目から始まるか。
+ */
+function readObsidianParagraphChildren(
+  schema: Schema,
+  markdown: string,
+  options: ParseMarkdownOptions | undefined,
+  recorder: SourceRecorder | undefined,
+  baseLine: number,
+): PMNode[] {
   const lines = markdown.split('\n')
   const children: PMNode[] = []
-
   for (let index = 0; index < lines.length;) {
-    const line = lines[index] ?? ''
+    const before = children.length
+    const next = readObsidianChunk(schema, lines, index, children, options)
+    recorder?.addChunk(baseLine + index, baseLine + next, children.length - before)
+    index = next
+  }
+  return children
+}
 
-    if (line.length === 0) {
-      children.push(createParagraphNode(schema, ''))
-      index++
-      continue
-    }
+/**
+ * MD-SOURCE-PRESERVE1: 行の loop が、この行を「後ろの行を見ずに、その1行だけで1つのまとまりにする」行か。
+ * `readObsidianChunk` の分岐のうち、空行・幅4以上の字下げの行・段落系の通常の行（fence の開き・水平線・構造の行でない）。
+ * このような行だけが並ぶ文字列は、各行が前後の行に左右されず、行ごとに読んだ結果を並べたものになる
+ * （装飾の `:::` の対応は行の loop の外なので、この判定は `:::` を含む行を扱わない。呼び出し側が先に除く）。
+ */
+export function isSelfContainedObsidianLine(line: string): boolean {
+  if (line.length === 0 || measureLeadingIndentWidth(line) >= 4) return true
+  return !(isFencedCodeStart(line) || isThematicBreakLine(line) || isStructuralLine(line))
+}
 
-    // MD-ROUNDTRIP-INDENT1: 幅4以上の字下げの行は chunk の先頭で通常段落として読む。
-    // R1（行頭空白は保持する）に従い、indented code block として読まない。
-    // `  ## 見出し` と同じく parseObsidianPlainLine へ1行ずつ渡す。
-    if (measureLeadingIndentWidth(line) >= 4) {
-      children.push(parseObsidianPlainLine(schema, line, options))
-      index++
-      continue
-    }
+/** 行の loop の1回分。子を `children` へ足し、次に読む行の添字を返す。 */
+function readObsidianChunk(
+  schema: Schema,
+  lines: string[],
+  index: number,
+  children: PMNode[],
+  options?: ParseMarkdownOptions,
+): number {
+  const line = lines[index] ?? ''
 
-    const fencedChunk = readFencedCodeChunk(lines, index)
-    if (fencedChunk) {
-      appendCommonmarkChunk(schema, fencedChunk.chunk, children, options)
-      index = fencedChunk.nextLine
-      continue
-    }
-
-    if (isThematicBreakLine(line)) {
-      appendCommonmarkChunk(schema, line, children, options)
-      index++
-      continue
-    }
-
-    if (isStructuralLine(line)) {
-      let next = index + 1
-      if (isBlockquoteLine(line)) {
-        // CommonMark's lazy continuation would otherwise absorb any
-        // following non-blank line into the blockquote's last paragraph.
-        // Nyoze's per-line obsidian-paragraph editing model treats a line
-        // without a `>` marker as always outside the quote, so only keep
-        // consuming lines that themselves carry the marker.
-        while (next < lines.length && lines[next] !== '' && isBlockquoteLine(lines[next])) {
-          next++
-        }
-      } else {
-        // MD-ROUNDTRIP-CHUNK1: html_block・リスト・hr・表の連続は block の範囲
-        // だけを chunk にして CommonMark で読み、段落系の先頭の1行は
-        // parseObsidianPlainLine で読む（行頭・行末の空白を保つ）。
-        // 後ろの行は行の loop へ戻す。
-        const resolved = resolveNonQuoteStructuralChunk(lines, index)
-        if (resolved.plain) {
-          children.push(parseObsidianPlainLine(schema, lines[index] ?? '', options))
-        } else {
-          appendCommonmarkChunk(schema, lines.slice(index, resolved.next).join('\n'), children, options)
-        }
-        index = resolved.next
-        continue
-      }
-      appendCommonmarkChunk(schema, lines.slice(index, next).join('\n'), children, options)
-      index = next
-      continue
-    }
-
-    children.push(parseObsidianPlainLine(schema, line, options))
-    index++
+  if (line.length === 0) {
+    children.push(createParagraphNode(schema, ''))
+    return index + 1
   }
 
-  return createDocNode(schema, children)
+  // MD-ROUNDTRIP-INDENT1: 幅4以上の字下げの行は chunk の先頭で通常段落として読む。
+  // R1（行頭空白は保持する）に従い、indented code block として読まない。
+  // `  ## 見出し` と同じく parseObsidianPlainLine へ1行ずつ渡す。
+  if (measureLeadingIndentWidth(line) >= 4) {
+    children.push(parseObsidianPlainLine(schema, line, options))
+    return index + 1
+  }
+
+  const fencedChunk = readFencedCodeChunk(lines, index)
+  if (fencedChunk) {
+    appendCommonmarkChunk(schema, fencedChunk.chunk, children, options)
+    return fencedChunk.nextLine
+  }
+
+  if (isThematicBreakLine(line)) {
+    appendCommonmarkChunk(schema, line, children, options)
+    return index + 1
+  }
+
+  if (isStructuralLine(line)) {
+    let next = index + 1
+    if (isBlockquoteLine(line)) {
+      // CommonMark's lazy continuation would otherwise absorb any
+      // following non-blank line into the blockquote's last paragraph.
+      // Nyoze's per-line obsidian-paragraph editing model treats a line
+      // without a `>` marker as always outside the quote, so only keep
+      // consuming lines that themselves carry the marker.
+      while (next < lines.length && lines[next] !== '' && isBlockquoteLine(lines[next])) {
+        next++
+      }
+    } else {
+      // MD-ROUNDTRIP-CHUNK1: html_block・リスト・hr・表の連続は block の範囲
+      // だけを chunk にして CommonMark で読み、段落系の先頭の1行は
+      // parseObsidianPlainLine で読む（行頭・行末の空白を保つ）。
+      // 後ろの行は行の loop へ戻す。
+      const resolved = resolveNonQuoteStructuralChunk(lines, index)
+      if (resolved.plain) {
+        children.push(parseObsidianPlainLine(schema, lines[index] ?? '', options))
+      } else {
+        appendCommonmarkChunk(schema, lines.slice(index, resolved.next).join('\n'), children, options)
+      }
+      return resolved.next
+    }
+    appendCommonmarkChunk(schema, lines.slice(index, next).join('\n'), children, options)
+    return next
+  }
+
+  children.push(parseObsidianPlainLine(schema, line, options))
+  return index + 1
 }
 
 function materializePreservedEmptyParagraphs(
@@ -615,10 +696,10 @@ class DocBuilder {
   private lineStartOffsets: number[]
   private enableRuby: boolean
   private linkStack: Array<{ kind: 'valid' } | { kind: 'invalid'; closeText: string }>
-  /** ESCAPE1 / ESCAPE2: `\*` と `\[` の目印（parse 1回分。text を作るところで戻す）。 */
-  private escapedCharEnv: EscapedCharEnv
+  /** MD-ESCAPE-EXPLICIT1: 綴りのある文字の目印と元の綴り（parse 1回分。text を作るところで戻す）。 */
+  private escapedCharEnv: SourceSpellingEnv
 
-  constructor(schema: Schema, source: string, options?: ParseMarkdownOptions, env?: EscapedCharEnv) {
+  constructor(schema: Schema, source: string, options?: ParseMarkdownOptions, env?: SourceSpellingEnv) {
     this.escapedCharEnv = env ?? { source }
     this.schema = schema
     this.blockStack = [{ type: 'doc', children: [], marks: [] }]
@@ -722,6 +803,11 @@ class DocBuilder {
         this.addHtmlBlockAtom(tok)
         break
 
+      // --- Link reference definition line (MD-ESCAPE-EXPLICIT1) ---
+      case REFERENCE_DEFINITION_TOKEN_TYPE:
+        this.addReferenceDefinitionParagraph(tok)
+        break
+
       default:
         // Ignore unknown token types (e.g., reference definitions)
         break
@@ -816,10 +902,10 @@ class DocBuilder {
           // Serializer reconstructs ![alt](src) or ![alt](src "title") losslessly.
           // alt is derived from children (unescaped) to avoid double-escaped
           // backslashes when the serializer re-escapes `]` / `\` etc.
-          const alt = unmaskEscapedChars(this.escapedCharEnv, extractImageAltFromToken(tok))
+          const alt = unmaskSourceSpellings(this.escapedCharEnv, extractImageAltFromToken(tok))
           const src = tok.attrGet('src') ?? ''
           const titleRaw = tok.attrGet('title')
-          const title = titleRaw === null ? null : unmaskEscapedChars(this.escapedCharEnv, titleRaw)
+          const title = titleRaw === null ? null : unmaskSourceSpellings(this.escapedCharEnv, titleRaw)
           this.addImageNode(src, alt, title)
           break
         }
@@ -996,8 +1082,19 @@ class DocBuilder {
 
   private addText(text: string, marks: MarkEntry[]): void {
     const pmMarks = this.toPmMarks(marks)
-    const textNode = this.schema.text(unmaskEscapedChars(this.escapedCharEnv, text), pmMarks)
-    this.currentFrame().children.push(textNode)
+    const env = this.escapedCharEnv
+    if (!hasSourceSpellings(env)) {
+      this.currentFrame().children.push(this.schema.text(text, pmMarks))
+      return
+    }
+    // MD-ESCAPE-EXPLICIT1: 綴りのある文字（`\*` `&amp;` など）は、文字に戻して `sourceSpelling` mark を付ける
+    // （mark の type が schema に無ければ、文字だけ）。
+    const spellingType = this.schema.marks[SOURCE_SPELLING_MARK_NAME]
+    for (const run of splitSourceSpelledText(env, text)) {
+      if (run.text.length === 0) continue
+      const runMarks = run.raw !== null && spellingType ? [...pmMarks, spellingType.create({ raw: run.raw })] : pmMarks
+      this.currentFrame().children.push(this.schema.text(run.text, runMarks))
+    }
   }
 
   private addHardBreak(): void {
@@ -1137,12 +1234,12 @@ class DocBuilder {
   private addRubyNode(base: string, ruby: string, hasDelimiter: boolean, marks: MarkEntry[]): void {
     const nodeType = this.schema.nodes['aozoraRuby']
     if (!nodeType || !base || !ruby) return
-    // ESCAPE1 / ESCAPE2: base・ruby の目印を元の文字へ戻す（失敗時の addText も戻す）。
-    const textNode = this.schema.text(unmaskEscapedChars(this.escapedCharEnv, base))
+    // base・ruby の目印を元の文字へ戻す（綴りの mark は付けない。失敗時の addText は mark を付ける）。
+    const textNode = this.schema.text(unmaskSourceSpellings(this.escapedCharEnv, base))
     const pmMarks = this.toPmMarks(marks)
     try {
       this.currentFrame().children.push(
-        nodeType.create({ ruby: unmaskEscapedChars(this.escapedCharEnv, ruby), hasDelimiter }, [textNode], pmMarks),
+        nodeType.create({ ruby: unmaskSourceSpellings(this.escapedCharEnv, ruby), hasDelimiter }, [textNode], pmMarks),
       )
     } catch {
       // Fallback: keep original text if mark constraints reject this node.
@@ -1154,7 +1251,7 @@ class DocBuilder {
   private addTcyNode(body: string, marks: MarkEntry[]): void {
     const nodeType = this.schema.nodes['aozoraTcy']
     if (!nodeType || !body) return
-    const textNode = this.schema.text(unmaskEscapedChars(this.escapedCharEnv, body))
+    const textNode = this.schema.text(unmaskSourceSpellings(this.escapedCharEnv, body))
     const pmMarks = this.toPmMarks(marks)
     try {
       this.currentFrame().children.push(
@@ -1165,14 +1262,22 @@ class DocBuilder {
     }
   }
 
+  /**
+   * MD-ROUNDTRIP-INLINE-MARK1: 同じ種類の mark が2つ以上あれば、最初の1つだけを残す。
+   * `**a **b** c**` のような入れ子（と、変更前の保存が書いた `*a ****b**** c*`）は、同じ
+   * 太字が重なって積まれるが、PM の mark の組としては不正なので1つにする。`addToSet()` は
+   * code の `excludes: '_'` で太字などが消えるため使わない。
+   */
   private toPmMarks(marks: MarkEntry[]) {
-    return marks
-      .map((m) => {
-        const markType = this.schema.marks[m.name]
-        if (!markType) return null
-        return markType.create(m.attrs)
-      })
-      .filter((m): m is NonNullable<typeof m> => m !== null)
+    const seen = new Set<string>()
+    const pmMarks = []
+    for (const m of marks) {
+      const markType = this.schema.marks[m.name]
+      if (!markType || seen.has(m.name)) continue
+      seen.add(m.name)
+      pmMarks.push(markType.create(m.attrs))
+    }
+    return pmMarks
   }
 
   private addImageNode(src: string, alt: string, title: string | null): void {
@@ -1204,6 +1309,19 @@ class DocBuilder {
     this.currentFrame().children.push(
       nodeType.create({ raw })
     )
+  }
+
+  /** MD-ESCAPE-EXPLICIT1: リンクの定義の行を、元の文字のまま持つ段落にする（改行は hardBreak）。 */
+  private addReferenceDefinitionParagraph(tok: Token): void {
+    const paragraphType = this.schema.nodes['paragraph']
+    if (!paragraphType) return
+    const hardBreakType = this.schema.nodes['hardBreak']
+    const children: PMNode[] = []
+    tok.content.split('\n').forEach((line, index) => {
+      if (index > 0 && hardBreakType) children.push(hardBreakType.create())
+      if (line.length > 0) children.push(this.schema.text(line))
+    })
+    this.currentFrame().children.push(paragraphType.create(null, children))
   }
 
   private addHtmlBlockAtom(tok: Token): void {

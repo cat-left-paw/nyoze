@@ -6,6 +6,7 @@ import {
   IconArrowForwardUp,
   IconBlockquote,
   IconBold,
+  IconIndentDecrease,
   IconIndentIncrease,
   IconLayoutDistributeHorizontal,
   IconLetterCase,
@@ -64,6 +65,10 @@ import type {
   ReactNode,
   WheelEventHandler,
 } from 'react'
+import {
+  resolveIndentStepAvailability,
+  type IndentStepDirection,
+} from '../../editor-core/io/customBlockDirective'
 import type { CommandAvailability } from '../../editor-core/types'
 import type { UiLanguageMode, WritingMode } from '../../settings/types'
 import { createUiTextGetter } from '../i18n/uiText'
@@ -157,6 +162,8 @@ type UnifiedHeaderProps = {
   onApplyBlockDirective: (token: string) => void
   /** 独自ブロック装飾を解除する。 */
   onRemoveBlockDirective: () => void
+  /** 字下げを 1 段増やす / 減らす（一番内側の装飾が対象。上限 20 段）。 */
+  onStepBlockIndent: (direction: IndentStepDirection) => void
   /** 改ページ marker (`nyozePageBreak`) を挿入する。wrapper 装飾の apply/remove とは別の独立した挿入 action。 */
   onInsertPageBreak: () => void
   /** selection が改ページ marker のときだけ有効な削除 action。 */
@@ -213,6 +220,7 @@ export function UnifiedHeader({
   onToggleCodeBlock,
   onApplyBlockDirective,
   onRemoveBlockDirective,
+  onStepBlockIndent,
   onInsertPageBreak,
   onDeletePageBreak,
   onInsertBlankPage,
@@ -233,6 +241,11 @@ export function UnifiedHeader({
   const t = createUiTextGetter(uiLanguageMode)
   const isVertical = writingMode === 'vertical-rl'
   const isMac = platform === 'darwin'
+  // PIS-TOOLBAR-FOCUS-KEEP1: 本文・選択に作用するボタン（と、ドロップダウンのトリガー・メニュー・項目）のmousedownで、
+  // 入力面がfocusを持っているなら、focusをボタンへ移さない（移すと範囲のHighlightが消え、メニューの間ずっと戻らない）。
+  // 対象・対象外の一覧は tests/e2e/pis-toolbar-focus-keep1.spec.ts の`TOOLBAR_CONTROLS`が正本。
+  // 以前の入力方式では`undefined`（何もしない）。focusを移すべきボタン（開く・保存・章の移動・つまみ）には付けない。
+  const keepEditorFocus = getInputSurfacePromptMouseDownHandler()
   const headingItems = [
     { id: 'h1', label: t('editor.heading.level1'), level: 1, icon: IconH1 },
     { id: 'h2', label: t('editor.heading.level2'), level: 2, icon: IconH2 },
@@ -268,20 +281,43 @@ export function UnifiedHeader({
     availability.isBulletList || availability.isOrderedList || availability.isChecklist
   const blockDecorationToken = availability.blockDirectiveToken
   const blockDecorationActive = blockDecorationToken !== null
-  const blockDecorationGroups: Array<
-    Array<{ id: string; token: string; label: string; icon: typeof IconAlignCenter }>
-  > = [
+  // BLOCK-INDENT-LEVELS1: 字下げは 1〜6 段の直接指定ではなく、「1 段増やす / 減らす」の 2 項目（上限 20 段）。
+  // 使える・使えないは、一番内側の装飾の token（`blockDirectiveToken`）から純粋に決める。今の段数は字下げのときだけ出す。
+  const indentStep = resolveIndentStepAvailability(blockDecorationToken)
+  const indentCurrentSuffix =
+    indentStep.currentLevel === null
+      ? ''
+      : t('editor.blockDecoration.indentCurrent').replace('{level}', String(indentStep.currentLevel))
+  type BlockDecorationItem = {
+    id: string
+    /** token 項目（align / style）。`onApplyBlockDirective(token)` で適用・置換する。 */
+    token?: string
+    /** 字下げの 1 段増減の項目。`onStepBlockIndent(step)` を呼ぶ。 */
+    step?: IndentStepDirection
+    disabled?: boolean
+    label: string
+    icon: typeof IconAlignCenter
+  }
+  const blockDecorationGroups: BlockDecorationItem[][] = [
     [
       { id: 'center', token: 'align-center', label: t('editor.blockDecoration.center'), icon: IconAlignCenter },
       { id: 'end', token: 'align-end', label: t('editor.blockDecoration.end'), icon: IconAlignRight },
     ],
     [
-      { id: 'indent1', token: 'indent-1', label: t('editor.blockDecoration.indent1'), icon: IconIndentIncrease },
-      { id: 'indent2', token: 'indent-2', label: t('editor.blockDecoration.indent2'), icon: IconIndentIncrease },
-      { id: 'indent3', token: 'indent-3', label: t('editor.blockDecoration.indent3'), icon: IconIndentIncrease },
-      { id: 'indent4', token: 'indent-4', label: t('editor.blockDecoration.indent4'), icon: IconIndentIncrease },
-      { id: 'indent5', token: 'indent-5', label: t('editor.blockDecoration.indent5'), icon: IconIndentIncrease },
-      { id: 'indent6', token: 'indent-6', label: t('editor.blockDecoration.indent6'), icon: IconIndentIncrease },
+      {
+        id: 'indentIncrease',
+        step: 'increase',
+        disabled: !indentStep.canIncrease,
+        label: `${t('editor.blockDecoration.indentIncrease')}${indentCurrentSuffix}`,
+        icon: IconIndentIncrease,
+      },
+      {
+        id: 'indentDecrease',
+        step: 'decrease',
+        disabled: !indentStep.canDecrease,
+        label: `${t('editor.blockDecoration.indentDecrease')}${indentCurrentSuffix}`,
+        icon: IconIndentDecrease,
+      },
     ],
     [
       { id: 'styleLetter', token: 'style-letter', label: t('editor.blockDecoration.styleLetter'), icon: IconLetterCase },
@@ -863,6 +899,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={onUndo}
+          onMouseDown={keepEditorFocus}
           disabled={!availability.canUndo}
           type='button'
           data-tooltip={t('common.undo')}
@@ -873,6 +910,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={onRedo}
+          onMouseDown={keepEditorFocus}
           disabled={!availability.canRedo}
           type='button'
           data-tooltip={t('common.redo')}
@@ -884,6 +922,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isBold ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('bold'))}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.bold')}
@@ -895,6 +934,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isItalic ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('italic'))}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.italic')}
@@ -906,6 +946,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isStrike ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('strike'))}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.strike')}
@@ -917,6 +958,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isHighlight ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('highlight'))}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.highlight')}
@@ -928,6 +970,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isUnderline ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(() => onRunMarkCommand('underline'))}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.underline')}
@@ -939,6 +982,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isInlineCode ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(onToggleInlineCode)}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.inlineCode')}
@@ -950,6 +994,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onClearFormat)}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.clearFormat')}
@@ -958,7 +1003,7 @@ export function UnifiedHeader({
           <IconEraser size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
         <span className='toolbar-sep'>|</span>
-        <div className='toolbar-heading-menu-wrap' ref={headingMenuRef}>
+        <div className='toolbar-heading-menu-wrap' ref={headingMenuRef} onMouseDown={keepEditorFocus}>
           <button
             className={`toolbar-btn-icon-only toolbar-heading-trigger${headingMenuOpen ? ' open' : ''}`}
             onClick={withPlainFormattingGuard(() => {
@@ -1027,7 +1072,7 @@ export function UnifiedHeader({
             </div>
           )}
         </div>
-        <div className='toolbar-list-menu-wrap' ref={listMenuRef}>
+        <div className='toolbar-list-menu-wrap' ref={listMenuRef} onMouseDown={keepEditorFocus}>
           <button
             className={`toolbar-btn-icon-only toolbar-list-trigger${listMenuOpen ? ' open' : ''}${listMenuTriggerActive ? ' toggle-active' : ''}`}
             onClick={withPlainFormattingGuard(() => {
@@ -1079,6 +1124,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isBlockquote ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(onToggleBlockquote)}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.blockquote')}
@@ -1089,6 +1135,7 @@ export function UnifiedHeader({
         <button
           className={`toolbar-btn-icon-only${availability.isCodeBlock ? ' toggle-active' : ''}`}
           onClick={withPlainFormattingGuard(onToggleCodeBlock)}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.codeBlock')}
@@ -1096,7 +1143,11 @@ export function UnifiedHeader({
         >
           <IconCodeDots size={ICON_SIZE} stroke={ICON_STROKE} />
         </button>
-        <div className='toolbar-block-decoration-menu-wrap' ref={blockDecorationMenuRef}>
+        <div
+          className='toolbar-block-decoration-menu-wrap'
+          ref={blockDecorationMenuRef}
+          onMouseDown={keepEditorFocus}
+        >
           <button
             className={`toolbar-btn-icon-only toolbar-block-decoration-trigger${blockDecorationMenuOpen ? ' open' : ''}${blockDecorationActive ? ' toggle-active' : ''}`}
             onClick={withPlainFormattingGuard(() => {
@@ -1132,7 +1183,7 @@ export function UnifiedHeader({
                   ) : null}
                   {group.map((item) => {
                     const Icon = item.icon
-                    const rowSelected = blockDecorationToken === item.token
+                    const rowSelected = item.token !== undefined && blockDecorationToken === item.token
                     return (
                       <button
                         key={item.id}
@@ -1140,9 +1191,11 @@ export function UnifiedHeader({
                         type='button'
                         role='menuitem'
                         data-directive-token={item.token}
-                        disabled={plainFormattingBlocked}
+                        data-indent-step={item.step}
+                        disabled={plainFormattingBlocked || item.disabled === true}
                         onClick={withPlainFormattingGuard(() => {
-                          onApplyBlockDirective(item.token)
+                          if (item.step) onStepBlockIndent(item.step)
+                          else if (item.token) onApplyBlockDirective(item.token)
                           setBlockDecorationMenuOpen(false)
                         })}
                       >
@@ -1237,7 +1290,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onSetOrUnsetLink)}
-          onMouseDown={getInputSurfacePromptMouseDownHandler()}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.link')}
@@ -1248,7 +1301,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onInsertImage)}
-          onMouseDown={getInputSurfacePromptMouseDownHandler()}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.image')}
@@ -1259,7 +1312,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onInsertRubyBouten)}
-          onMouseDown={getInputSurfacePromptMouseDownHandler()}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.insertRuby')}
@@ -1270,6 +1323,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onToggleTcy)}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.tcy')}
@@ -1280,7 +1334,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onAddNoteAnchor)}
-          onMouseDown={getInputSurfacePromptMouseDownHandler()}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.noteAnchor')}
@@ -1292,6 +1346,7 @@ export function UnifiedHeader({
         <button
           className='toolbar-btn-icon-only'
           onClick={withPlainFormattingGuard(onInsertHorizontalRule)}
+          onMouseDown={keepEditorFocus}
           type='button'
           tabIndex={-1}
           aria-label={t('editor.horizontalRule')}

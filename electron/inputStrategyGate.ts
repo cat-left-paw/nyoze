@@ -36,6 +36,8 @@ export type InputStrategyCapability = {
   productStrategy: InputProductStrategy;
   authorPilot: boolean;
   forced: boolean;
+  /** PIS-DEFAULT-ON1: 起動時のprofileからmainだけが読む。 */
+  startupClassicInputEnabled?: boolean;
 };
 
 export const INPUT_STRATEGY_NONE: InputStrategyCapability = Object.freeze({
@@ -88,5 +90,5 @@ export function normalizeInputStrategyCapability(value: unknown): InputStrategyC
   // 矛盾する組は受け取らない（Pilotと製品の入口、input-surface以外の強制ON）。
   if (v.authorPilot && strategy !== "none") return INPUT_STRATEGY_NONE;
   if (v.forced && strategy !== "input-surface") return INPUT_STRATEGY_NONE;
-  return { productStrategy: strategy, authorPilot: v.authorPilot, forced: v.forced };
+  return { productStrategy: strategy, authorPilot: v.authorPilot, forced: v.forced, ...(typeof v.startupClassicInputEnabled === 'boolean' ? { startupClassicInputEnabled: v.startupClassicInputEnabled } : {}) };
 }

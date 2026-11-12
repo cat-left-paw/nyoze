@@ -7,9 +7,7 @@
 Nyoze は、**縦書きでそのまま文章を書けるエディタ**です。
 Published by Left Paw Studio.
 
-現行の GitHub Latest と Microsoft Store版は、いずれも `0.4.0-beta.2` です。
-
-試用版の `0.5.0-alpha.1` を、GitHub Releases のプレリリースとして公開しています。長文編集モード（実験的）の新しい入力の方式を試していただくための版です。内容と注意は [RELEASE_NOTES.md](./RELEASE_NOTES.md) を参照してください。
+現行の GitHub Latest と Microsoft Store版は、いずれも `0.5.0-beta.1` です（Microsoft Store版は審査の後に更新されます）。
 
 `0.3.0-beta.1` で確認された、章境界ナビゲーションが無効な状態で renderer の CPU 使用率が高止まりする問題は `0.3.0-beta.2` で修正済みです。以後の版にもこの修正が含まれています。
 
@@ -42,7 +40,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 - 縦書きでそのまま編集できます
 - 見た目のまま書ける編集画面があります
 - Typewriter scroll、Visual Focus、擬似キャレットで、今書いている場所へ視線を戻しやすくできます
-- 既定OFFの **長文編集モード（実験的）** で、長い文書の連続入力を軽くできます
+- 専用の入力欄で文字を受け取る方式を標準にし、ルビや書式の境目でも安定した入力を支えます（表示設定から以前の入力方式へ切り替えられます）
 - ルビや縦中横に対応しています
 - `.md` だけでなく `.txt` もそのまま開いて保存できます
 - 原稿を壊さず保存往復することを重視しています
@@ -59,7 +57,7 @@ beta 版では、日常執筆で破綻しないこと、Markdown / frontmatter /
 
 - 縦書き / 横書きの切り替え
 - WYSIWYG 編集
-- 長文編集モード（実験的。既定OFF。macOS / Windows対応、Linuxは非サポートの試験利用）
+- 入力の方式（専用の入力欄で受け取る標準の方式、以前の入力方式への切り替え。Linuxは動作保証の対象外）
 - Typewriter scroll、編集ブロックハイライト、現在行ハイライト、擬似キャレットなどの執筆補助表示
 - 作品内の本文位置へ紐づく付箋（タイトル、複数行Markdownメモ、解決済み管理、Notesタブ）
 - 作品タブでの Books 一覧、Materials 一覧、複数 role filter、資料Markdown preview、右ペイン内の資料簡易編集（textarea + 明示保存）
@@ -182,7 +180,7 @@ author: 著者名
 
 ## 対応環境
 
-`0.4.0-beta.2`の公式配布対象は次の環境です。
+`0.5.0-beta.1`の公式配布対象は次の環境です。
 
 - macOS:
   - Apple Silicon Mac 用 DMG（`arm64`）
@@ -193,7 +191,7 @@ author: 著者名
 - Linux: 現時点の beta では公式パッケージなし
 
 Windows 版は 64bit (`x64`) 専用です。32bit Windows は現行 beta のサポート対象外です。
-Windowsでは、`0.4.0-beta.2`をMicrosoft StoreとGitHub x64 zipで公開しています。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
+Windowsでは、`0.5.0-beta.1`をMicrosoft StoreとGitHub x64 zipで公開しています。通常利用ではStore版を優先し、GitHub zipはStoreを使えない環境向けの代替とします。
 
 macOS 版は 2 種類あります。
 
@@ -202,7 +200,7 @@ macOS 版は 2 種類あります。
 
 間違った方を入れると、起動できない、または著しく遅くなることがあります。自分の Mac の種類に合ったものを使ってください。
 
-Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run build` を試せます。長文編集モード（実験的）も Linux で試験的に利用できますが、既定はOFFで、動作保証および公式サポートの対象外です。Linux 向け公式パッケージと artifact 公開は現時点の beta では提供・承認していません。Electron / Linux に慣れている場合は、必要に応じて `electron-builder` で Linux 向けパッケージを作成できますが、公式配布物としては扱いません。
+Linux 環境では公開ソースから `npm install` / `npm run dev` / `npm run build` を試せます。Linux でも標準の入力方式で起動しますが、動作保証および公式サポートの対象外です。入力に問題がある場合は、以前の入力方式をお試しください。Linux 向け公式パッケージと artifact 公開は現時点の beta では提供・承認していません。Electron / Linux に慣れている場合は、必要に応じて `electron-builder` で Linux 向けパッケージを作成できますが、公式配布物としては扱いません。
 
 ## ダウンロードとインストール
 
@@ -312,7 +310,7 @@ Windows の `x64` zip を明示的に作る場合:
 npm run package:win:x64
 ```
 
-配布物は `release/<version>/` に出力されます。`0.4.0-beta.2`ではmacOS DMG、Windows zip、Microsoft Store版を公式scopeとし、Linux向け公式パッケージは提供しません。GitHub Release assetはDMGとzipで、Store用AppXはPartner Centerへ別途提出します。`npm run package` は通常、その実行環境に対応する 1 つの配布物を作ります。macOS DMG は arch を含む名前で出力されます。Windows zip は、展開時にファイルが散らからないよう `Nyoze-Windows-<version>-x64/` フォルダを含む形で作成します。
+配布物は `release/<version>/` に出力されます。`0.5.0-beta.1`ではmacOS DMG、Windows zip、Microsoft Store版を公式scopeとし、Linux向け公式パッケージは提供しません。GitHub Release assetはDMGとzipで、Store用AppXはPartner Centerへ別途提出します。`npm run package` は通常、その実行環境に対応する 1 つの配布物を作ります。macOS DMG は arch を含む名前で出力されます。Windows zip は、展開時にファイルが散らからないよう `Nyoze-Windows-<version>-x64/` フォルダを含む形で作成します。
 
 - `Nyoze-Mac-<version>-arm64-Installer.dmg`
 - `Nyoze-Mac-<version>-x64-Installer.dmg`
@@ -326,21 +324,19 @@ npm run package:win:x64
 - drag and drop は未対応です
 - `Open With` は未対応です
 - `.md` の関連付けは未対応です
-- Linux 向け公式パッケージは現時点の beta では提供していません。長文編集モード（実験的）はソース / `npm run dev` から試験利用できますが、既定OFFで公式サポート対象外です
+- Linux 向け公式パッケージは現時点の beta では提供していません。ソース / `npm run dev` から利用できますが、入力の方式を含めて公式サポートの対象外です
 - frontmatter の一般編集 UI はありません
 - 複雑な YAML の編集は `Source Mode` での編集が前提です
 - 高度な競合解決やマージ UI はありません
 - コードブロックのシンタックスハイライトは WYSIWYG 表示のみです。言語未指定・未対応言語では自動判定せず、プレーン表示になります
 - 文書内リンクは `Cmd/Ctrl + Click` で外部ページへ移動できます。通常クリックでは開きません
 - `Cmd/Ctrl + Click` で開ける文書内リンクは、`https://` の認証情報なし絶対 URL のみです。`http://`、`mailto:`、`tel:`、相対リンク、文書内アンカーは通常編集上の外部オープン対象ではありません
-- 長文編集モードで局所編集面が「編集中」の間は、タイプライターモードなど一部の表示・編集補助機能を同時に利用できません。これらの機能を使う場合は、長文編集モードをOFFにしてください
-- 長文編集モードを安全に維持できない場合、未確定の編集内容を保護したまま「回復（recovery）」状態になることがあります。この状態では、再試行、下書きのコピー、確認後の破棄を選択できます。macOS / Windows実機ではこの状態を自然に再現できなかったため、回復状態での実機確認は未了です
-- ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
+- 以前の入力方式で、ルビや明示 TCY（縦中横）の直後で日本語 IME 入力を始めたとき、環境やタイミングによっては、まれに 1 タイプ目の直後に 2 タイプ目で入力が詰まることがあります。その場合は `Escape` を押すと未確定入力を破棄して通常の編集状態へ復帰できます
 - Windows の一部 AMD GPU + Chromium 系環境では、本文や `Source Mode` 上の I-beam カーソルが白く見えて視認しづらくなることがあります。その場合は `View Settings > 文書テーマ > エディタで矢印ポインターを使う` を有効にすると、本文上だけ矢印ポインターへ切り替えて回避できます
 - 一部のWindows環境では、DeepLなどの常駐アプリとの同時利用時に編集が著しく遅くなる場合があります。`表示設定 > Windows互換性 > Chromiumアクセシビリティを無効化する`を有効にしてNyozeを再起動すると改善する場合があります。スクリーンリーダーなどの支援技術を利用している場合は有効にしないでください
 - 10万文字前後から、環境によっては入力や描画が重くなる場合があります。特に縦書き・ルビ表示・検索 ON・日本語 IME 入力の組み合わせでは重くなりやすく、ルビを多用した文書ではそれより少ない文量でも影響が出ることがあります
 - 数十万文字級でルビ等を多く含む文書では、文書切替直後のclickやdragが数秒以上遅れ、一時的に「応答なし」と表示されることがあります。発生のしやすさは、端末の性能や文書の内容・構造によって異なります
-- 重く感じたときは、まず長文編集モードまたはルビ表示をOFFにする、`Paragraph Plain`を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
+- 重く感じたときは、まずルビ表示をOFFにする、`Paragraph Plain`を使って編集する、それでも重い場合は章などの区切りのよい単位でファイルを分ける、といった運用をおすすめします
 - beta 版では、開いてすぐ保存しても Markdown の表記がまったく変わらないことまでは保証しません。元の Markdown 表記が Nyoze の Markdown 表現へ正規化される場合があります
 - beta で完全保持しない代表例は、GFM table、reference-style link / link definition、footnote、definition list、複雑な list / blockquote、code fence の文字種・長さ・空行、softbreak / hardbreak の表記差分です
 - `Source Mode` も beta では raw save 専用導線ではありません。Apply / Save 時に Nyoze の parser / serializer を通るため、上記の未対応構文や表記差分は正規化される場合があります

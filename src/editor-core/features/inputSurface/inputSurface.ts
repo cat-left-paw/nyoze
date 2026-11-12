@@ -1,9 +1,10 @@
-import type { EditOwner, OwnerCommitReceipt, OwnerInsertionSnapshot, OwnerPreeditContext } from './editOwner'
+import type { CommitTargetRestriction, EditOwner, OwnerCommitReceipt, OwnerInsertionSnapshot, OwnerPreeditContext } from './editOwner'
 import { isSurfaceInputAllowed, shouldClearSurfaceFailure, shouldNormalizeEmptySurface } from './surfaceState'
 import { surfacePlacement } from './surfacePlacement'
 import { surfaceBlockPlacement, surfaceFollowStart, type SurfaceFrozenPlacement } from './surfacePlacement'
 import { createSurfaceTypography } from './surfaceTypography'
 import { createPreeditHighlight } from './preeditHighlight'
+import { createRetainedDisplay } from './retainedDisplay'
 import { hasCanonicalEmptySurfaceCaret } from './emptySurfaceCaret'
 import { readContentOrigin, rightFromContentLineEnd, toContentLeft, toContentRect, toContentRight, toContentTop } from './contentCoordinates'
 import { createSelectionMirrorController } from './selectionMirrorController'
@@ -39,6 +40,11 @@ export function createInputSurface(options: {
   onCompositionFinished?(): void
   onStateChange?(): void
   onDisplayChange?(): void
+  /**
+   * BLOCK-WARN1: 確定先の位置だけで確定が拒否されると、打つ前に分かった。直接入力はbeforeinputで止めた後、
+   * 変換はcompositionstartで（変換は止めない）。表示は受け手が持つ。
+   */
+  onInputRestricted?(restriction: CommitTargetRestriction, via: 'direct' | 'composition'): void
   record: SurfaceRecord
 }) {
   const { host, scrollHost, record } = options
@@ -94,6 +100,15 @@ export function createInputSurface(options: {
   let followAllowed = false
   const content = createSelectionMirrorController({ element, currentOwner: options.currentOwner, mayMirror: () => options.mayMirror?.() ?? false, canNotify: () => enabled && !composing && !committing && !failure, record })
   const { text, rawText } = content
+  // PIS-RETAINED-TEXT-COLOR1: 保持文字の表示（属性）。付け外しはこの1つで決め、`failure`の代入ごとには付け外ししない。
+  // 出来事の途中（文字が入力面に入ってからownerへ確定するまで）の状態では合わせない。入口（event handlerと外へ出すAPI）を
+  // `settleRetained`で包み、抜けるときに1回だけ合わせる。途中で合わせると、成功する入力の1打ごとに属性が付いて外れる。
+  const retainedDisplay = createRetainedDisplay(element, () => ({ kind: content.kind(), text: text(), composing, failure }))
+  let entryDepth = 0
+  const settleRetained = <T>(run: () => T): T => {
+    entryDepth++
+    try { return run() } finally { if (--entryDepth === 0) retainedDisplay.refresh() }
+  }
   /** 内容の座標の原点（親の矩形・clientのinset・scroll量）を読む。書き込みの前に、ほかの読み取りと一緒に呼ぶ。 */
   const contentOrigin = () => readContentOrigin(scrollHost)
 
@@ -169,6 +184,8 @@ export function createInputSurface(options: {
   const visual = () => {
     // 方式A: 見える字とnative IME表示は、cycleの有無によらず入力面が描く。背景は、本文へ重ねる表示でだけ塗る。
     refreshPreeditPaint()
+    // 入口の外（外から呼ばれた配置の書き込みなど）では、落ち着いた状態なのでその場で合わせる。
+    if (entryDepth === 0) retainedDisplay.refresh()
     element.style.opacity = content.kind() === 'mirror' ? '0' : enabled || text() ? '1' : '0'
     options.onDisplayChange?.()
   }
@@ -258,7 +275,7 @@ export function createInputSurface(options: {
       options.onDisplayChange?.()
     }
   }
-  const place = (forceTypography = false) => preparePlacement(forceTypography)?.()
+  const place = (forceTypography = false) => settleRetained(() => preparePlacement(forceTypography)?.())
   // dataをpayloadの正本にしても、同じDOMを作り直さない（IMEのcaretを保つ）。
   const replacePayloadIfDifferent = (payload: string) => {
     if (rawText() === payload) return
@@ -307,7 +324,7 @@ export function createInputSurface(options: {
     options.onCommit()
     return true
   }
-  const onStart = (event: CompositionEvent) => {
+  const onStart = (event: CompositionEvent) => settleRetained(() => {
     const startSnapshot = options.currentOwner().snapshotInsertion()
     if (!composing) retainedStart = content.kind() !== 'mirror' && text()
       ? { kind: 'retained', text: text(), failure } : null
@@ -318,6 +335,9 @@ export function createInputSurface(options: {
     record('compositionstart-placement', { durationMs: performance.now() - started, revealed })
     // 前cycleの表示文字を持ち越さない。
     endCompositionPresentation()
+    // BLOCK-WARN1: 確定先が拒否される位置なら、変換の開始で知らせる（変換は止めない。確定した文字は従来どおり入力面に保持される）。
+    const startRestriction = startSnapshot && options.currentOwner().resolveCommitTargetRestriction?.(startSnapshot)
+    if (startRestriction) { record('composition-target-restricted', { restriction: startRestriction, from: startSnapshot!.from, to: startSnapshot!.to }); options.onInputRestricted?.(startRestriction, 'composition') }
     composing = true
     discarding = false
     compositionCycle++
@@ -348,9 +368,9 @@ export function createInputSurface(options: {
     visual()
     record('compositionstart', { data: event.data, from: compositionSnapshot?.from, to: compositionSnapshot?.to, identity: compositionSnapshot?.identity })
     options.onStateChange?.()
-  }
-  const onUpdate = () => { updateCompositionPresentation(); visual() }
-  const onEnd = (event: CompositionEvent) => {
+  })
+  const onUpdate = () => settleRetained(() => { updateCompositionPresentation(); visual() })
+  const onEnd = (event: CompositionEvent) => settleRetained(() => {
     composing = false
     const previousRetained = retainedStart
     retainedStart = null
@@ -395,7 +415,7 @@ export function createInputSurface(options: {
     visual()
     options.onStateChange?.()
     options.onCompositionFinished?.()
-  }
+  })
   const onBeforeInput = (event: InputEvent) => {
     record('beforeinput', { inputType: event.inputType, data: event.data, composing: event.isComposing })
     if (content.kind() === 'mirror' && !composing && !event.isComposing && event.inputType.startsWith('delete')) {
@@ -408,12 +428,25 @@ export function createInputSurface(options: {
       record('beforeinput-blocked', { inputType: event.inputType })
       return
     }
-    options.onBeforeInput?.(event)
-    if (!composing && !event.isComposing && event.inputType === 'insertText') {
+    const direct = !composing && !event.isComposing && event.inputType === 'insertText'
+    if (direct) {
       insertionSnapshot = options.currentOwner().snapshotInsertion()
+      // BLOCK-WARN1: 確定先が拒否される位置の直接入力は、入力面へ入る前に止めて知らせる（文字は本文にも入力面にも入らない）。
+      // 入力面に保持文字があるときは、確定を試みない（保持文字へ続く）ので、止めない。判定は`commitText`と同じ1つの関数。
+      const restriction = insertionSnapshot && !failure && (content.kind() === 'mirror' || !text())
+        ? options.currentOwner().resolveCommitTargetRestriction?.(insertionSnapshot) : null
+      if (restriction) {
+        event.preventDefault()
+        record('beforeinput-blocked', { inputType: event.inputType, restriction, from: insertionSnapshot!.from, to: insertionSnapshot!.to })
+        // snapshotは捨てない。止めた後に`input`は来ないが、来た場合（合成eventなど）は、確定の`protected-target`が
+        // 安全網として文字を捨てる（`commit()`）。捨てると`stale`として入力欄に保持される。次のbeforeinputで取り直す。
+        options.onInputRestricted?.(restriction, 'direct')
+        return
+      }
     }
+    options.onBeforeInput?.(event)
   }
-  const onInput = (rawEvent: Event) => {
+  const onInput = (rawEvent: Event) => settleRetained(() => {
     const event = rawEvent as InputEvent
     updateCompositionPresentation()
     visual()
@@ -435,13 +468,13 @@ export function createInputSurface(options: {
     if (!composing && text()) content.retained()
     normalize()
     options.onStateChange?.()
-  }
+  })
   element.addEventListener('compositionstart', onStart)
   element.addEventListener('compositionupdate', onUpdate)
   element.addEventListener('compositionend', onEnd)
   element.addEventListener('beforeinput', onBeforeInput)
   element.addEventListener('input', onInput)
-  const onKeyDown = (event: KeyboardEvent) => {
+  const onKeyDown = (event: KeyboardEvent) => settleRetained(() => {
     content.beforeKey(event)
     const navigation = isMirrorNavigationKey(event.key)
     if (navigation) content.holdNavigation()
@@ -449,12 +482,12 @@ export function createInputSurface(options: {
     const released = !event.isComposing && content.releaseRejection()
     if (!composing && (dirty || released) && !navigation) place()
     content.noteKey(event)
-  }
-  const onKeyUp = (event: KeyboardEvent) => {
+  })
+  const onKeyUp = (event: KeyboardEvent) => settleRetained(() => {
     content.noteKeyUp(event)
     if (content.releaseNavigation() && !composing && !committing) place()
-  }
-  const onPointer = () => { content.releaseNavigation(); content.invalidate(); visual() }
+  })
+  const onPointer = () => settleRetained(() => { content.releaseNavigation(); content.invalidate(); visual() })
   element.addEventListener('keydown', onKeyDown)
   element.addEventListener('keyup', onKeyUp)
   host.addEventListener('pointerdown', onPointer, true)
@@ -465,7 +498,7 @@ export function createInputSurface(options: {
     contentState: content.snapshot,
     resumeMirror: content.releaseNavigation,
     withDeferredMirrorWrite: content.withDeferredWrites,
-    invalidateMirror: () => { content.invalidate(); visual() },
+    invalidateMirror: () => settleRetained(() => { content.invalidate(); visual() }),
     /** 予約領域の有無が、入力面のeventの外（本文の変更）で変わったときに、背景の塗りを合わせる。読み取りなし。 */
     refreshPreeditPaint,
     isComposing: () => composing,
@@ -473,7 +506,7 @@ export function createInputSurface(options: {
     compositionState: () => composing ? { cycle: compositionCycle, discardable: !committing && !retainedAtCompositionStart } : null,
     isCommitting: () => committing,
     failure: () => failure,
-    discardRetained() {
+    discardRetained: () => settleRetained(() => {
       if (composing || committing || !text()) return false
       element.replaceChildren()
       content.empty()
@@ -482,12 +515,12 @@ export function createInputSurface(options: {
       record('retained-discarded-by-user')
       options.onStateChange?.()
       return true
-    },
+    }),
     /**
      * E4: 変換が終わらないときの逃げ道。利用者の確認の後だけ呼ぶ。変換中の文字を捨て、
      * この後に届く`compositionend`でも確定しない。Hostへ確定しない・再適用しない。
      */
-    discardComposition() {
+    discardComposition: () => settleRetained(() => {
       // 保持文字と同居している変換は破棄しない（保持文字を、確認の文にないまま消さない）。
       if (!composing || committing || retainedAtCompositionStart) return false
       discarding = true
@@ -499,23 +532,23 @@ export function createInputSurface(options: {
       record('composition-discarded-by-user')
       options.onStateChange?.()
       return true
-    },
-    focus() {
+    }),
+    focus: () => settleRetained(() => {
       if (!enabled || composing) return false
       content.releaseNavigation()
       place()
       element.focus({ preventScroll: true })
       normalize()
       return doc.activeElement === element
-    },
-    setEnabled(value: boolean) {
+    }),
+    setEnabled: (value: boolean) => settleRetained(() => {
       if (!value) endCompositionPresentation()
       if (!value) { content.releaseNavigation(); content.invalidate() }
       if (value === enabled) return
       enabled = value
       if (!composing) element.contentEditable = value ? 'plaintext-only' : 'false'
       visual()
-    },
+    }),
     destroy() {
       retainedStart = null
       unsubscribeAccessibleName()

@@ -35,6 +35,7 @@ const COMMAND_AVAILABILITY_KEYS: Array<keyof CommandAvailability> = [
   "isCodeBlock",
   "canBlockDirective",
   "blockDirectiveToken",
+  "canReparseParagraph",
 ];
 
 export function isSameCommandAvailability(

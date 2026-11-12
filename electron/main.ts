@@ -1,3 +1,4 @@
+import { readStartupClassicInputEnabled } from './classicInputStartup';
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
@@ -152,7 +153,6 @@ import {
   type WindowRuntimeState,
 } from "./appWindowBounds";
 import {
-  DIRTY_CLOSE_DIALOG_BUTTON_INDEX,
   IDLE_APP_QUIT_INTENT,
   buildDirtyCloseDialogCopy,
   currentQuitAttemptId,
@@ -187,6 +187,11 @@ import {
   LOCAL_IME_PILOT_ENV,
   resolveLocalImePilotAvailability,
 } from "./localImePilotGate";
+import {
+  RUBY_OVERLAY_CHANNEL,
+  RUBY_OVERLAY_ENV,
+  resolveRubyOverlayMode,
+} from "./rubyOverlayGate";
 import {
   buildPageViewerWindowQueryString,
   validatePageViewerImageScope,
@@ -283,6 +288,12 @@ const INPUT_STRATEGY_CAPABILITY = resolveInputStrategyCapability({
 if (!INPUT_STRATEGY_CAPABILITY.forced) delete process.env[INPUT_SURFACE_ENV];
 if (INPUT_STRATEGY_CAPABILITY.productStrategy !== "local-window") delete process.env[INPUT_STRATEGY_ENV];
 delete process.env[LOCAL_IME_EXPERIMENTAL_PREVIEW_TEST_CAPABILITY_ENV];
+/** EDITOR-RUBY-OVERLAY-P1: main が表示を起動時に決め、renderer へ同期 IPC で渡す。 */
+const RUBY_OVERLAY_MODE = resolveRubyOverlayMode({
+  isPackaged: app.isPackaged,
+  flagValue: process.env[RUBY_OVERLAY_ENV],
+});
+delete process.env[RUBY_OVERLAY_ENV];
 
 /**
  * E2E-UX1b: renderer の初回 paint 前に適用する theme bootstrap。
@@ -338,6 +349,17 @@ if (_userDataSpec.kind === "e2e") {
 
 const userDataPath = app.getPath("userData");
 const settingsJsonPath = path.join(userDataPath, "settings.json");
+// PIS-DEFAULT-ON1: 起動時の互換設定は、rendererの起動ごと（preloadの同期IPC）に、その時点のsettings.jsonから読む。
+// アプリの起動時に1回だけ読んで固定すると、macOSで窓を閉じてDockから開き直したとき（同じmainで新しい窓を作る）や
+// 再読み込みのときに、使っている間に変えた設定ではなく古い値で始まり、従来の入力の起動で入力面を作ってしまう。
+function resolveInputStrategyForRenderer() {
+  return {
+    ...INPUT_STRATEGY_CAPABILITY,
+    ...(INPUT_STRATEGY_CAPABILITY.productStrategy === "input-surface" ? {
+      startupClassicInputEnabled: readStartupClassicInputEnabled(settingsJsonPath),
+    } : {}),
+  };
+}
 
 // --- WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1 ---
 // Windows 限定 opt-in（既定 OFF）。userData path の dev / E2E 切り替えを確定した
@@ -1052,7 +1074,7 @@ function createWindow() {
         (other) => other !== currentWindow && !other.isDestroyed(),
       ).length,
     });
-    const copy = buildDirtyCloseDialogCopy(closeIntent);
+    const copy = buildDirtyCloseDialogCopy(closeIntent, process.platform);
 
     /**
      * cancel / 保存失敗 / Save As キャンセル / conflict キャンセル / dialog 失敗の
@@ -1081,11 +1103,14 @@ function createWindow() {
           abandonQuitAttempt();
           return;
         }
-        if (result.response === DIRTY_CLOSE_DIALOG_BUTTON_INDEX.cancel) {
+        // APP-DIRTY-DIALOG-FOCUS1: `response` の意味は platform ごとの並び（copy.buttonIndex）で
+        // 決める。文字列では判定せず、cancel / save / discard のどれにも当たらない値は
+        // 破棄として扱わずキャンセルへ倒す（fail-closed）。
+        if (result.response === copy.buttonIndex.cancel) {
           abandonQuitAttempt();
           return;
         }
-        if (result.response === DIRTY_CLOSE_DIALOG_BUTTON_INDEX.save) {
+        if (result.response === copy.buttonIndex.save) {
           const saved = await requestSaveBeforeClose(currentWindow);
           if (currentWindow.isDestroyed()) {
             abandonQuitAttempt();
@@ -1096,7 +1121,7 @@ function createWindow() {
             abandonQuitAttempt();
             return;
           }
-        } else {
+        } else if (result.response === copy.buttonIndex.discard) {
           // STICKY-NOTE-DISCARD-CONSISTENCY1: 明示的な破棄。未保存 anchor に対応する
           // provisional 付箋を取り除いてからでないと close / quit を完了させない。
           const cleaned = await requestDiscardBeforeClose(currentWindow);
@@ -1108,6 +1133,9 @@ function createWindow() {
             abandonQuitAttempt();
             return;
           }
+        } else {
+          abandonQuitAttempt();
+          return;
         }
         if (quitAttemptId !== null) {
           // 明示 quit だけ、保存成功または明示破棄のあとに app quit を再開する。
@@ -2390,7 +2418,11 @@ ipcMain.on(LOCAL_IME_PILOT_AVAILABILITY_CHANNEL, (event) => {
  * 任意payloadは載せない。設定はsettings.json側が正本なので、このchannelには現れない。
  */
 ipcMain.on(INPUT_STRATEGY_CHANNEL, (event) => {
-  event.returnValue = { ...INPUT_STRATEGY_CAPABILITY };
+  event.returnValue = resolveInputStrategyForRenderer();
+});
+/** EDITOR-RUBY-OVERLAY-P0: 試作のflag。`"hidden" | "float" | null`だけを返す。 */
+ipcMain.on(RUBY_OVERLAY_CHANNEL, (event) => {
+  event.returnValue = RUBY_OVERLAY_MODE;
 });
 
 ipcMain.handle(

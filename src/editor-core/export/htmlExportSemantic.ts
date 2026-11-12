@@ -28,6 +28,7 @@ import {
 } from './webBookAssetPlan'
 import { buildExportAutoTcySegments } from './exportAutoTcy'
 import type { WebBookAutoTcySnapshot } from './webBookAutoTcySnapshot'
+import { SOURCE_SPELLING_MARK_NAME } from '../io/sourceSpelling'
 
 /**
  * Shared semantic HTML serialization for Web Book (and former standalone HTML).
@@ -333,6 +334,8 @@ function sortMarks(marks: Mark[]): Mark[] {
 function emitUnsupportedMarks(ctx: ExportContext, marks: Mark[]): void {
   for (const mark of marks) {
     if (SUPPORTED_MARK_NAMES.has(mark.type.name)) continue
+    // MD-ESCAPE-EXPLICIT1: 元の綴りを覚える mark は書き出しの対象外（本文の文字は `*` のまま。警告も出さない）。
+    if (mark.type.name === SOURCE_SPELLING_MARK_NAME) continue
     pushWarning(ctx, {
       code: 'unsupported-mark',
       message: `Unsupported mark "${mark.type.name}" was stripped during HTML export`,

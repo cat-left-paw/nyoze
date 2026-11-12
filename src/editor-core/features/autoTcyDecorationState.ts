@@ -51,7 +51,7 @@ export function buildAutoTcyDecorationState(doc: ProseMirrorNode, config: AutoTc
 }
 
 /** sentinelと同じStepMap→最終Doc→top-level範囲。空mapのmark/attrs変更も拾う。 */
-function changedBlockRanges(tr: Transaction): Array<[number, number]> {
+export function changedBlockRanges(tr: Transaction): Array<[number, number]> {
   const doc = tr.doc, size = doc.content.size, ranges: Array<[number, number]> = []
   if (tr.steps.length !== tr.mapping.maps.length) throw new Error('Auto TCY step/map mismatch')
   for (let index = 0; index < tr.mapping.maps.length; index++) {

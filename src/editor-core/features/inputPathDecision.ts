@@ -3,7 +3,7 @@
  *
  * 入力は、mainの固定値（`electron/inputStrategyGate.ts`）と、設定から読んだ希望の方式だけ。
  * DOM・Electron・storeに依存しない。**DEFAULT-ON1で変えるのは、`DEFAULT_INPUT_PATH`と
- * 設定の読み方（`readExperimentalInputPathPreference`の差し替え）だけ**にする。
+ * 設定の読み方（`readClassicInputPathPreference`）だけ**にする。
  */
 export type InputPath = 'input-surface' | 'host'
 
@@ -11,14 +11,16 @@ export type InputStrategyCapabilityView = {
   readonly productStrategy: 'input-surface' | 'local-window' | 'none'
   readonly authorPilot: boolean
   readonly forced: boolean
+  /** mainが起動時に読んだ互換設定。renderer生成前に確定する。 */
+  readonly startupClassicInputEnabled?: boolean
 }
 
 export const INPUT_STRATEGY_CAPABILITY_NONE: InputStrategyCapabilityView = Object.freeze({
   productStrategy: 'none', authorPilot: false, forced: false,
 })
 
-/** 設定がない・読み込み前・不正のときの方式。いまは従来の入力。 */
-export const DEFAULT_INPUT_PATH: InputPath = 'host'
+/** 設定がない・不正のときは新しい方式。読み込み前の互換設定はmainから受け取る。 */
+export const DEFAULT_INPUT_PATH: InputPath = 'input-surface'
 
 /** rendererが受け取ったbridgeの値の形を確かめる。形が違えば製品の入口なし。 */
 export function normalizeInputStrategyCapabilityView(value: unknown): InputStrategyCapabilityView {
@@ -29,15 +31,12 @@ export function normalizeInputStrategyCapabilityView(value: unknown): InputStrat
   if (typeof v.authorPilot !== 'boolean' || typeof v.forced !== 'boolean') return INPUT_STRATEGY_CAPABILITY_NONE
   if (v.authorPilot && strategy !== 'none') return INPUT_STRATEGY_CAPABILITY_NONE
   if (v.forced && strategy !== 'input-surface') return INPUT_STRATEGY_CAPABILITY_NONE
-  return { productStrategy: strategy, authorPilot: v.authorPilot, forced: v.forced }
+  return { productStrategy: strategy, authorPilot: v.authorPilot, forced: v.forced, ...(typeof v.startupClassicInputEnabled === 'boolean' ? { startupClassicInputEnabled: v.startupClassicInputEnabled } : {}) }
 }
 
-/**
- * いまの設定の読み方: 「長文編集モード（実験的）」（`experimentalLocalImeEnabled`）がtrueならPIS。
- * それ以外（false・未設定・読み込み前・不正）は希望なし（既定の方式）。
- */
-export function readExperimentalInputPathPreference(experimentalLocalImeEnabled: unknown): InputPath | null {
-  return experimentalLocalImeEnabled === true ? 'input-surface' : null
+/** DEFAULT-ON1: trueだけが従来の入力。旧実験設定は製品の決定には使わない。 */
+export function readClassicInputPathPreference(classicInputEnabled: unknown): InputPath | null {
+  return classicInputEnabled === true ? 'host' : null
 }
 
 export type InputPathDecisionReason =

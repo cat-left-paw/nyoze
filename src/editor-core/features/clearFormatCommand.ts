@@ -8,6 +8,7 @@
  */
 
 import type { EditorState, Transaction } from '@tiptap/pm/state'
+import { SOURCE_SPELLING_MARK_NAME } from '../io/sourceSpelling'
 import { resolveSelectedTcyRanges } from './tcyFormatting'
 
 type Dispatch = (tr: Transaction) => void
@@ -41,7 +42,11 @@ export function applyClearFormatMarksAndTcy(
 
   const mappedFrom = tr.mapping.map(initialSelection.from, -1)
   const mappedTo = tr.mapping.map(initialSelection.to, 1)
-  tr = tr.removeMark(mappedFrom, mappedTo)
+  // MD-ESCAPE-EXPLICIT1: 元の綴り（`\*` `&amp;`）を覚える mark は書式ではないので、書式の解除では外さない
+  // （外すと、保存でファイルの `\` が消える）。それ以外の mark はすべて外す。
+  for (const markType of Object.values(state.schema.marks)) {
+    if (markType.name !== SOURCE_SPELLING_MARK_NAME) tr = tr.removeMark(mappedFrom, mappedTo, markType)
+  }
   dispatch(tr)
   return {
     mappedFrom,

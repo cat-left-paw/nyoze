@@ -1,7 +1,9 @@
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { NavigationOp, NavigationReceipt } from './navigation/rules'
 import type { SelectionMirror } from './selectionMirror'
+import type { CommitTargetRestriction } from './commitTargetRestriction'
 export type { NavigationOp, NavigationReceipt } from './navigation/rules'
+export type { CommitTargetRestriction } from './commitTargetRestriction'
 
 export type OwnerInsertionSnapshot = {
   readonly identity: string
@@ -9,7 +11,10 @@ export type OwnerInsertionSnapshot = {
   readonly from: number
   readonly to: number
 }
-/** `protected-target`: Hostがbeforeinputで黙って捨てる場面（TCYの保護）。直接入力は捨て、compositionの確定は保持する。 */
+/**
+ * `protected-target`: 確定先の位置だけで拒否される場面（`CommitTargetRestriction`: TCYの保護、付箋のマーカーを含む範囲、
+ * 段落を置けないblockのatomの直後）。直接入力は捨て、compositionの確定は保持する。
+ */
 export type OwnerCommitReceipt = 'committed' | 'stale' | 'newline-in-payload' | 'dispatch-rejected' | 'protected-target'
 export type OwnerCaretGeometry = { left: number; right: number; top: number; bottom: number }
 /** 変換中の文字をownerの表示と同じ位置へ組むための、前後の文脈（表示専用。INLINE-2）。 */
@@ -31,6 +36,11 @@ export interface EditOwner {
   snapshotInsertion(): OwnerInsertionSnapshot | null
   proveSnapshot(snapshot: OwnerInsertionSnapshot): boolean
   commitText(snapshot: OwnerInsertionSnapshot, text: string, unchangedOriginal?: SelectionMirror | null): OwnerCommitReceipt
+  /**
+   * PIS-INPUT-BLOCK-WARN1: 確定先の位置だけで確定が拒否されるか。`commitText`の拒否（`protected-target`）と、
+   * 入力面の事前の判定（直接入力のbeforeinput、変換のcompositionstart）が、この1つの関数を呼ぶ。位置の局所だけを読む。
+   */
+  resolveCommitTargetRestriction?(snapshot: OwnerInsertionSnapshot): CommitTargetRestriction | null
   /** 再変換へ渡せるtext-only範囲。DOMを読まない。 */
   selectionMirror?(): SelectionMirror | null
   presentComposition?(text: string | null, snapshot?: OwnerInsertionSnapshot): void

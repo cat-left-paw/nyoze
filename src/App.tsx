@@ -89,6 +89,7 @@ import { useEditorContextMenu } from "./ui/hooks/useEditorContextMenu";
 import { useEditorTabActionsSlot } from "./ui/hooks/useEditorTabActionsSlot";
 import { useSearchUiState } from "./ui/hooks/useSearchUiState";
 import { useBlockDirectiveCommands } from "./ui/hooks/useBlockDirectiveCommands";
+import { useParagraphReparseCommand } from "./ui/hooks/useParagraphReparseCommand";
 import { useAozoraTextExport } from "./ui/hooks/useAozoraTextExport";
 import { useLeMEMarkdownExport } from "./ui/hooks/useLeMEMarkdownExport";
 import { useDendenMarkdownExport } from "./ui/hooks/useDendenMarkdownExport";
@@ -100,7 +101,6 @@ import { useBookExport } from "./ui/hooks/useBookExport";
 import { useBookExportResultDetailsPrompt } from "./ui/hooks/useBookExportResultDetailsPrompt";
 import { useWebBookCapacityConfirmPrompt } from "./ui/hooks/useWebBookCapacityConfirmPrompt";
 import { useBookExportMenuAvailability } from "./ui/hooks/useBookExportMenuAvailability";
-import { useLargeDocumentGuard } from "./ui/hooks/useLargeDocumentGuard";
 import { useGlobalShortcuts } from "./ui/hooks/useGlobalShortcuts";
 import { useUndoRedoRouting } from "./ui/hooks/useUndoRedoRouting";
 import { useEditMenuCommandRouting } from "./ui/hooks/useEditMenuCommandRouting";
@@ -154,7 +154,6 @@ import { EditorContextMenu } from "./ui/components/EditorContextMenu";
 import { DisplaySettingsModal } from "./ui/components/DisplaySettingsModal";
 import { LibraryManagerModal } from "./ui/components/LibraryManagerModal";
 import { ThemeStudioPanel } from "./ui/components/ThemeStudioModal";
-import { LargeDocumentGuardModal } from "./ui/components/LargeDocumentGuardModal";
 import { LineBreakPolicyConfirmModal } from "./ui/components/LineBreakPolicyConfirmModal";
 import { FileExplorerNamePromptModal } from "./ui/components/FileExplorerNamePromptModal";
 import { ExplorerProjectCreateModalHost } from "./ui/components/ExplorerProjectCreateModalHost";
@@ -245,7 +244,7 @@ import { ImeProfilerHud } from "./ui/components/ImeProfilerHud";
 import { LocalImePilotHud } from "./ui/components/LocalImePilotHud";
 import { useLocalImePilot } from "./ui/hooks/useLocalImePilot";
 import { useLocalImeExperimentalPreview } from "./ui/hooks/useLocalImeExperimentalPreview";
-import { LocalImeExperimentalPreviewNotice } from "./ui/components/LocalImeExperimentalPreviewNotice";
+import { InputMethodNotice } from "./ui/components/InputMethodSwitchNotice";
 import { InputSurfaceDocumentActionNotice } from "./ui/components/InputSurfaceDocumentActionNotice";
 import { useInputSurfaceDocumentShortcuts } from "./ui/hooks/useInputSurfaceDocumentShortcuts";
 import { allowInputSurfaceDocumentMutation, isInputSurfacePayloadBearing } from "./editor-core/features/inputSurface/documentAction";
@@ -703,7 +702,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only stable setter + tab switch; avoid `search` snapshot churn
   }, [ui.activeTab.internalDocId, search.setReplaceOpen]);
 
-  const largeDocGuard = useLargeDocumentGuard();
   const [unsavedModalOpen, setUnsavedModalOpen] = useState(false);
   const [activeDocumentCharacterCount, setActiveDocumentCharacterCount] =
     useState(0);
@@ -2295,6 +2293,7 @@ function App() {
     getEditorSessionStatusForE2e,
     readDocumentStateDiagnosticsForE2e: () => coreRef.current?.readDocumentStateDiagnosticsForE2e() ?? null,
     injectDocumentStateRestoreFailureForE2e: (kind) => coreRef.current?.injectDocumentStateRestoreFailureForE2e(kind),
+    readSourcePreservationDiagnosticsForE2e: () => coreRef.current?.readSourcePreservationDiagnosticsForE2e() ?? null,
     setPseudoCaretEnabledForE2e: ui.setPseudoCaretEnabled,
     setPseudoCaretThicknessForE2e: ui.setPseudoCaretThickness,
     setPseudoCaretBlinkEnabledForE2e: ui.setPseudoCaretBlinkEnabled,
@@ -2736,6 +2735,8 @@ function App() {
     coreRef.current?.clearFormat();
   }, [ui.activeTab.internalDocId]);
 
+  const handleReparseParagraph = useParagraphReparseCommand({ coreRef, internalDocActive: Boolean(ui.activeTab.internalDocId), uiLanguageMode: ui.uiLanguageMode, showEditorInlineHint: ui.showEditorInlineHint });
+
   const handleInsertHorizontalRule = useCallback(() => {
     if (ui.activeTab.internalDocId) return;
     runLocalImeHostCommand("host-command-horizontal-rule", () => coreRef.current?.insertHorizontalRule());
@@ -2771,7 +2772,7 @@ function App() {
     runLocalImeHostCommand("host-command-code-block", () => coreRef.current?.toggleCodeBlock());
   }, [ui.activeTab.internalDocId]);
 
-  const blockDirective = useBlockDirectiveCommands(coreRef, Boolean(ui.activeTab.internalDocId));
+  const blockDirective = useBlockDirectiveCommands(coreRef, Boolean(ui.activeTab.internalDocId), syncCommandAvailability);
 
   // P2-G2b: armed 局所 IME slot 中は、既存 document-action barrier で session を
   // teardown した後の実 PM selection を正本として prompt を開く（composing / busy /
@@ -2813,6 +2814,7 @@ function App() {
   // Global keyboard shortcuts (marks, headings, list move, outline, search)
   useGlobalShortcuts({
     coreRef,
+    onReparseParagraph: handleReparseParagraph,
     sourceModeController,
     writingMode: ui.writingMode,
     getPlainModeKind,
@@ -3407,25 +3409,18 @@ function App() {
   );
 
   const handleConfirmLineBreakPolicyChange = useCallback(() => {
-    const count = flushImeCompositionSideEffects("line-break-policy-confirm") ?? activeDocumentCharacterCount;
-    // BETA-SP9: commonmark-strict 確認後も大文書 guard を適用
+    flushImeCompositionSideEffects("line-break-policy-confirm");
+    // EDITOR-LARGE-DOC-GUARD-REMOVE1: 「数秒かかる」確認は撤去済み。
+    // commonmark-strict の意味の確認（pendingDocumentSettingsChange）は残る。
     if (pendingDocumentSettingsChange) {
       const change = pendingDocumentSettingsChange;
       setPendingDocumentSettingsChange(null);
-      largeDocGuard.requestGuardedAction(
-        count,
-        "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
-        () => applyDocumentSettingsChange(change),
-      );
+      applyDocumentSettingsChange(change);
       return;
     }
     // useAppUiState 経由の requestLineBreakPolicyChange → confirmLineBreakPolicyChange
-    largeDocGuard.requestGuardedAction(
-      count,
-      "改行ポリシーの変更は、大きな文書では全文の変換を伴うため数秒かかる場合があります。続行しますか。",
-      () => ui.confirmLineBreakPolicyChange(),
-    );
-  }, [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, pendingDocumentSettingsChange, flushImeCompositionSideEffects, ui]);
+    ui.confirmLineBreakPolicyChange();
+  }, [applyDocumentSettingsChange, pendingDocumentSettingsChange, flushImeCompositionSideEffects, ui]);
 
   const handleCancelLineBreakPolicyChange = useCallback(() => {
     setPendingDocumentSettingsChange(null);
@@ -3461,7 +3456,7 @@ function App() {
       const core = coreRef.current;
       if (!core) return;
 
-      const count = flushImeCompositionSideEffects("document-settings") ?? activeDocumentCharacterCount;
+      flushImeCompositionSideEffects("document-settings");
       const currentMarkdown = core.peekMarkdown();
       const split = splitLeadingFrontmatter(currentMarkdown);
       const hasMalformedLeadingFence =
@@ -3528,11 +3523,6 @@ function App() {
         nextEffectiveLineBreakPolicy,
         nextDocumentMarkdownOptions,
       };
-      const requiresImmediateNormalization =
-        nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy ||
-        (currentDocumentMarkdownOptions.preserveEmptyParagraphs &&
-          !nextDocumentMarkdownOptions.preserveEmptyParagraphs);
-
       if (
         nextEffectiveLineBreakPolicy !== ui.effectiveLineBreakPolicy &&
         nextEffectiveLineBreakPolicy === "commonmark-strict"
@@ -3541,19 +3531,9 @@ function App() {
         return;
       }
 
-      // BETA-SP9: 文書全体の再解釈が必要な変更では大文書 guard をかける
-      if (requiresImmediateNormalization) {
-        largeDocGuard.requestGuardedAction(
-          count,
-          "この変更は、大きな文書では全文の再解釈を伴うため数秒かかる場合があります。続行しますか。",
-          () => applyDocumentSettingsChange(pendingChange),
-        );
-        return;
-      }
-
       applyDocumentSettingsChange(pendingChange);
     },
-    [activeDocumentCharacterCount, applyDocumentSettingsChange, largeDocGuard, flushImeCompositionSideEffects, ui],
+    [applyDocumentSettingsChange, flushImeCompositionSideEffects, ui],
   );
   const handleDocumentWritingModeChange = useDocumentWritingModeChange(coreRef, ui);
 
@@ -3696,8 +3676,7 @@ function App() {
   // BETA-SP1: guardSourceModeDraft の遅延参照用 ref に closeFullPlainEdit を登録
   sourceDraftGuard.bindClose(closeFullPlainEdit);
 
-  // BETA-SP9: Source Mode apply を guard でラップ
-  const guardedApplyAndCloseFullPlainEdit = useCallback(() => {
+  const applyAndCloseFullPlainEdit = useCallback(() => {
     const ok = applyFullPlainEdit();
     if (ok) closeFullPlainEdit();
   }, [applyFullPlainEdit, closeFullPlainEdit]);
@@ -3742,21 +3721,15 @@ function App() {
   }, [applyEditorScroll, captureEditorScroll, flushImeCompositionSideEffects, ui]);
 
   const toggleFullPlainEdit = useCallback(() => {
-    const count = flushImeCompositionSideEffects("source-mode-toggle") ?? activeDocumentCharacterCount;
+    flushImeCompositionSideEffects("source-mode-toggle");
     if (ui.fullPlainEditActive) {
-      largeDocGuard.requestGuardedAction(
-        count,
-        "Source Mode から通常表示へ戻るときは、大きな文書では数秒かかる場合があります。続行しますか。",
-        guardedApplyAndCloseFullPlainEdit,
-      );
+      applyAndCloseFullPlainEdit();
       return;
     }
     openFullPlainEdit();
   }, [
-    activeDocumentCharacterCount,
     flushImeCompositionSideEffects,
-    guardedApplyAndCloseFullPlainEdit,
-    largeDocGuard,
+    applyAndCloseFullPlainEdit,
     openFullPlainEdit,
     ui.fullPlainEditActive,
   ]);
@@ -3803,8 +3776,7 @@ function App() {
   const editorTabActionsSlot = useEditorTabActionsSlot({
     ui,
     search,
-    largeDocGuard,
-    localImeExperimentalPreview, activeDocumentCharacterCount,
+    localImeExperimentalPreview,
     flushCoreUiSync: flushImeCompositionSideEffects,
     toggleParagraphPlainMode,
     toggleFullPlainEdit,
@@ -3850,6 +3822,7 @@ function App() {
         onToggleCodeBlock={handleToggleCodeBlock}
         onApplyBlockDirective={blockDirective.apply}
         onRemoveBlockDirective={blockDirective.remove}
+        onStepBlockIndent={blockDirective.stepIndent}
         onInsertPageBreak={blockDirective.insertPageBreak}
         onDeletePageBreak={blockDirective.deletePageBreak}
         onInsertBlankPage={blockDirective.insertBlankPage}
@@ -3903,7 +3876,7 @@ function App() {
         fileExplorerOperationError={fileExplorerOperationError}
         activeDocumentInfo={activeDocumentInfo}
         localImeStatusPresentation={{
-          settingVisible: localImeExperimentalPreview.settingVisible,
+          settingVisible: localImeExperimentalPreview.settingVisible && !localImeExperimentalPreview.inputSurface,
           // 状態iconは、設定の値ではなく実際の方式から出す（止められた切り替えの後も食い違わない）。
           preferenceEnabled: localImeExperimentalPreview.effectiveEnabled,
           needsAttention: localImeExperimentalPreview.productStatus === "attention",
@@ -3960,6 +3933,7 @@ function App() {
           flushImeCompositionSideEffects("workspace-add-tab");
           void tabManager.addNewTab();
         }}
+        onReorderTab={ui.reorderTab}
         tabLimitReached={tabLimitReached}
         onCloseTab={(tabId: string) => {
           flushImeCompositionSideEffects("workspace-close-tab");
@@ -3967,11 +3941,8 @@ function App() {
         }}
         onFullPlainEditChange={ui.handleFullPlainEditChange}
         onApplyFullPlainEdit={() => {
-          largeDocGuard.requestGuardedAction(
-            flushImeCompositionSideEffects("source-mode-apply") ?? activeDocumentCharacterCount,
-            "Source Mode から通常表示へ戻るときは、大きな文書では数秒かかる場合があります。続行しますか。",
-            guardedApplyAndCloseFullPlainEdit,
-          );
+          flushImeCompositionSideEffects("source-mode-apply");
+          applyAndCloseFullPlainEdit();
         }}
         onCloseFullPlainEdit={closeFullPlainEdit}
         onSetRightPaneTab={ui.setRightPaneTab}
@@ -4207,10 +4178,12 @@ function App() {
         onRuby={guardedOpenRubyBoutenPrompt}
         onTcy={handleToggleTcy}
         onClearFormat={handleClearFormat}
+        onReparseParagraph={handleReparseParagraph}
         onMoveListUp={handleCtxMoveUp}
         onMoveListDown={handleCtxMoveDown}
         onApplyBlockDirective={blockDirective.apply}
         onRemoveBlockDirective={blockDirective.remove}
+        onStepBlockIndent={blockDirective.stepIndent}
         onInsertPageBreak={blockDirective.insertPageBreak}
         onDeletePageBreak={blockDirective.deletePageBreak}
         onInsertBlankPage={blockDirective.insertBlankPage}
@@ -4276,7 +4249,7 @@ function App() {
         onDismiss={dismissBackupWarning}
       />
 
-      <LocalImeExperimentalPreviewNotice preview={localImeExperimentalPreview} uiLanguageMode={ui.uiLanguageMode} />
+      <InputMethodNotice preview={localImeExperimentalPreview} uiLanguageMode={ui.uiLanguageMode} />
       <InputSurfaceDocumentActionNotice uiLanguageMode={ui.uiLanguageMode} />
 
       <LibraryManagerModal
@@ -4357,7 +4330,7 @@ function App() {
           ui.setPseudoCaretEnabled(DEFAULT_PSEUDO_CARET_ENABLED);
           ui.setPseudoCaretThickness(DEFAULT_PSEUDO_CARET_THICKNESS);
           ui.setPseudoCaretBlinkEnabled(DEFAULT_PSEUDO_CARET_BLINK_ENABLED);
-          localImeExperimentalPreview.onChangeEnabled(false);
+          localImeExperimentalPreview.onChangeEnabled(!!localImeExperimentalPreview.inputSurface);
           ui.setExperimentalInputSurfacePreeditDisplay(DEFAULT_EXPERIMENTAL_INPUT_SURFACE_PREEDIT_DISPLAY);
           ui.setParagraphPlainBehavior("fast");
           ui.setTypewriterModeEnabled(DEFAULT_TYPEWRITER_MODE_ENABLED);
@@ -4514,12 +4487,6 @@ function App() {
           </button>
         </div>
       )}
-
-      <LargeDocumentGuardModal
-        pendingAction={largeDocGuard.pendingAction}
-        onConfirm={largeDocGuard.confirmPendingAction}
-        onCancel={largeDocGuard.cancelPendingAction}
-      />
 
       <LineBreakPolicyConfirmModal
         pendingPolicy={

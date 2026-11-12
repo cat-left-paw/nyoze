@@ -31,9 +31,12 @@ import {
   isLocalImeHostBlockStructureShortcutFocusOwner,
   runLocalImeHostCommand,
 } from '../utils/localImeHostCommandPreflight'
+import { isParagraphReparseShortcut } from '../utils/paragraphReparseShortcut'
 
 type UseGlobalShortcutsOptions = {
   coreRef: RefObject<EditorCoreHandle | null>
+  /** EDITOR-PARAGRAPH-REPARSE1: この段落の記法を反映（Cmd/Ctrl+Shift+M）。 */
+  onReparseParagraph: () => void
   sourceModeController: SourceModeController
   writingMode: WritingMode
   getPlainModeKind: () => PlainModeKind | null
@@ -62,6 +65,7 @@ type UseGlobalShortcutsOptions = {
  */
 export function useGlobalShortcuts({
   coreRef,
+  onReparseParagraph,
   sourceModeController,
   writingMode,
   getPlainModeKind,
@@ -419,6 +423,27 @@ export function useGlobalShortcuts({
         core.clearFormat()
         return
       }
+      // EDITOR-PARAGRAPH-REPARSE1: この段落の記法を反映。host の本文か PIS の入力面にフォーカスがあるときだけ。
+      if (
+        isParagraphReparseShortcut({
+          key: e.key,
+          code: e.code,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          altGraphKey:
+            typeof e.getModifierState === 'function' && e.getModifierState('AltGraph'),
+          isComposing: e.isComposing,
+          keyCode: e.keyCode,
+          cancelable: e.cancelable,
+        })
+      ) {
+        if (!isLocalImeHostBlockStructureShortcutFocusOwner(document.activeElement)) return
+        e.preventDefault()
+        onReparseParagraph()
+        return
+      }
       if (
         blockStructure === 'heading-1' ||
         blockStructure === 'heading-2' ||
@@ -579,6 +604,7 @@ export function useGlobalShortcuts({
     }
   }, [
     coreRef,
+    onReparseParagraph,
     writingMode,
     getPlainModeKind,
     getInternalDocActive,

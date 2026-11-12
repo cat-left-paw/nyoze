@@ -60,7 +60,7 @@ import {
   findNoteAnchorPosition,
   buildRemoveNoteAnchorTransaction,
   buildRemoveNoteAnchorTransactionAtDom,
-  collectNoteAnchorIdsInDoc, registerNoteAnchorProtectionNoticeSink, registerNoteAnchorEditDetachListener,
+  collectNoteAnchorIdsInDoc, registerNoteAnchorProtectionNoticeSink, registerNoteAnchorEditDetachListener, registerInlineMarkInputRuleNoticeSink, registerInputRestrictionNoticeSink,
   NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY,
   createEditorSurfaceWheelController,
   createInlineAnnotationController,
@@ -119,8 +119,8 @@ import { searchHighlightPluginKey } from './extensions/searchHighlight'
 import { replaceMatchInDoc, replaceAllMatchesInDoc } from './features'
 import { serializeClipboardSliceToPlainText } from './io/clipboardSlicePlainText'
 import { AOZORA_TCY_BODY_PATTERN } from './schema/aozoraTcy'
-import { createInputSurfaceIntegration, isInputSurfacePathActive, connectLazyInputSurface, getInputSurfaceFocusPort, selectSinglePseudoCaretExternalGeometrySource, createInputSurfaceDisplayCallbacks } from './features'
-import { createDocumentStateController } from './features'
+import { createInputSurfaceIntegration, isInputSurfacePathActive, connectLazyInputSurface, getInputSurfaceFocusPort, selectSinglePseudoCaretExternalGeometrySource, createInputSurfaceDisplayCallbacks, createParagraphReparsePort, runParagraphReparseCommand, getInputSurfaceNoticeSnapshot } from './features'
+import { createDocumentStateController, createSourcePreservationController, attachRubyOverlay } from './features'
 
 const TCY_VALID_PATTERN = AOZORA_TCY_BODY_PATTERN
 
@@ -306,8 +306,17 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     }
   }
 
+  // EDITOR-PARAGRAPH-REPARSE1: 段落を離れたとき・コマンドで読み直してよい場面の判定と、読み込みと同じ設定を束ねた port。
+  const paragraphReparsePort = createParagraphReparsePort({
+    getLineBreakPolicy: readLineBreakPolicy, getEnableRuby: () => enableRubyFlag, getPreserveEmptyParagraphs: () => documentMarkdownOptions.preserveEmptyParagraphs,
+    isCompositionActive: () => isCompositionActive(), isParagraphPlainActive: () => paragraphPlainControllerRef.current?.isActive() ?? false,
+    isSourceModeActive: () => options.getIsSourceModeActive?.() ?? false, isEditable: () => editorHolder.current?.isEditable ?? false,
+    hasPendingInputSurfaceText: () => getInputSurfaceNoticeSnapshot().kind !== null,
+    serializeDocument: (doc) => sourcePreservation.serializeQuietly(doc, readLineBreakPolicy(), documentMarkdownOptions), // 保存と同じ書き出し（診断を数えない）
+  })
   const editor = new Editor({
     extensions: buildExtensions({
+      paragraphReparse: paragraphReparsePort,
       autoTcy: autoTcyRuntimeController.getExtensionOptions(() => localImeIntegration.beginFlushPerfSpan('auto-tcy')),
       visualFocus: {
         getBlockHighlightEnabled: () => options.getVisualFocusBlockHighlightEnabled?.() ?? false,
@@ -334,6 +343,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   })
 
   editorHolder.current = editor
+  const rubyOverlay = attachRubyOverlay(editor, options.element) // EDITOR-RUBY-OVERLAY-P0: flag OFF は null
   /** アプリcommand・表示用composition判定。Host DOMの入力経路はHost専用判定を保つ。 */
   function isCompositionActive(): boolean {
     const view = editorHolder.current?.view; return isComposing || view?.composing === true || localImeIntegration.isActive() || (view ? getInputSurfaceFocusPort(view.dom)?.isComposing() === true : false)
@@ -357,18 +367,20 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
   const unsubscribeTypewriterParagraphPlainMode = paragraphPlainControllerRef.current.onModeChange(() => {
     typewriterModeController?.syncRuntimeState()
   })
+  const sourcePreservation = createSourcePreservationController({ isRubyEnabled: () => enableRubyFlag }) // MD-SOURCE-PRESERVE1
   const markdownIoController = createMarkdownIoController({
     getLineBreakPolicy: readLineBreakPolicy,
     setParagraphPlainMode: (enabled) => {
       paragraphPlainControllerRef.current!.setMode(enabled)
     },
     parseMarkdownToJson: (markdownBody, lineBreakPolicy) =>
-      parseMarkdown(editor.schema, markdownBody, lineBreakPolicy, {
+      sourcePreservation.parseToJson(editor.schema, markdownBody, lineBreakPolicy, {
         enableRuby: enableRubyFlag,
         preserveEmptyParagraphs: documentMarkdownOptions.preserveEmptyParagraphs,
-      }).toJSON(),
+      }),
     setEditorContent: (content) => {
       const nextDoc = editor.schema.nodeFromJSON(content)
+      sourcePreservation.attachToLoadedDoc(content, nextDoc)
       const tr = editor.state.tr
         .replaceWith(0, editor.state.doc.content.size, nextDoc.content)
         .setMeta(NOTE_ANCHOR_DOCUMENT_LOAD_META_KEY, true)
@@ -381,12 +393,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       })
       editor.view.updateState(freshState)
     },
-    serializeCurrentDoc: (lineBreakPolicy) =>
-      serializeMarkdown(
-        editor.state.doc,
-        lineBreakPolicy,
-        documentMarkdownOptions,
-      ),
+    serializeCurrentDoc: (lineBreakPolicy) => sourcePreservation.serialize(editor.state.doc, lineBreakPolicy, documentMarkdownOptions),
     defaultEditorContent: DEFAULT_EDITOR_CONTENT,
     splitLeadingFrontmatter,
     joinWithFrontmatter,
@@ -655,7 +662,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     getDocumentMarkdownOptions: () => documentMarkdownOptions,
     setDocumentMarkdownOptions: (options) => { documentMarkdownOptions = options },
     isRubyEnabled: () => enableRubyFlag,
-    serialize: serializeMarkdown, joinWithFrontmatter, peekMarkdown: () => markdownIoController.peekMarkdown(),
+    serialize: sourcePreservation.serialize, joinWithFrontmatter, peekMarkdown: () => markdownIoController.peekMarkdown(),
     prepareDocumentReplace: () => prepareDocumentReplace('core-document-restore', 'document-restore'),
     readSearchState: () => searchHighlightPluginKey.getState(editor.state) ?? null,
     closeSearch: () => { editor.commands.closeSearch() },
@@ -874,6 +881,14 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       return customBlockDirectiveController.remove()
     },
 
+    stepCustomBlockIndent(direction): boolean {
+      return customBlockDirectiveController.stepIndent(direction)
+    },
+
+    reparseCurrentParagraph() {
+      return runParagraphReparseCommand(editor.view, paragraphReparsePort)
+    },
+
     getCustomBlockDirectiveToken(): string | null {
       return customBlockDirectiveController.getToken()
     },
@@ -1023,6 +1038,9 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     setOnNoteAnchorReveal(listener: ((id: string) => void) | null) { onNoteAnchorReveal = listener },
     // STICKY-NOTE-LIFECYCLE1: 拒否の理由の通知の受け口（表示は App 側）。
     setNoteAnchorProtectionNoticeHandler: (handler, onDetachedByEdit = null) => { registerNoteAnchorProtectionNoticeSink(editor.view, handler); registerNoteAnchorEditDetachListener(editor.view, onDetachedByEdit) },
+    // EDITOR-INPUT-RULE-INLINE-NODE1: 書式の入力規則が変換しなかった理由の通知の受け口（表示は App 側）。
+    setInlineMarkInputRuleNoticeHandler: (handler) => registerInlineMarkInputRuleNoticeSink(editor.view, handler),
+    setInputRestrictionNoticeHandler: (handler) => registerInputRestrictionNoticeSink(editor.view, handler),
     beginLocalImeLocalWindowTransition: (kind) => localImeIntegration.beginLocalWindowTransition(kind),
     cancelLocalImeLocalWindowTransition: (kind) => localImeIntegration.cancelLocalWindowTransition(kind),
     completeLocalImeLocalWindowTransition: (kind, writingMode) => localImeIntegration.completeLocalWindowTransition(kind, writingMode),
@@ -1077,6 +1095,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
     restoreDocumentState: (key, expectedMarkdown, filePath) => documentStateController.restore(key, expectedMarkdown, filePath),
     discardDocumentState: (key) => documentStateController.discard(key),
     readDocumentStateDiagnosticsForE2e: () => documentStateController.diagnosticsForE2e(),
+    readSourcePreservationDiagnosticsForE2e: () => sourcePreservation.diagnosticsForE2e(),
     injectDocumentStateRestoreFailureForE2e: (kind) => documentStateController.injectRestoreFailureForE2e(kind),
 
     undoParagraphPlain() {
@@ -1509,6 +1528,7 @@ export function createEditorCore(options: CreateEditorCoreOptions): EditorCoreHa
       noteAnchorJumpController?.destroy()
       noteAnchorJumpController = null
       listenerSubscriptions.clearAll()
+      rubyOverlay?.destroy()
       editor.destroy()
       return true
     },

@@ -27,7 +27,9 @@ export function supportsPreservedEmptyParagraphBoundary(
 
 function mapTopLevelTokenTypeToBlockName(tokenType: string): string | null {
   switch (tokenType) {
+    // MD-ESCAPE-EXPLICIT1: リンクの定義の行（`ref_def`。parseMarkdown.ts）は、元の文字を持つ段落になる。
     case "paragraph_open":
+    case "ref_def":
       return "paragraph";
     case "heading_open":
       return "heading";

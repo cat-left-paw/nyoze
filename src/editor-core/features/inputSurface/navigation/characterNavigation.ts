@@ -3,6 +3,7 @@ import { resolveRubyBoundaryArrowAnchor, resolveRubyBoundaryArrowSelection } fro
 import { selectionTouchesSpecialInlineNode } from '../../specialInlineBoundaryDiagnostics'
 import { isLocalImeLocalWindowSelectionInsideSpecialInline } from '../../localImeLocalWindowCaretCapability'
 import type { SupportedEditorWritingMode } from '../../writingModeNavigationMapping'
+import { keepSelectionOutsideInlineAtom, verticalTcyCharacterTarget } from './inlineAtomNavigation'
 import type { Textblock } from './lineGeometry'
 import { stopAtAnchor, type NavigationOp } from './rules'
 
@@ -15,7 +16,7 @@ export function characterSelection(state: EditorState, block: Textblock, adjacen
   if (!selection.empty && !op.extend) return TextSelection.near(doc.resolve(forward ? selection.to : selection.from))
   // Bare Ruby boundary corrections are the Host's authority. Shift uses native text extent.
   const ruby = !op.extend ? resolveRubyBoundaryArrowSelection(state, op.direction) : null
-  if (ruby) return ruby
+  if (ruby) return keepSelectionOutsideInlineAtom(ruby, forward)
   const touching = selectionTouchesSpecialInlineNode(state)
   const inside = isLocalImeLocalWindowSelectionInsideSpecialInline(selection)
   const node = forward ? $pos.nodeAfter : $pos.nodeBefore
@@ -28,7 +29,7 @@ export function characterSelection(state: EditorState, block: Textblock, adjacen
   if (touching && node?.type.name === 'aozoraTcy' && !op.extend) {
     return mode === 'horizontal-tb'
       ? NodeSelection.create(doc, forward ? pos : pos - node.nodeSize)
-      : at(forward ? pos + node.nodeSize : pos)
+      : at(verticalTcyCharacterTarget(forward, pos, node.nodeSize))
   }
   if (inside && $pos.parent.type.name === 'aozoraTcy') return at(mode === 'vertical-rl' && forward ? Math.min($pos.end(), pos + 1) : pos)
   const boundaries = new Set([block.start, block.end])

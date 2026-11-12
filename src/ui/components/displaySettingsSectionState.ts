@@ -15,6 +15,7 @@ export type DisplaySettingsSectionKey =
   | 'typewriter'
   /** P3-EXP1: 実験的機能（macOS packaged capability があるときだけ表示）。 */
   | 'experimental'
+  | 'input'
   /** WINDOWS-RENDERER-ACCESSIBILITY-COMPAT1: Windows でだけ表示する互換性 section。 */
   | 'windowsCompatibility'
   | 'support'
@@ -37,6 +38,7 @@ export const DEFAULT_DISPLAY_SETTINGS_SECTION_OPEN_STATE: DisplaySettingsSection
   paragraphPlain: false,
   typewriter: false,
   experimental: false,
+  input: false,
   windowsCompatibility: false,
   support: false,
 }

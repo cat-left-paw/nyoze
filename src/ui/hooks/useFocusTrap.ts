@@ -137,9 +137,10 @@ export function useFocusTrap(
       container?.removeEventListener('keydown', onKeyDown)
       const prev = previousFocusRef.current
       if (prev?.isConnected) {
+        // 元の focus が入力面なら、いまの入力の方式の持ち主へ戻す（PIS-SETTINGS-FOCUS-RETURN1。
+        // 設定で従来の入力へ切り替えて閉じたとき、使えない入力面へ focus して BODY へ落ちていた）。
         const port = isInputSurfaceFocusOwner(prev) ? getInputSurfaceFocusPort(prev) : null
-        if (port?.isEligible()) port.focus()
-        else prev.focus()
+        if (!port || port.restoreEditorFocus() === 'none') prev.focus()
       }
     }
   }, [containerRef, enabled])

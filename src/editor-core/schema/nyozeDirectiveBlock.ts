@@ -17,10 +17,14 @@ import {
  * attrs:
  *   - kind:  'align' | 'indent' | 'style'
  *   - name:  align は 'center'|'end' / indent は level digit / style は style id
- *   - level: indent のみ 1..6
+ *   - level: indent のみ 1..`INDENT_MAX_LEVEL`（20）
  *
  * 装飾は CSS class / data attr で表現し、本文 Markdown には font / color の
  * 直接値を書かない。未知 style id も class / data attr として保持する。
+ *
+ * indent の段数は、段数ごとの class の列挙ではなく、描画のときに 1 回だけ
+ * `style="--nyoze-directive-indent-level: N"` を渡す（ページビューア・HTML の書き出しと同じ形。
+ * BLOCK-INDENT-LEVELS1）。この値は node の DOM を作るときだけ書き、resize・frame ごとには書かない。
  */
 export const NyozeDirectiveBlock = Node.create({
   name: NYOZE_DIRECTIVE_NODE_NAME,
@@ -56,6 +60,7 @@ export const NyozeDirectiveBlock = Node.create({
 
     if (kind === 'indent' && level !== null) {
       attrs['data-nyoze-indent-level'] = String(level)
+      attrs.style = `--nyoze-directive-indent-level: ${level}`
     }
     if (kind === 'style') {
       attrs['data-nyoze-style-id'] = name

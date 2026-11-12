@@ -3,6 +3,7 @@ import type { EditorView } from '@tiptap/pm/view'
 import { pickHorizontalWrapBoundaryRect, pickVerticalWrapBoundaryRect, synthesizeVerticalEmptyTextblockCaretCoords } from '../../pseudoCaretGeometry'
 import type { SupportedEditorWritingMode } from '../../writingModeNavigationMapping'
 import { isGapCursorPosition } from './gapCursorApi'
+import { clampCrossExtent, inlineEdgeCaret, inlineEdgeNeighborOrder, inlineEdgeSource, planAtomWrapCandidates, type InlineEdgeNeighbor } from './inlineEdgeCaret'
 import type { NavigationAffinity } from './rules'
 
 export type CaretRect = { left: number; right: number; top: number; bottom: number }
@@ -53,6 +54,105 @@ function readGapCaretRect(view: EditorView, $pos: ResolvedPos, mode: SupportedEd
   return { left: anchor.left, right: anchor.left, top: edge - size / 2, bottom: edge + size / 2 }
 }
 
+/**
+ * PIS-INLINE-EDGE-CARET1: 縦書きで、Rangeがどのsideでも矩形を返さない位置（文字と隣り合わない位置。ルビ・縦中横・画像などの前後）の
+ * caret。`view.coordsAtPos()`は横書きの前提の値（部品の左端に立てた、部品の高さの縦線）で、縦書きの擬似キャレットの形（その中央）にすると、
+ * 部品の中央に細く出る・幅も高さもない矩形で取れない。隣の部品（text以外のinline node）の矩形の端から、列の幅いっぱいのcaretを作る。
+ * 隣は、text以外のinline node（Ruby・縦中横・画像など）と、前がtextでない位置の後ろのtext。先に試す側は、affinityが行末側なら前の末尾、それ以外は後ろの先頭。
+ * 判断は`inlineEdgeCaret.ts`の純粋な関数。
+ * 擬似キャレット・入力面の配置・navigationのすべての`purpose`で同じ。Rangeで矩形が取れる位置は、ここへ来ない。
+ */
+function readInlineEdgeCaretRect(view: EditorView, $pos: ResolvedPos, pos: number, affinity: NavigationAffinity): CaretRect | null {
+  const doc = view.dom.ownerDocument
+  const neighborRect = (neighbor: InlineEdgeNeighbor): CaretRect | null => {
+    const node = neighbor === 'after' ? $pos.nodeAfter : $pos.nodeBefore
+    const source = inlineEdgeSource(node, neighbor, neighbor === 'after' ? $pos.nodeBefore : $pos.nodeAfter)
+    if (!node || !source) return null
+    const nodePos = neighbor === 'after' ? pos : pos - node.nodeSize
+    try {
+      if (source === 'content' || source === 'text') {
+        // 親文字の端（読み（rt）を含まない。既存のB13の予備と同じ読み方）、または後ろのtextの先頭のRange。
+        const at = source === 'text' ? view.domAtPos(pos, 1)
+          : neighbor === 'after' ? view.domAtPos(nodePos + 1, 1) : view.domAtPos(nodePos + node.nodeSize - 1, -1)
+        const range = doc.createRange()
+        range.setStart(at.node, at.offset)
+        range.collapse(true)
+        const rect = range.getBoundingClientRect()
+        return validRect(rect) ? copyRect(rect) : null
+      }
+      const element = view.nodeDOM(nodePos) as Element | null
+      const rect = typeof element?.getBoundingClientRect === 'function' ? element.getBoundingClientRect() : null
+      return rect && rect.width > 0 && rect.height > 0 ? copyRect(rect) : null
+    } catch { return null }
+  }
+  for (const neighbor of inlineEdgeNeighborOrder(affinity)) {
+    const rect = neighborRect(neighbor)
+    if (rect) return inlineEdgeCaret(rect, neighbor, 'vertical-rl')
+  }
+  return null
+}
+
+/**
+ * PIS-INLINE-ATOM-WRAP-NAV1: 折り返しの位置で、隣がinlineのatomのときの、行頭側・行末側の候補。
+ * 字と字の間の折り返しでは、collapsed Rangeが2つの矩形（前の行の末尾・次の行の先頭）を返し、共有のpickerがaffinityで選べる。隣がatomだと、
+ * Rangeは字の側の1つの矩形しか返さないので、atomの端のcaret（`inlineEdgeCaret()`。atomの要素の矩形）を足して、字の側の矩形と一緒にpickerへ
+ * 渡す。足すかどうかは純粋な`planAtomWrapCandidates()`（隣がatomのときだけ）。pickerは変えない。同じ行の2つの候補を折り返しとみなさない判定
+ * （`yGap`・`xGap`）はpickerの既存の条件に任せ、折り返しでなければ`null`（従来の経路がそのまま使われる）。
+ * 擬似キャレット・入力面の配置・navigationのすべての`purpose`で同じ（sidesの順に依らない）。縦書き・横書きの両方。
+ *
+ * pickerの判定は、候補のblock方向の長さ（縦書きは幅、横書きは高さ）を「1行ぶん」の目安にする。列より幅の広い画像（縦書き）・行より高い画像
+ * （横書き）は、その長さが目安を膨らませ、遠く離れた折り返しでも「同じ行」と判定されてしまう。そこで、pickerへ渡す判定用の矩形は、atomの
+ * block方向の長さを、字の側の長さ（両側がatomのときは、小さい方）までに揃える（中心は変えない。inline方向の位置も変えない）。
+ * 選ばれた候補として返すのは、揃える前の矩形（atomの要素の矩形の端）。
+ */
+type WrapCandidate = { real: CaretRect; forPick: CaretRect }
+function readAtomWrapBoundaryCandidates(view: EditorView, $pos: ResolvedPos, pos: number, mode: SupportedEditorWritingMode): WrapCandidate[] | null {
+  const plan = planAtomWrapCandidates($pos.nodeBefore, $pos.nodeAfter)
+  if (!plan) return null
+  const vertical = mode === 'vertical-rl'
+  const cross = (r: CaretRect) => vertical ? r.right - r.left : r.bottom - r.top
+  const text: CaretRect[] = [], atoms: CaretRect[] = []
+  try {
+    if (plan.text) {
+      // 字の側の矩形: そのtextの、atomに近い端のcollapsed Range（前のtextは末尾、後ろのtextは先頭）。2つ返るときは字だけの折り返しなので触れない。
+      const at = view.domAtPos(pos, plan.text === 'before' ? -1 : 1), range = view.dom.ownerDocument.createRange()
+      if (at.node.nodeType !== Node.TEXT_NODE) return null
+      range.setStart(at.node, at.offset)
+      range.collapse(true)
+      const found = Array.from(range.getClientRects()).filter(validRect)
+      if (found.length !== 1) return null
+      text.push(copyRect(found[0]))
+    }
+    for (const neighbor of plan.atoms) {
+      const node = neighbor === 'after' ? $pos.nodeAfter : $pos.nodeBefore
+      const element = view.nodeDOM(neighbor === 'after' ? pos : pos - node!.nodeSize) as Element | null
+      const rect = typeof element?.getBoundingClientRect === 'function' ? element.getBoundingClientRect() : null
+      if (!rect || !(rect.width > 0 && rect.height > 0)) return null
+      atoms.push(inlineEdgeCaret(rect, neighbor, mode))
+    }
+  } catch { return null }
+  if (text.length + atoms.length < 2) return null
+  // 判定用の「1行ぶん」: 字の側の長さ。なければ、atomの長さのうち小さい方。
+  const reference = text.length ? cross(text[0]) : Math.min(...atoms.map(cross))
+  const normalized = (r: CaretRect): CaretRect => clampCrossExtent(r, reference, mode)
+  return [...text.map(real => ({ real, forPick: real })), ...atoms.map(real => ({ real, forPick: normalized(real) }))]
+}
+
+/** 候補（判定用の矩形）を共有のpickerへ渡し、選ばれた候補の元の矩形を返す。pickerが折り返しとみなさなければ`null`。 */
+function pickAtomWrapCandidate(candidates: WrapCandidate[], mode: SupportedEditorWritingMode, affinity: NavigationAffinity, pointer?: { x: number; y: number }): CaretRect | null {
+  const pick = mode === 'vertical-rl' ? pickVerticalWrapBoundaryRect : pickHorizontalWrapBoundaryRect
+  const picked = pick({ rects: candidates.map(candidate => candidate.forPick), affinity, pointer })
+  return candidates.find(candidate => candidate.forPick === picked)?.real ?? null
+}
+
+/** 折り返しの位置で、隣のatomの端のcaretが、字（または隣のatom）の側のcaretと別の行にあるとき、その行頭側・行末側の矩形。折り返しでなければ`null`。 */
+export function atomWrapBoundary(view: EditorView, pos: number, mode: SupportedEditorWritingMode): { head: CaretRect; end: CaretRect } | null {
+  const candidates = readAtomWrapBoundaryCandidates(view, view.state.doc.resolve(pos), pos, mode)
+  if (!candidates) return null
+  const head = pickAtomWrapCandidate(candidates, mode, 'head'), end = pickAtomWrapCandidate(candidates, mode, 'end')
+  return head && end ? { head: copyRect(head), end: copyRect(end) } : null
+}
+
 /** Detached Ranges never touch the focused editing host's DOM Selection. */
 export function readCaretRect(view: EditorView, pos: number, mode: SupportedEditorWritingMode, affinity: NavigationAffinity, pointer?: { x: number; y: number }, purpose?: 'pseudo-caret'): CaretRect | null {
   const doc = view.dom.ownerDocument
@@ -61,6 +161,12 @@ export function readCaretRect(view: EditorView, pos: number, mode: SupportedEdit
   const $pos = view.state.doc.resolve(pos)
   // textのRangeがない位置。矩形を得られないときは、下の既存の経路へ進まずnullを返す（無関係なnodeの矩形を使わない）。
   if (!$pos.parent.inlineContent && isGapCursorPosition($pos)) return readGapCaretRect(view, $pos, mode)
+  // PIS-INLINE-ATOM-WRAP-NAV1: 折り返しの位置で隣がatomのとき、行頭側・行末側をaffinity（click後はpointer）で選ぶ。折り返しでなければ従来の経路。
+  const atomWrap = readAtomWrapBoundaryCandidates(view, $pos, pos, mode)
+  if (atomWrap) {
+    const picked = pickAtomWrapCandidate(atomWrap, mode, affinity, pointer)
+    if (picked) return copyRect(picked)
+  }
   const afterSpecialInline = ['aozoraRuby', 'aozoraTcy'].includes($pos.nodeBefore?.type.name ?? '')
   const sides = purpose === 'pseudo-caret'
     ? afterSpecialInline ? [1, 0, -1] : [$pos.parentOffset ? -1 : 1] : [0, 1, -1]
@@ -107,6 +213,11 @@ export function readCaretRect(view: EditorView, pos: number, mode: SupportedEdit
         const edge = atom.after ? rect.right : rect.left
         return { left: edge, right: edge, top: rect.top, bottom: rect.bottom }
       }
+    }
+    // 縦書きだけ。横書きの`coordsAtPos()`は、部品の端に立てた縦線で正しい。
+    if (mode === 'vertical-rl') {
+      const edge = readInlineEdgeCaretRect(view, $pos, pos, affinity)
+      if (edge) return edge
     }
     if (mode === 'vertical-rl' && $pos.parent.isTextblock && !$pos.parent.content.size) {
       const element = view.nodeDOM($pos.before()) as HTMLElement | null

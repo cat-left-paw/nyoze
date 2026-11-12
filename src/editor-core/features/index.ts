@@ -116,6 +116,8 @@ export {
 export { handleNoteAnchorDeleteKey, wouldDeleteNoteAnchorWithKey } from './noteAnchorDeleteKey'
 export { registerNoteAnchorProtectionNoticeSink, notifyNoteAnchorProtection, registerNoteAnchorEditDetachListener, notifyNoteAnchorsDetachedByEdit } from './noteAnchorProtectionNotice'
 export type { NoteAnchorProtectionNoticeKind } from './noteAnchorProtectionNotice'
+export { registerInlineMarkInputRuleNoticeSink } from './inlineMarkInputRuleNotice'
+export type { InlineMarkInputRuleNoticeReason } from './inlineMarkInputRules'
 export { createCompositionEventHandlers } from './compositionHandlers'
 export { bindEditorDomEvents } from './domEventBindings'
 export { createEditorLifecycleCallbacks } from './editorLifecycleCallbacks'
@@ -258,10 +260,19 @@ export type {
 export { notifyLocalImePointerSelectionHandoff } from './localImePointerSelectionHandoff'
 export type { EditorMarkShortcutName } from './editorMarkShortcutClassification'
 export { createInputSurfaceIntegration, isInputSurfaceCapable, isInputSurfacePathActive } from './inputSurface/inputSurfaceIntegration'
+// EDITOR-PARAGRAPH-REPARSE1: 段落を離れたとき・コマンドで、その段落の記法を読み直す（読み直してよい場面の port と、明示のコマンド）。
+export { createParagraphReparsePort, runParagraphReparseCommand, canReparseParagraphAtSelection } from './paragraphReparse/reparseCommand'
+export { getInputSurfaceNoticeSnapshot } from './inputSurface/documentAction'
 export { connectLazyInputSurface } from './inputSurface/inputPathController'
 export { selectSinglePseudoCaretExternalGeometrySource } from './localImePseudoCaretGeometrySource'
 export { createInputSurfaceDisplayCallbacks } from './inputSurface/pseudoCaretWiring'
 export { getInputSurfaceFocusPort } from './inputSurface/focusOwner'
+export { registerInputRestrictionNoticeSink } from './inputSurface/inputRestrictionNotice'
+export type { InputRestrictionNotice } from './inputSurface/inputRestrictionNotice'
 // EDITOR-TAB-HISTORY1: タブごとの履歴つき state の保持・復元・破棄（判定は documentStateCapsule、順序は controller）。
 export { createDocumentStateController, type DocumentStateController, type DocumentStateControllerPorts } from './documentStateController'
+// MD-SOURCE-PRESERVE1: 編集していないブロックを、読み込んだときの元の文字列のまま書き出すための対応づけ。
+export { createSourcePreservationController, type SourcePreservationController, type SourcePreservationDiagnostics } from './sourcePreservationController'
 export type { DocumentStateCapsule, DocumentStateDiagnostics } from './documentStateCapsule'
+// EDITOR-RUBY-OVERLAY-P0（試作）: 非packagedの開発用flagがONのときだけ、ルビの読みを画面の近くの分だけ別の層へ描く。
+export { attachRubyOverlay } from './rubyOverlay'

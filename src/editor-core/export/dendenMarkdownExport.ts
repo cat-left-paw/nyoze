@@ -8,6 +8,7 @@ import {
 } from '../io/markdownEscaping'
 import {
   formatDirectiveToken,
+  isValidIndentLevel,
   NYOZE_BLANK_PAGE_NODE_NAME,
   NYOZE_DIRECTIVE_NODE_NAME,
   NYOZE_PAGE_BREAK_NODE_NAME,
@@ -21,6 +22,7 @@ import {
 } from './externalExportOptions'
 import { applyExportAutoTcyToText } from './exportAutoTcy'
 import type { BookExportBookInfo, BookExportChapterInfo } from './bookExportMetadata'
+import { SOURCE_SPELLING_MARK_NAME } from '../io/sourceSpelling'
 
 /**
  * でんでんコンバーター向け Markdown export の pure converter。
@@ -379,6 +381,8 @@ function resolveInlineNodeMarks(node: PMNode): Mark[] {
 function emitUnsupportedMarks(ctx: ExportContext, marks: Mark[]): void {
   for (const mark of marks) {
     if (SUPPORTED_MARK_NAMES.has(mark.type.name)) continue
+    // MD-ESCAPE-EXPLICIT1: 元の綴りを覚える mark は書き出しの対象外（本文の文字は `*` のまま。警告も出さない）。
+    if (mark.type.name === SOURCE_SPELLING_MARK_NAME) continue
     pushWarning(ctx, {
       code: 'unsupported-mark',
       message: `Unsupported mark "${mark.type.name}" was stripped during Denden Markdown export`,
@@ -759,7 +763,8 @@ function serializeDirectiveBlock(ctx: ExportContext, node: PMNode): string {
 
   if (attrs.kind === 'indent') {
     const level = attrs.level ?? Number(attrs.name) ?? 1
-    if (level >= 1 && level <= 6) {
+    // 段数の範囲は記法の正本（`INDENT_MIN_LEVEL..INDENT_MAX_LEVEL`）と同じ（BLOCK-INDENT-LEVELS1）。
+    if (isValidIndentLevel(level)) {
       // 段落先頭の全角スペースは折り返し行に効かず block indent として破綻する
       // ため採用しない。LeME と同じく markdown="1" 付き HTML div (padding-top)
       // で字下げを表現する（縦書き前提。横書き向け padding-left 切替は未対応）。

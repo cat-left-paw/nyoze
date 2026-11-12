@@ -1,4 +1,4 @@
-import { normalizeInputStrategyCapabilityView, type InputPath, type InputStrategyCapabilityView } from '../inputPathDecision'
+import { readClassicInputPathPreference, resolveInputPathDecision, normalizeInputStrategyCapabilityView, type InputPath, type InputStrategyCapabilityView } from '../inputPathDecision'
 import type { InputSurfaceCreateFailureReason } from './inputSurfaceCreation'
 
 /**
@@ -25,6 +25,8 @@ export type InputPathController = {
 
 /** 開発用の診断（読むだけ）。製品のnoticeや自動の切り替え・設定の制御には使わない。読むのは試験専用の入口だけ。 */
 export type InputPathDiagnostics = {
+  /** この起動で作った入力面の累計（試験専用診断）。 */
+  surfaceCreations: number
   switched: number
   blocked: Partial<Record<InputPathChangeReason, number>>
   compositionDiscarded: number
@@ -35,13 +37,14 @@ export type InputPathDiagnostics = {
   createFailures: Partial<Record<InputSurfaceCreateFailureReason, number>>
   lastCreateFailure: InputSurfaceCreateFailureReason | null
 }
-const diagnostics: InputPathDiagnostics = { switched: 0, blocked: {}, compositionDiscarded: 0, deferredCreations: 0, domSelectionMismatch: 0, lastBlocked: null, createFailures: {}, lastCreateFailure: null }
+const diagnostics: InputPathDiagnostics = { surfaceCreations: 0, switched: 0, blocked: {}, compositionDiscarded: 0, deferredCreations: 0, domSelectionMismatch: 0, lastBlocked: null, createFailures: {}, lastCreateFailure: null }
 type InputPathDiagnosticEvent =
-  | { kind: 'switched' } | { kind: 'composition-discarded' } | { kind: 'deferred-creation' } | { kind: 'dom-selection-mismatch' }
+  | { kind: 'surface-created' } | { kind: 'switched' } | { kind: 'composition-discarded' } | { kind: 'deferred-creation' } | { kind: 'dom-selection-mismatch' }
   | { kind: 'blocked'; reason: InputPathChangeReason }
   | { kind: 'create-failure'; reason: InputSurfaceCreateFailureReason }
 export function noteInputPathDiagnostic(event: InputPathDiagnosticEvent): void {
   switch (event.kind) {
+    case 'surface-created': diagnostics.surfaceCreations++; break
     case 'switched': diagnostics.switched++; break
     case 'composition-discarded': diagnostics.compositionDiscarded++; break
     case 'deferred-creation': diagnostics.deferredCreations++; break
@@ -85,7 +88,7 @@ export function getInputPath(): InputPath {
   const current = readInputStrategyCapability()
   if (current.productStrategy !== 'input-surface') return 'host'
   if (current.forced) return 'input-surface'
-  return path ?? 'host'
+  return path ?? resolveInputPathDecision({ capability: current, preferredPath: readClassicInputPathPreference(current.startupClassicInputEnabled) }).path
 }
 
 export function subscribeInputPath(listener: () => void): () => void {
@@ -136,5 +139,5 @@ export function consumeDeferredInputSurfaceCreationFailure(): boolean {
 /** unit test専用。 */
 export function resetInputPathRuntimeForTest(): void {
   capability = null; path = null; controller = null; deferredCreationFailed = false; listeners.clear()
-  Object.assign(diagnostics, { switched: 0, blocked: {}, compositionDiscarded: 0, deferredCreations: 0, domSelectionMismatch: 0, lastBlocked: null, createFailures: {}, lastCreateFailure: null })
+  Object.assign(diagnostics, { surfaceCreations: 0, switched: 0, blocked: {}, compositionDiscarded: 0, deferredCreations: 0, domSelectionMismatch: 0, lastBlocked: null, createFailures: {}, lastCreateFailure: null })
 }

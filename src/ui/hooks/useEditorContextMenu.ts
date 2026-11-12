@@ -64,6 +64,7 @@ const EMPTY_AVAILABILITY: CommandAvailability = {
   isCodeBlock: false,
   canBlockDirective: false,
   blockDirectiveToken: null,
+  canReparseParagraph: false,
   canDeletePageBreak: false,
   noteAnchorContextId: null,
   touchesNoteAnchor: false,

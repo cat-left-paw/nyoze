@@ -67,13 +67,55 @@ export function createHorizontalEditorSurfaceWheelApplier(): HorizontalEditorSur
   }
 }
 
+/**
+ * 縦書きの wheel の deltaY 係数（縦書きは `scrollLeft += -deltaY * 係数 + deltaX`）。
+ * 章の境目の移動（`editorChapterBoundaryWheelNavigation.ts`）は、同じ向きと量で方向を決めるため、この定数を使う。
+ * 速さ（係数）は作者が実機で決める。EDITOR-VERTICAL-WHEEL-ACCUM1 では、今までと同じ 0.8 のまま。
+ */
+export const VERTICAL_WHEEL_DELTA_Y_FACTOR = 0.8
+
+/**
+ * 縦書きの wheel を、足し合わせて frame ごとに 1 回だけ `scrollLeft` へ書く（EDITOR-VERTICAL-WHEEL-ACCUM1）。
+ *
+ * - event ごとに `preventDefault()` し、量を足し合わせる。**event を捨てない**（以前は 16 ms の `setTimeout`
+ *   が済むまで次の event を捨てていて、連続した入力の約半分が使われず、描画が重いと物理のホイールも捨てられた）。
+ * - 書き込みは `requestAnimationFrame` の 1 つの予約だけで、frame ごとに最大 1 回。この rAF は scroll の表示の
+ *   ためだけで、所有・完了の根拠にはしない（timer・polling は使わない）。wheel event は frame の入力の段階で
+ *   届き、rAF はその同じ frame の中で走るので、書き込みは event と同じ frame の描画に載る。
+ * - 範囲の端の clamp はブラウザに任せる（`scrollLeft` に足すだけ）。
+ * - 書く時点で、書く先が document から外れた・縦書きでなくなった・`destroy()` された場合は、何も書かずに
+ *   足し合わせを捨てる。
+ */
 export function createVerticalWheelScrollController(
   scroller: HTMLElement,
 ): VerticalWheelScrollController {
-  let wheelThrottleTimer: ReturnType<typeof setTimeout> | null = null
+  let destroyed = false
+  let frameHandle: number | null = null
+  let pendingTarget: HTMLElement | null = null
+  let pendingAmount = 0
+
+  const discardPending = (): void => {
+    pendingTarget = null
+    pendingAmount = 0
+  }
+
+  const flush = (): void => {
+    frameHandle = null
+    const target = pendingTarget
+    const amount = pendingAmount
+    discardPending()
+    if (destroyed || target === null || amount === 0) return
+    // `isConnected` を持たない軽量な要素（試験の fake）は「接続されている」とみなす。
+    if (target.isConnected === false) return
+    if (!window.getComputedStyle(scroller).writingMode.startsWith('vertical')) return
+    target.scrollLeft += amount
+  }
 
   return {
     onWheel(event: WheelEvent): void {
+      // destroy 後の controller は何も扱わない（preventDefault もしない。ブラウザの既定に任せる）。
+      if (destroyed) return
+
       const computed = window.getComputedStyle(scroller)
       if (!computed.writingMode.startsWith('vertical')) return
 
@@ -90,19 +132,26 @@ export function createVerticalWheelScrollController(
       if (!scrollEl) return
 
       event.preventDefault()
-      const scrollAmount = -event.deltaY * 0.8 + event.deltaX
-      if (wheelThrottleTimer !== null) return
-      scrollEl.scrollLeft += scrollAmount
-      wheelThrottleTimer = setTimeout(() => {
-        wheelThrottleTimer = null
-      }, 16)
+      // 同じ frame の中で書く先が変わる（nearest な横 scroll の祖先が変わる）ことは通常ないが、
+      // 変わった場合は、それまでに足し合わせた量を元の書く先へ先に書いて、量を取りこぼさない。
+      if (pendingTarget !== null && pendingTarget !== scrollEl) {
+        const previousTarget = pendingTarget
+        const previousAmount = pendingAmount
+        discardPending()
+        if (previousTarget.isConnected !== false) previousTarget.scrollLeft += previousAmount
+      }
+      pendingTarget = scrollEl
+      pendingAmount += -event.deltaY * VERTICAL_WHEEL_DELTA_Y_FACTOR + event.deltaX
+      if (frameHandle === null) frameHandle = window.requestAnimationFrame(flush)
     },
 
     destroy() {
-      if (wheelThrottleTimer !== null) {
-        clearTimeout(wheelThrottleTimer)
-        wheelThrottleTimer = null
+      destroyed = true
+      if (frameHandle !== null) {
+        window.cancelAnimationFrame(frameHandle)
+        frameHandle = null
       }
+      discardPending()
     },
   }
 }

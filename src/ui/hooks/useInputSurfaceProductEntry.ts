@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { requestLocalImeDocumentActionWithOwner } from '../../editor-core/features/localImeDocumentActionBarrier'
 import {
-  readExperimentalInputPathPreference,
+  readClassicInputPathPreference,
   resolveInputPathDecision,
 } from '../../editor-core/features/inputPathDecision'
 import {
@@ -51,7 +51,7 @@ export function useInputSurfaceProductEntry(options: ProductEntryOptions): Local
   const decision = useMemo(
     () => resolveInputPathDecision({
       capability,
-      preferredPath: readExperimentalInputPathPreference(preferenceEnabled),
+      preferredPath: readClassicInputPathPreference(!preferenceEnabled),
     }),
     [capability, preferenceEnabled],
   )
@@ -158,7 +158,7 @@ export function useInputSurfaceProductEntry(options: ProductEntryOptions): Local
     recoveryDraftCopyAvailable: false,
     notice: confirmDiscard && actualOn ? 'confirm-discard-composition' : switchBlocked ? 'switch-blocked' : null,
     switchBlockedReason: confirmDiscard && actualOn ? null : switchBlocked,
-    inputSurface: { preeditDisplay, onChangePreeditDisplay: setPreeditDisplay },
+    inputSurface: { classicInputOn: !actualOn, onChangeClassicInput: (next) => onChangeEnabled(!next), preeditDisplay, onChangePreeditDisplay: setPreeditDisplay },
     onChangeEnabled,
     onStopSession: noop,
     onRetryRecovery: noop,

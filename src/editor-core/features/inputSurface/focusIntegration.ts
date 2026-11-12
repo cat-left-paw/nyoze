@@ -1,12 +1,14 @@
 import type { Editor } from '@tiptap/core'
 import type { InputSurface, SurfaceRecord } from './inputSurface'
-import { createHostFocusPermissions, judgeHostFocus, shouldRestoreContextMenuFocus, type HostFocusPermission } from './focusSafety'
+import { createHostFocusPermissions, judgeHostFocus, resolveEditorFocusRestoreTarget, shouldRestoreContextMenuFocus, type HostFocusPermission } from './focusSafety'
 import { registerInputSurfaceFocusPort } from './focusOwner'
 import { AllSelection } from '@tiptap/pm/state'
 
 /** focus要求・typed許可・同期安全網。ownershipの完了を遅延処理で推測しない。 */
 export function createInputSurfaceFocusIntegration(options: {
   editor: Editor; surface: InputSurface; isEligible(): boolean
+  /** 入力の方式が従来の入力（Host）で、Host の本文が編集できる（Source Mode・段落プレーン編集などでない）。 */
+  isHostEligible(): boolean
   hasLease(): boolean; hostComposing(): boolean; record: SurfaceRecord
 }) {
   const { editor, surface, record } = options, view = editor.view
@@ -38,6 +40,14 @@ export function createInputSurfaceFocusIntegration(options: {
     isComposing: composing,
     hasFocus: () => view.dom.ownerDocument.activeElement === surface.element || view.hasFocus(),
     focus: focusSurface,
+    restoreEditorFocus() {
+      const target = resolveEditorFocusRestoreTarget({ surfaceEligible: options.isEligible(), hostEligible: options.isHostEligible(), composing: composing() })
+      if (target === 'surface') focusSurface()
+      // PM の view.focus() は、PM の選択から DOM の caret を置き直す（scroll しない）。
+      else if (target === 'host') view.focus()
+      record('restore-editor-focus', { target })
+      return target
+    },
     selectAll,
     focusForContextMenuClipboard() {
       if (focusSurface()) return 'surface'

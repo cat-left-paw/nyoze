@@ -2147,6 +2147,7 @@ body.is-resizing-pane {
 }
 
 .editor-tab {
+  position: relative; /* EDITOR-TAB-REORDER1: 挿入位置の棒（::before）の基準。layout は変えない。 */
   border: 1px solid transparent;
   background: transparent;
   color: var(--text-muted);
@@ -2217,6 +2218,32 @@ body.is-resizing-pane {
 .editor-tab-close:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* EDITOR-TAB-REORDER1: drag 中の tab と挿入位置の線。layout を動かさない（opacity / cursor と、tab の内側の端に
+   絶対配置した ::before の棒だけ）。棒は tab の内側に描く（.editor-tab-list の overflow で切れないように）。 */
+.editor-tab[data-dragging="true"] {
+  opacity: 0.6;
+  cursor: grabbing;
+}
+
+.editor-tab[data-drop-edge]::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.editor-tab[data-drop-edge="before"]::before {
+  left: 0;
+}
+
+.editor-tab[data-drop-edge="after"]::before {
+  right: 0;
 }
 
 .editor-tab-add {
@@ -4854,7 +4881,8 @@ body.is-resizing-pane {
   border: 0;
   border-radius: 0;
   padding: 0.55em 0.7em;
-  overflow: auto;
+  /* EDITOR-CODEBLOCK-WRAP1: 常に折り返す（設定にしない）ので、ブロックの中にscrollは出さない。 */
+  overflow: visible;
   writing-mode: inherit;
   text-orientation: sideways;
   /* 本文 root の justify を code へ継承させない（editor 表示限定）。 */
@@ -4870,7 +4898,10 @@ body.is-resizing-pane {
   font-family: "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.95em;
   line-height: 1.55;
-  white-space: pre;
+  /* EDITOR-CODEBLOCK-WRAP1: 行頭の空白・タブ・空行は保ったまま、編集の領域の端で折り返す。
+     inline-blockの幅（shrink-to-fit）に空白なしの長い並びを収めるため、`anywhere`（最小幅にも効く）。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   writing-mode: inherit;
   text-orientation: sideways;
 }
@@ -7816,12 +7847,8 @@ body.is-resizing-pane {
   );
 }
 
-.nyoze-directive-block--indent-1 { --nyoze-directive-indent-level: 1; }
-.nyoze-directive-block--indent-2 { --nyoze-directive-indent-level: 2; }
-.nyoze-directive-block--indent-3 { --nyoze-directive-indent-level: 3; }
-.nyoze-directive-block--indent-4 { --nyoze-directive-indent-level: 4; }
-.nyoze-directive-block--indent-5 { --nyoze-directive-indent-level: 5; }
-.nyoze-directive-block--indent-6 { --nyoze-directive-indent-level: 6; }
+/* BLOCK-INDENT-LEVELS1: 段数（1〜20）は、node の描画が渡す style="--nyoze-directive-indent-level: N" で決まる
+   （段数ごとの class の規則は持たない。上の規則の `var(..., 1)` は、値が無いときの安全側の既定）。 */
 
 /* style: 組み込み semantic style は最小限・控えめ。テーマ変数のみ使用。 */
 .nyoze-directive-block--style-letter {
@@ -8219,6 +8246,22 @@ body.is-resizing-pane {
 }
 
 /*
+ * EDITOR-RUBY-OVERLAY-P1: 製品の既定。非 packaged の NYOZE_RUBY_OVERLAY=0 だけ従来の DOM の読みで描く。
+ * 親文字の position を外し、DOM に残した読みを display: none にする。読みは画面の近くの分だけ別の層へ描く。
+ * 読みの PaintLayer をなくすため、Chromium の単語移動・範囲の端が一部変わる（作者が受け入れた差は P1 の報告を参照）。
+ * 属性 `data-nyoze-ruby-overlay` は editor を作るときに 1 回だけ `.editor-core-host` へ付け、途中で付け外ししない
+ * （開いた後の切り替えは、ルビの数だけの PaintLayer の作り直しで 0.4〜2.9 秒止まる）。
+ * Local Window の local PM（`.editor-surface > .nyoze-local-window-overlay`）は `.editor-core-host` の外なので、この規則は効かない。
+ */
+.editor-core-host[data-nyoze-ruby-overlay] .ProseMirror .tategaki-aozora-ruby {
+  position: static;
+}
+
+.editor-core-host[data-nyoze-ruby-overlay="1"] .ProseMirror .tategaki-aozora-ruby-rt {
+  display: none;
+}
+
+/*
  * EDITOR-RUBY-INLINE1: 境界の sentinel（WJ と、Host の変換中の文字が入る）は、空白を保ったまま折り返せる（pre-wrap）。
  * ルビは inline で、WJ が前後の改行を禁じるので、`pre`（折り返さない）だと変換中は「ルビ＋WJ＋変換中の文字の全体」が
  * 切れない塊になり、変換中の文字が列（行）の残りに収まらないと、ルビが変換中だけ次の列へ跳んでいた。
@@ -8247,6 +8290,12 @@ body.is-resizing-pane {
   color: inherit;
   border-radius: 2px;
   padding: 0 0.05em;
+}
+
+/* MD-ESCAPE-EXPLICIT1: リンクの定義の行（`[注]: 説明`）の `[注]:` を、Obsidian と同じく薄く表示する
+   （文字は元のまま。色は既存の文字色の token で、テーマに追従する）。 */
+.editor-surface .ProseMirror .nyoze-ref-def-label {
+  color: var(--text-muted);
 }
 
 /* Underline mark: in vertical writing mode, Japanese underline (傍線) is
@@ -11084,6 +11133,12 @@ body.is-resizing-project-preview {
 
 [data-nyoze-input-surface="true"] {
   caret-color: currentColor;
+}
+/* PIS-RETAINED-TEXT-COLOR1: 確定できずに入力欄に残った文字（保持文字）。背景の明るさに応じた赤系の色で、本文に入った文字と見分ける。
+   色は入力面自身の変数（surfaceTypographyが下地を読むときに書く）。文字の色は本文から inline style で写すので !important が要る。
+   下線・取り消し線・text-shadow（短い横倒しの字の対策）・native の caret は currentColor なので同じ色になる。規則は固定で、書き換えない。 */
+[data-nyoze-input-surface="true"][data-nyoze-input-surface-retained] {
+  color: var(--nyoze-input-surface-retained-color) !important;
 }
 /* 再変換の押し出し表示だけ。currentColorはoriginating elementの文字色を使い、
    親の::selectionの白文字をhighlight継承しない。IMEの文節表示はブラウザが描く。 */

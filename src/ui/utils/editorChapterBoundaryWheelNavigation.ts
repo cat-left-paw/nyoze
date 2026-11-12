@@ -4,19 +4,21 @@
  * 将来、Book 本文の章頭 / 章末で `Option/Alt + スクロール` により前後章へ移動する
  * ための「論理方向 + 単発 trigger」判定だけを担う純粋ロジック。
  *
- * このモジュールは pure であり、React / DOM listener / Electron / IPC を一切 import しない。
+ * このモジュールは pure であり、React / DOM listener / Electron / IPC を一切 import しない
+ * （例外は、縦書き wheel の係数の定数 `VERTICAL_WHEEL_DELTA_Y_FACTOR` だけ。定義を 1 か所にするため）。
  * タイマー API も使わず、呼び出し側が渡す `nowMs` による同期判定だけで idle / cooldown /
  * latch を扱う（fake timer なしでテストできる）。
  *
  * 方向感覚は既存 wheel 補正（`src/editor-core/features/verticalWheelScroll.ts`）と一致させる:
  * - 横書き horizontal-tb: `deltaY > 0` → next、`deltaY < 0` → previous。
  *   deltaY がほぼ 0 で deltaX だけが来る（トラックパッド横スワイプ）場合は誤発火回避のため none。
- * - 縦書き vertical-rl: 実 scroll 量 `scrollAmount = -deltaY * 0.8 + deltaX` の符号で解釈する。
+ * - 縦書き vertical-rl: 実 scroll 量 `scrollAmount = -deltaY * VERTICAL_WHEEL_DELTA_Y_FACTOR + deltaX` の符号で解釈する。
  *   vertical-rl は scrollLeft が 0 から負方向へ進むため `scrollAmount < 0` → next、`> 0` → previous。
  *
  * このスライスでは wheel listener / 既定動作の抑止 / 章移動呼び出し / UI には一切接続しない。
  */
 
+import { VERTICAL_WHEEL_DELTA_Y_FACTOR } from '../../editor-core/features/verticalWheelScroll'
 import type { WritingMode } from '../../settings/types'
 
 /** 章境界 wheel が示す論理方向。`none` は「triggerなし」。 */
@@ -68,8 +70,11 @@ export const WHEEL_LINE_TO_PIXEL = 16
 /** page 単位 1 ページを pixel 相当へ変換する固定係数（viewport 情報を持たない pure 層の安全値）。 */
 export const WHEEL_PAGE_TO_PIXEL = 800
 
-/** 縦書き実 scroll 量計算の deltaY 係数（verticalWheelScroll と一致）。 */
-export const VERTICAL_WHEEL_DELTA_Y_FACTOR = 0.8
+/**
+ * 縦書き実 scroll 量計算の deltaY 係数。定義は `verticalWheelScroll.ts` の 1 か所で、ここは同じ定数を使う
+ * （EDITOR-VERTICAL-WHEEL-ACCUM1。2 か所に値を持たない）。既存の import 元のため再 export する。
+ */
+export { VERTICAL_WHEEL_DELTA_Y_FACTOR }
 
 /** これ未満の論理スクロール量は「動いていない」とみなし方向 none。 */
 export const WHEEL_DIRECTION_EPSILON_PX = 1

@@ -10,6 +10,7 @@ import { handleRubyBaseBackspaceKey } from './rubyBoundarySelection'
 import { handleListTabKey } from './listTabNavigation'
 import { runRegularBodyShiftEnter } from './lineBreakCommands'
 import { runVerticalRlArrowNavigationCommand } from './verticalRlArrowNavigationAdapter'
+import { handleInlineNodeDeletion } from './inlineNodeDeletion'
 
 type Dispatch = (tr: Transaction) => void
 type LogPush = (event: string, detail: string) => void
@@ -78,6 +79,10 @@ export function createEditorPropsKeyDownHandler({
     }
     // Home/End 以外のキーで2段階状態をリセット
     resetHomeEndState()
+
+    if ((event.key === 'Backspace' || event.key === 'Delete') && !getIsComposing(view.composing) && handleInlineNodeDeletion(view, event)) {
+      return true
+    }
 
     if (handleRubyBaseBackspaceKey(view, event, { pushLog })) {
       return true

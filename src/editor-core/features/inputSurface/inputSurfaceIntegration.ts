@@ -3,11 +3,14 @@ import type { Transaction } from '@tiptap/pm/state'
 import { createHostOwner } from './hostOwner'
 import { createOwnerResolver } from './ownerResolver'
 import { createInputSurface } from './inputSurface'
+import { notifyInputRestriction } from './inputRestrictionNotice'
 import { createPointerLending } from './pointerLending'
 import { createKeyRouter } from './keyRouter'
 import { createRangePresenter } from './rangePresenter'
+import { createRangeNewlineBands, type RangeNewlineBandCounters } from './rangeNewlineBands'
 import { isInputSurfaceCapable, isInputSurfacePathActive } from './inputSurfaceGate'
-import { transitionSurface, type SurfaceEvent, type SurfaceState } from './surfaceState'
+import type { SurfaceEvent, SurfaceState } from './surfaceState'
+import { isRangeDisplayState, reduceRangeRetention, shouldShowRange, type RangeRetentionEvent } from './rangeRetention'
 import type { NavigationOp } from './editOwner'
 import { createInputSurfaceFocusIntegration } from './focusIntegration'
 import { createInputSurfaceClipboard } from './clipboard'
@@ -23,6 +26,8 @@ export { isInputSurfaceCapable, isInputSurfacePathActive } from './inputSurfaceG
 
 export type InputSurfaceSnapshot = {
   state: SurfaceState
+  /** PIS-RANGE-RETAIN-DISPLAY1: focusが別のUIへ移った後も範囲のHighlightを出す印（試験専用の診断）。 */
+  rangeRetained: boolean
   composing: boolean
   text: string
   content: { kind: string; consumed: boolean; rejected: boolean }
@@ -34,6 +39,8 @@ export type InputSurfaceSnapshot = {
   transactions: { total: number; docChanged: number; selectionOnly: number }
   highlightName: string
   highlightSupported: boolean
+  /** PIS-RANGE-DISPLAY1: 範囲に入った改行の帯（層の計算の回数・現在の帯の数など）。 */
+  rangeNewlines: RangeNewlineBandCounters
   /** B033: PMが求めたscrollを、入力面の選択のときにPISが代わりに行った回数（rAF単位）。 */
   reveal: CaretRevealCounters
   compositionPresentation: ReturnType<ReturnType<typeof createHostCompositionPresentation>['snapshot']>
@@ -89,12 +96,20 @@ export function createInputSurfaceIntegration(options: {
   editor.registerPlugin(hostOwner.deletionGuard.plugin)
   const owner = createOwnerResolver(hostOwner)
   const eligible = () => !destroyed && isInputSurfacePathActive() && editor.isEditable && !options.getSourceMode() && !options.getParagraphPlain() && !options.getLocalWindowActive()
-  const transition = (event: SurfaceEvent) => {
-    state = transitionSurface(state, event)
-    if (state !== 'surface-range') presenter.clear()
-    record('state', { event: event.type })
+  const hostEligible = () => !destroyed && !isInputSurfacePathActive() && editor.isEditable && !options.getSourceMode() && !options.getParagraphPlain() && !options.getLocalWindowActive()
+  // PIS-RANGE-RETAIN-DISPLAY1: 「入力面にfocusがあった状態から、別のUIへfocusが移った」印。状態機械（transitionSurface）の外に1つだけ持ち、
+  // 範囲の表示を出すかの判定にだけ使う（key router・選択の写し・reveal・pointerの貸し出しは、これまでどおりstateを見る）。
+  let rangeOtherUi = false
+  const applyEvent = (event: RangeRetentionEvent) => {
+    const next = reduceRangeRetention({ state, otherUi: rangeOtherUi }, event)
+    state = next.state
+    rangeOtherUi = next.otherUi
+    if (!isRangeDisplayState(state, rangeOtherUi)) presenter.clear()
+    // 既存の診断は、これらを`deactivate`として読む。原因は`cause`へ足す。
+    record('state', event.type === 'other-ui-focus' || event.type === 'ineligible' || event.type === 'document-changed' ? { event: 'deactivate', cause: event.type } : { event: event.type })
     options.onDisplayChange?.('geometry')
   }
+  const transition = (event: SurfaceEvent) => applyEvent(event)
   let documentAction: ReturnType<typeof createInputSurfaceDocumentAction> | null = null
   let syncVisualFocusComposition: ((composing: boolean) => void) | null = null
   const surface = createInputSurface({
@@ -108,14 +123,23 @@ export function createInputSurfaceIntegration(options: {
     onStateChange: () => { documentAction?.onSurfaceStateChange(); syncVisualFocusComposition?.(surface.isComposing()); updateRangePresentation(); options.onDisplayChange?.() },
     onDisplayChange: options.onDisplayChange,
     onBeforeInput: options.onBeforeInput,
+    // BLOCK-WARN1: 打つ前に分かった拒否を、viewごとの受け口へ渡す（表示と連打の抑制は受け手）。
+    onInputRestricted: (restriction, via) => notifyInputRestriction(view, { restriction, via }),
     record,
   })
   documentAction = createInputSurfaceDocumentAction(surface, record)
   syncVisualFocusComposition = createVisualFocusCompositionSync(editor)
   const presenter = createRangePresenter(view.dom, owner.current, record)
+  // PIS-RANGE-DISPLAY1: 範囲に入った改行の帯。表示の事実はpresenterの1つ（Highlightが登録されているか）に従い、
+  // Highlightを消す呼び出しの中で同期に消える。矩形の読み取りは、下の表示のframe（scheduleDisplay）の中で行う。
+  const bands = createRangeNewlineBands({ view, scrollHost, name: presenter.name, isShown: presenter.isShown, requestFrame: () => scheduleDisplay('bands'), record })
+  presenter.subscribe(shown => { if (shown) bands.noteRange(); else bands.clear() })
   // 予約領域にHostの範囲Highlightを塗ると、透明な入力面の下から選択色が見える。
   // すべての既存入口と、表示終了の通知で同じ同期の事実を使う。
-  const updateRangePresentation = () => presenter.update(state === 'surface-range' && !surface.isReconversionPresented())
+  // PIS-RANGE-RETAIN-DISPLAY1: 判定は`rangeRetention.ts`の1つ。focusが別のUIへ移っても（印）、PMの選択が範囲のままなら出し続ける。
+  const updateRangePresentation = () => presenter.update(shouldShowRange({
+    state, otherUi: rangeOtherUi, eligible: eligible(), range: !view.state.selection.empty, reconversionPresented: surface.isReconversionPresented(),
+  }))
   // B033: DOMの選択が入力面にある間、PMのscrollToSelectionは何もしない。印を付けたtransactionを次のrAFで代わりにrevealする。
   const reveal = createCaretReveal({
     view, surface: surface.element, isEligible: eligible, getGeneration: () => documentGeneration,
@@ -123,7 +147,7 @@ export function createInputSurfaceIntegration(options: {
   })
   let wasEligible = eligible()
   const refresh = (deferGeometry = false) => {
-    if (!eligible()) { wasEligible = false; pointer.cancel(); transition({ type: 'deactivate' }); surface.setEnabled(false); return }
+    if (!eligible()) { wasEligible = false; pointer.cancel(); applyEvent({ type: 'ineligible' }); surface.setEnabled(false); return }
     surface.setEnabled(true)
     if (!wasEligible) {
       wasEligible = true
@@ -148,7 +172,7 @@ export function createInputSurfaceIntegration(options: {
     clearRange: presenter.clear, record,
     focusHost: (reason, action) => focus.focusHost(reason, action),
   })
-  const focus = createInputSurfaceFocusIntegration({ editor, surface, isEligible: eligible, hasLease: pointer.hasLease, hostComposing: pointer.hostComposing, record })
+  const focus = createInputSurfaceFocusIntegration({ editor, surface, isEligible: eligible, isHostEligible: hostEligible, hasLease: pointer.hasLease, hostComposing: pointer.hostComposing, record })
   const router = createKeyRouter({ view, surface, currentOwner: owner.current, isEligible: eligible, transition, refresh, record, focusHost: focus.focusHost, selectAll: focus.selectAll, onNavigationIntent: options.onNavigationIntent })
   const clipboard = createInputSurfaceClipboard({
     surface, currentOwner: owner.current, isEligible: eligible,
@@ -166,13 +190,16 @@ export function createInputSurfaceIntegration(options: {
       if (focus.onHostFocus()) transition({ type: 'host-focus' })
     } else {
       pointer.cancel()
-      transition({ type: 'deactivate' })
+      // 別のUIへfocusが移った。状態はinactiveになるが、PMの選択が範囲のままなら、範囲のハイライトは残す（印）。
+      applyEvent({ type: 'other-ui-focus' })
     }
   }
   const onBlur = () => { surface.invalidateMirror(); options.onDisplayChange?.('geometry') }
   let lastTransaction: Transaction | null = null
   const onTransaction = ({ transaction, appendedTransactions }: { transaction: Transaction; appendedTransactions?: Transaction[] }) => {
     lastTransaction = transaction
+    // 範囲を表示している間のtransactionは、帯の矩形を次の表示のframeで読み直す（Docの変化・decorationだけの変化も含む）。
+    bands.invalidate()
     for (const tr of [transaction, ...(appendedTransactions ?? [])]) {
       transactions.total++
       if (tr.docChanged) transactions.docChanged++
@@ -193,14 +220,32 @@ export function createInputSurfaceIntegration(options: {
   }
   const onCreate = () => { if (eligible()) { transition({ type: 'surface-focus', range: !view.state.selection.empty }); surface.focus() } }
   const onDisplay = () => {
-    if (state === 'surface' || state === 'surface-range') { surface.place(); updateRangePresentation() }
+    const surfaceActive = state === 'surface' || state === 'surface-range'
+    // 入力面の配置は、入力面が使える状態のときだけ（印の付いたinactiveでは行わない）。範囲の表示は、印の付いたinactiveも読み直す。
+    if (surfaceActive) surface.place()
+    if (surfaceActive || rangeOtherUi) updateRangePresentation()
     options.onDisplayChange?.('geometry')
   }
-  let displayFrame = 0
-  const scheduleDisplay = () => {
+  let displayFrame = 0, displayFull = false, displayGeometry = false
+  /**
+   * 既存の1つのrAFへ合流する。'full'（scroll・refresh）は入力面の配置と範囲の表示、'geometry'（resize・font）はそれに加えて帯の矩形の読み直し、
+   * 'bands'（帯だけ）は入力面を触らない。scrollだけでは、帯の矩形を読み直さない（内容の座標なので、ブラウザが追従する）。
+   */
+  const scheduleDisplay = (kind: 'full' | 'geometry' | 'bands' = 'full') => {
+    if (kind !== 'bands') displayFull = true
+    if (kind === 'geometry') displayGeometry = true
     if (displayFrame) return
-    displayFrame = win.requestAnimationFrame(() => { displayFrame = 0; onDisplay() })
+    displayFrame = win.requestAnimationFrame(() => {
+      displayFrame = 0
+      const full = displayFull, geometry = displayGeometry
+      displayFull = displayGeometry = false
+      if (full) onDisplay()
+      if (geometry) bands.invalidate(false)
+      bands.render()
+    })
   }
+  const onScroll = () => scheduleDisplay()
+  const onGeometry = () => scheduleDisplay('geometry')
   let previousSourceMode = options.getSourceMode(), previousParagraphPlain = options.getParagraphPlain()
   const syncModes = () => {
     const sourceMode = options.getSourceMode(), paragraphPlain = options.getParagraphPlain()
@@ -217,15 +262,15 @@ export function createInputSurfaceIntegration(options: {
   editor.on('create', onCreate)
   doc.addEventListener('focusin', onFocus, true)
   surface.element.addEventListener('blur', onBlur)
-  win.addEventListener('scroll', scheduleDisplay, true)
-  win.addEventListener('resize', scheduleDisplay)
-  win.visualViewport?.addEventListener('resize', scheduleDisplay)
-  doc.fonts?.addEventListener('loadingdone', scheduleDisplay)
+  win.addEventListener('scroll', onScroll, true)
+  win.addEventListener('resize', onGeometry)
+  win.visualViewport?.addEventListener('resize', onGeometry)
+  doc.fonts?.addEventListener('loadingdone', onGeometry)
   const snapshot = (): InputSurfaceSnapshot => ({
-    state, composing: surface.isComposing(), text: surface.text(), content: surface.contentState(), failure: surface.failure(), lease: pointer.hasLease(),
+    state, rangeRetained: rangeOtherUi, composing: surface.isComposing(), text: surface.text(), content: surface.contentState(), failure: surface.failure(), lease: pointer.hasLease(),
     hostComposing: pointer.hostComposing(), identity: owner.current().identity,
     selection: { anchor: view.state.selection.anchor, head: view.state.selection.head, from: view.state.selection.from, to: view.state.selection.to },
-    transactions: { ...transactions }, highlightName: presenter.name, highlightSupported: presenter.supported, reveal: reveal.counters(),
+    transactions: { ...transactions }, highlightName: presenter.name, highlightSupported: presenter.supported, rangeNewlines: bands.counters(), reveal: reveal.counters(),
     compositionPresentation: presentation.snapshot(),
     records: records.slice(),
   })
@@ -251,7 +296,8 @@ export function createInputSurfaceIntegration(options: {
   refresh()
   return {
     sync: syncModes,
-    displayChanged: onDisplay,
+    // EditorCoreからのpaneの幾何の通知: 帯の矩形は、次の表示のframeで読み直す（同期に読まない）。
+    displayChanged: () => { onDisplay(); bands.invalidate() },
     getPseudoCaretExternalGeometrySource(): InputSurfacePseudoCaretGeometrySource | null {
       if (!isInputSurfacePseudoCaretLive({ enabled: true, eligible: eligible(), documentFocused: doc.hasFocus(),
         surfaceFocused: doc.activeElement === surface.element, connected: surface.element.isConnected,
@@ -270,7 +316,9 @@ export function createInputSurfaceIntegration(options: {
           if (!applyPlacement) return null
           win.cancelAnimationFrame(displayFrame)
           displayFrame = 0
-          return () => { applyPlacement(); updateRangePresentation() }
+          const geometry = displayGeometry
+          displayFull = displayGeometry = false
+          return () => { applyPlacement(); updateRangePresentation(); if (geometry) bands.invalidate(false); bands.render() }
         },
       }
     },
@@ -308,7 +356,7 @@ export function createInputSurfaceIntegration(options: {
       documentGeneration++
       surface.invalidateMirror()
       pointer.cancel()
-      transition({ type: 'deactivate' })
+      applyEvent({ type: 'document-changed' })
       record('document-change', { retained: surface.text() })
     },
     documentLoaded() { surface.refreshTypography(); refresh() },
@@ -322,12 +370,13 @@ export function createInputSurfaceIntegration(options: {
       editor.off('create', onCreate)
       doc.removeEventListener('focusin', onFocus, true)
       surface.element.removeEventListener('blur', onBlur)
-      win.removeEventListener('scroll', scheduleDisplay, true)
-      win.removeEventListener('resize', scheduleDisplay)
-      win.visualViewport?.removeEventListener('resize', scheduleDisplay)
-      doc.fonts?.removeEventListener('loadingdone', scheduleDisplay)
+      win.removeEventListener('scroll', onScroll, true)
+      win.removeEventListener('resize', onGeometry)
+      win.visualViewport?.removeEventListener('resize', onGeometry)
+      doc.fonts?.removeEventListener('loadingdone', onGeometry)
       if (displayFrame) win.cancelAnimationFrame(displayFrame)
       reveal.destroy()
+      bands.destroy()
       pointer.destroy()
       focus.destroy()
       router.destroy()

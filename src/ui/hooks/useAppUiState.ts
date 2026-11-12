@@ -208,6 +208,7 @@ import {
 } from "../themePresetPolicy";
 import { formatDocumentTypeNoticeMessage } from "../utils/documentTypePresentation";
 import { detectRuntimePlatform } from "../utils/platform";
+import { applyTabReorderRequest, type TabReorderRequest } from "../utils/tabReorder";
 import {
   resolveDirtyState,
   resolveDirtyStateFromDocChangeSignal,
@@ -253,6 +254,7 @@ export const EMPTY_COMMAND_AVAILABILITY: CommandAvailability = {
   isCodeBlock: false,
   canBlockDirective: false,
   blockDirectiveToken: null,
+  canReparseParagraph: false,
   canDeletePageBreak: false,
   noteAnchorContextId: null,
   touchesNoteAnchor: false,
@@ -1849,6 +1851,11 @@ export function useAppUiState({ coreRef, flushDeferredCoreUiSync, invalidateDefe
     );
   }, [setTabs]);
 
+  // EDITOR-TAB-REORDER1: drag の並べ替え。共通の setter の updater の中だけで配列を変える。
+  const reorderTab = useCallback((request: TabReorderRequest) => {
+    setTabs((prev) => applyTabReorderRequest(prev, request));
+  }, [setTabs]);
+
   const toggleWritingMode = useCallback(() => {
     const nextMode: WritingMode =
       effectiveWritingMode === "vertical-rl" ? "horizontal-tb" : "vertical-rl";
@@ -2927,6 +2934,7 @@ export function useAppUiState({ coreRef, flushDeferredCoreUiSync, invalidateDefe
     addTab,
     removeTab,
     patchTab,
+    reorderTab,
     patchActiveTab,
     markDirtyFalse,
     readTabs, readActiveTabId, documentIdentity,

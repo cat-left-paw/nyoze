@@ -559,6 +559,11 @@ export function sanitizeSettingsJson(
     );
   }
 
+  // PIS-DEFAULT-ON1: trueだけが従来の入力。fieldがあるときだけbooleanへ正規化する（不正値は新しい方式）。
+  if (Object.prototype.hasOwnProperty.call(raw, "classicInputEnabled")) {
+    out.classicInputEnabled = raw.classicInputEnabled === true;
+  }
+
   // RETIRE1: legacy keyはread-time migration inputとしてbooleanだけ通す。
   // rendererの次回writeはこのkeyを除去し、runtimeやUIの正本にはしない。
   if (typeof raw.experimentalLocalImeParagraphOverlayEnabled === "boolean") {

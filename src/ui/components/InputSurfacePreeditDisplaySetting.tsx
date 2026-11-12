@@ -1,7 +1,7 @@
 /**
- * PIS-S10-PREEDIT-DISPLAY1: 表示設定「実験的機能」の、変換中の文字の表示（押し出す / 重ねる）。
+ * PIS-S10-PREEDIT-DISPLAY1: 表示設定「入力」の、変換中の文字の表示（押し出す / 重ねる）。
  *
- * 製品の入口がPISで、長文編集モードがONのときだけ出す（出し分けは`DisplaySettingsModal`）。
+ * 新しい入力方式を使っているときだけ出す（出し分けは`InputSettingsSection`）。
  * 切り替えは次の変換から効く（入力面が`compositionstart`の時点の値で、その変換の間は固定する）。
  */
 import type { ExperimentalInputSurfacePreeditDisplay } from "../../settings/types";

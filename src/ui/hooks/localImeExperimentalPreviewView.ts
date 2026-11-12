@@ -41,6 +41,8 @@ export type LocalImeExperimentalPreviewView = {
    * Local Windowの開発用の経路はnullで、設定の画面は従来の表示（説明文・「状態」の行）のまま。
    */
   inputSurface: {
+    classicInputOn: boolean
+    onChangeClassicInput: (next: boolean) => void
     preeditDisplay: ExperimentalInputSurfacePreeditDisplay
     onChangePreeditDisplay: (next: ExperimentalInputSurfacePreeditDisplay) => void
   } | null

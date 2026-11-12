@@ -6,8 +6,9 @@ import { isModifierOnly, type SurfaceEvent } from './surfaceState'
 import type { HostFocusPermission } from './focusSafety'
 import { resolveChecklistClickPos, resolveFoldToggleHeadingPos } from '../clickRouting'
 import { FOLD_TOGGLE_CLASS } from '../../extensions/headingFold'
+import { correctCaretAtInlineAtom, isAtomClickDrag } from './pointerAtomClick'
 
-type GestureLease = { pointerId: number; identity: string; inputStarted: boolean; keepCaret: boolean }
+type GestureLease = { pointerId: number; identity: string; inputStarted: boolean; keepCaret: boolean; shift: boolean; down: { x: number; y: number } }
 
 /** PM内部APIへの依存をここへ閉じる。selectionの完了はこの同期flushだけで判断する。 */
 export function flushHostDomObserver(view: EditorView): boolean {
@@ -75,7 +76,7 @@ export function createPointerLending(options: {
       view.dispatch(view.state.tr.setSelection(selection).setMeta('addToHistory', false))
     }
     options.clearRange()
-    lease = { pointerId: event.pointerId, identity: options.currentOwner().identity, inputStarted: hostComposing || view.composing, keepCaret }
+    lease = { pointerId: event.pointerId, identity: options.currentOwner().identity, inputStarted: hostComposing || view.composing, keepCaret, shift: event.shiftKey, down: { x: event.clientX, y: event.clientY } }
     options.transition({ type: 'pointerdown' })
     if (event.shiftKey) options.focusHost('pointer-shift')
     else options.focusHost('pointer-primary', keepCaret ? () => view.focus() : () => view.dom.focus({ preventScroll: true }))
@@ -93,6 +94,11 @@ export function createPointerLending(options: {
     const inputStarted = active.inputStarted || hostComposing || view.composing || surface.isComposing()
     // Host入力中はobserver / selection / focusを入力面側から変更しない（P5）。
     const flushed = inputStarted || active.keepCaret ? true : flushHostDomObserver(view)
+    // PIS-INLINE-ATOM-NAV1: 縦中横・画像などの前後のclickの補正。Shift・drag・変換中・caretを動かさないwidgetでは何もしない。
+    if (!inputStarted && flushed && !active.keepCaret && !active.shift && !isAtomClickDrag(active.down, { x: event.clientX, y: event.clientY })) {
+      const corrected = correctCaretAtInlineAtom(view, { x: event.clientX, y: event.clientY })
+      if (corrected !== null) record('pointer-atom-correction', { to: corrected })
+    }
     options.transition({ type: 'pointerup', range: !view.state.selection.empty, inputStarted: inputStarted || !flushed })
     if (!inputStarted && flushed) {
       options.currentOwner().setPointerAffinity({ x: event.clientX, y: event.clientY })

@@ -6,10 +6,14 @@ import {
   BLANK_PAGE_MIN_COUNT,
   classifyDirectiveToken,
   formatDirectiveToken,
+  INDENT_MAX_LEVEL,
+  INDENT_MIN_LEVEL,
+  isValidIndentLevel,
   NYOZE_BLANK_PAGE_NODE_NAME,
   NYOZE_DIRECTIVE_NODE_NAME,
   NYOZE_PAGE_BREAK_NODE_NAME,
   type DirectiveDescriptor,
+  type IndentStepDirection,
 } from '../io/customBlockDirective'
 
 /**
@@ -159,6 +163,71 @@ export function applyCustomBlockDirective(
   }
   dispatch(tr.scrollIntoView())
   return true
+}
+
+/** 字下げの段数 N を表す descriptor（`indent-N`）。 */
+function indentDescriptor(level: number): DirectiveDescriptor {
+  return { kind: 'indent', name: String(level), level }
+}
+
+/** directive node の attrs から字下げの段数を読む。字下げでない・段数が不正なら null。 */
+function readIndentLevel(attrs: PMNode['attrs']): number | null {
+  if (attrs.kind !== 'indent') return null
+  const level = attrs.level ?? Number(attrs.name)
+  return isValidIndentLevel(level) ? level : null
+}
+
+/** 「字下げを 1 段増やす / 減らす」が実行する操作。使えないときは null（plan の段階で決まる）。 */
+export type IndentStepPlan =
+  | { action: 'apply'; descriptor: DirectiveDescriptor }
+  | { action: 'remove' }
+
+/**
+ * 「字下げを 1 段増やす / 減らす」の判定（純粋。dispatch しない）。一番内側の装飾だけを対象にする。
+ *
+ * - 増やす: 装飾の外なら `indent-1` で包む（`applyCustomBlockDirective` の wrap と同じ）。一番内側が字下げ N 段なら
+ *   `indent-(N+1)` へ置き換える（N が `INDENT_MAX_LEVEL` なら使えない）。字下げ以外（align・style）なら、
+ *   その装飾を `indent-1` に置き換える（直接指定の `indent-1` と同じ動き）。
+ * - 減らす: 一番内側が字下げ N 段なら `indent-(N-1)`。1 段から減らすと装飾を外して中身を残す
+ *   （`removeCustomBlockDirective` と同じ）。字下げの中でなければ使えない。
+ */
+export function planIndentStep(state: EditorState, direction: IndentStepDirection): IndentStepPlan | null {
+  const enclosing = findEnclosingDirective(state)
+  if (direction === 'increase') {
+    if (!enclosing) return { action: 'apply', descriptor: indentDescriptor(INDENT_MIN_LEVEL) }
+    const level = readIndentLevel(enclosing.node.attrs)
+    // 字下げ以外（または段数が不正な装飾）は、今の 1〜6 段の項目と同じく indent-1 へ置き換える。
+    if (level === null) return { action: 'apply', descriptor: indentDescriptor(INDENT_MIN_LEVEL) }
+    if (level >= INDENT_MAX_LEVEL) return null
+    return { action: 'apply', descriptor: indentDescriptor(level + 1) }
+  }
+  if (!enclosing) return null
+  const level = readIndentLevel(enclosing.node.attrs)
+  if (level === null) return null
+  if (level <= INDENT_MIN_LEVEL) return { action: 'remove' }
+  return { action: 'apply', descriptor: indentDescriptor(Math.min(level - 1, INDENT_MAX_LEVEL)) }
+}
+
+/** 「字下げを 1 段増やす / 減らす」を実行できるか。 */
+export function canStepCustomBlockIndent(state: EditorState, direction: IndentStepDirection): boolean {
+  return planIndentStep(state, direction) !== null
+}
+
+/**
+ * 「字下げを 1 段増やす / 減らす」。transaction 1 回（Undo 1 回で元の Doc と選択へ戻る）。選択は、既存の
+ * `applyCustomBlockDirective`（包む・置き換える）と `removeCustomBlockDirective`（外す）と同じ扱い。
+ * 使えないときは false（何も dispatch しない）。
+ */
+export function stepCustomBlockIndent(
+  state: EditorState,
+  dispatch: Dispatch | undefined,
+  direction: IndentStepDirection,
+): boolean {
+  const plan = planIndentStep(state, direction)
+  if (!plan) return false
+  return plan.action === 'remove'
+    ? removeCustomBlockDirective(state, dispatch)
+    : applyCustomBlockDirective(state, dispatch, plan.descriptor)
 }
 
 /** 現在の directive wrapper を外し、中身の block を残す。なければ false。 */
@@ -356,6 +425,7 @@ export function createCustomBlockDirectiveController(options: {
 }): {
   applyToken: (token: string) => boolean
   remove: () => boolean
+  stepIndent: (direction: IndentStepDirection) => boolean
   getToken: () => string | null
   insertPageBreak: () => boolean
   deletePageBreak: () => boolean
@@ -382,6 +452,15 @@ export function createCustomBlockDirectiveController(options: {
       if (changed) {
         editor.view.focus()
         pushLog('command', 'customBlockDirectiveRemove')
+      }
+      return changed
+    },
+    stepIndent(direction: IndentStepDirection): boolean {
+      if (getIsComposing()) return false
+      const changed = stepCustomBlockIndent(editor.state, dispatch, direction)
+      if (changed) {
+        editor.view.focus()
+        pushLog('command', `customBlockDirectiveStepIndent ${direction}`)
       }
       return changed
     },

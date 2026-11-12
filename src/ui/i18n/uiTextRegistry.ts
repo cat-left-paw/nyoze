@@ -1752,6 +1752,13 @@ export const UI_TEXT_REGISTRY = {
   'editor.clearFormat': {
     label: { ja: '書式をクリア', en: 'Clear Format' },
   },
+  // EDITOR-PARAGRAPH-REPARSE1: 段落の記法（`**太字**`・ルビ・リンクなど）を、ファイルの読み込みと同じ規則で読み直して表示に反映する。
+  'editor.paragraphReparse': {
+    label: { ja: 'この段落の記法を反映', en: 'Apply Markdown in This Paragraph' },
+  },
+  'editor.paragraphReparse.nothing': {
+    label: { ja: 'この段落には、反映する記法がありません。', en: 'Nothing to apply in this paragraph.' },
+  },
   'editor.heading': {
     label: { ja: '見出し', en: 'Heading' },
   },
@@ -1809,23 +1816,16 @@ export const UI_TEXT_REGISTRY = {
   'editor.blockDecoration.end': {
     label: { ja: '右寄せ / 地付き', en: 'End (right / bottom)' },
   },
-  'editor.blockDecoration.indent1': {
-    label: { ja: '字下げ 1', en: 'Indent 1' },
+  // BLOCK-INDENT-LEVELS1: 字下げの 1〜6 段の直接指定を、「1 段増やす / 減らす」の 2 項目に置き換えた（上限は 20 段）。
+  // `indentCurrent` は、一番内側の装飾が字下げのときだけ項目の後ろに付ける（`{level}` に今の段数）。
+  'editor.blockDecoration.indentIncrease': {
+    label: { ja: '字下げを 1 段増やす', en: 'Increase Indent by 1 Level' },
   },
-  'editor.blockDecoration.indent2': {
-    label: { ja: '字下げ 2', en: 'Indent 2' },
+  'editor.blockDecoration.indentDecrease': {
+    label: { ja: '字下げを 1 段減らす', en: 'Decrease Indent by 1 Level' },
   },
-  'editor.blockDecoration.indent3': {
-    label: { ja: '字下げ 3', en: 'Indent 3' },
-  },
-  'editor.blockDecoration.indent4': {
-    label: { ja: '字下げ 4', en: 'Indent 4' },
-  },
-  'editor.blockDecoration.indent5': {
-    label: { ja: '字下げ 5', en: 'Indent 5' },
-  },
-  'editor.blockDecoration.indent6': {
-    label: { ja: '字下げ 6', en: 'Indent 6' },
+  'editor.blockDecoration.indentCurrent': {
+    label: { ja: '（いま {level} 段）', en: ' (now level {level})' },
   },
   'editor.blockDecoration.styleLetter': {
     label: { ja: 'スタイル: 手紙', en: 'Style: Letter' },
@@ -1897,6 +1897,41 @@ export const UI_TEXT_REGISTRY = {
     label: {
       ja: '付箋のマーカーを含む範囲は削除・切り取りできません。付箋を削除するには、マーカーを右クリックしてください。',
       en: 'A range containing a sticky-note marker cannot be deleted or cut. To delete the note, right-click its marker.',
+    },
+  },
+  // EDITOR-INPUT-RULE-INLINE-NODE1: code の入力規則（`` ` ``）が、中身の inline node で変換しなかった理由。
+  'editor.inlineMarkInputRule.codeInlineNodeHint': {
+    label: {
+      ja: 'ルビ・縦中横・画像・付箋などを含む範囲は、インラインコードにできません。',
+      en: "Inline code can't contain ruby, tate-chu-yoko, images, sticky-note markers, or similar.",
+    },
+  },
+  // PIS-INPUT-BLOCK-WARN1: 長文編集モードで、確定先の位置だけで入力が拒否されると打つ前に分かった場面の警告。
+  // 直接入力は止めた（文字は入らない）。変換は止めず、確定した文字は入力欄に残る。文言は作者が承認したもの。
+  // blockのatomの直後（B15の`no-paragraph-after-block-atom`）は、本番のschemaでは到達できないので、文を持たない
+  // （`tests/pis-input-block-warn1.test.ts`の列挙が、到達できるようになったら落ちる）。
+  'editor.inputRestriction.tcy.direct': {
+    label: {
+      ja: '縦中横の中には入力できません。縦中横の外で入力してください。',
+      en: "You can't type inside tate-chu-yoko. Type outside it.",
+    },
+  },
+  'editor.inputRestriction.tcy.composition': {
+    label: {
+      ja: '縦中横の中には入力できません。確定した文字は入力欄に残ります。',
+      en: "You can't type inside tate-chu-yoko. The committed text stays in the input box.",
+    },
+  },
+  'editor.inputRestriction.noteAnchor.direct': {
+    label: {
+      ja: '付箋のマーカーを含む範囲を選んだまま入力することはできません。',
+      en: "You can't type while a range containing a sticky-note marker is selected.",
+    },
+  },
+  'editor.inputRestriction.noteAnchor.composition': {
+    label: {
+      ja: '付箋のマーカーを含む範囲を選んだまま入力することはできません。確定した文字は入力欄に残ります。',
+      en: "You can't type while a range containing a sticky-note marker is selected. The committed text stays in the input box.",
     },
   },
   'editor.noteAnchor.removeMarkerOnly': {
@@ -2679,6 +2714,27 @@ export const UI_TEXT_REGISTRY = {
       en: 'Restart Nyoze to apply this change.',
     },
   },
+  // PIS-DEFAULT-ON1: 作者・レビュー担当が承認した文言（2026-11-06、作者の判断で「従来の」を「以前の」へ）。
+  'displaySettings.section.input': { label: { ja: '入力', en: 'Input' } },
+  'displaySettings.classicInput.enabled': {
+    label: { ja: '以前の入力方式を使う', en: 'Use the previous input method' },
+    helper: {
+      ja: '入力に問題がある場合や、スクリーンリーダーなどで以前の方式が必要な場合にのみ、この設定をオンにしてください。（推奨：オフ）',
+      en: 'Turn this on only if you have input problems or need the previous method, for example when using a screen reader. (Recommended: off)',
+    },
+  },
+  'displaySettings.input.linuxUnsupported': {
+    label: {
+      ja: 'Linuxは動作保証および公式サポートの対象外です。入力に問題がある場合は、以前の入力方式をお試しください。',
+      en: 'Linux is not officially supported or guaranteed. If you have input problems, try the previous input method.',
+    },
+  },
+  'inputMethod.notice.startFailed': {
+    label: {
+      ja: '新しい入力方式を開始できませんでした。以前の入力方式で続けます。',
+      en: "Couldn't start the new input method. The previous input method stays in use.",
+    },
+  },
   // PUBLIC-ENTRY1: Local Window Experimental product entry（既定 OFF）。
   'displaySettings.section.experimental': {
     label: { ja: '実験的機能', en: 'Experimental' },
@@ -2720,8 +2776,8 @@ export const UI_TEXT_REGISTRY = {
   'displaySettings.experimentalLocalIme.preeditDisplay': {
     label: { ja: '変換中の文字の表示', en: 'Display of text being converted' },
     helper: {
-      ja: '押し出す: 入力中の文字の分だけ、後ろの本文が動きます（通常の入力に近い表示）。重ねる: 後ろの本文は動かず、入力中の文字を本文の上に重ねて表示します。',
-      en: 'Push: the following text moves to make room for the text being converted (closer to the standard input). Overlay: the following text stays in place and the text being converted is drawn over it.',
+      ja: '押し出す: 入力中の文字の分だけ、後ろの本文が動きます。重ねる: 後ろの本文は動かず、入力中の文字を本文の上に重ねて表示します。',
+      en: 'Push: the following text moves to make room for the text being converted. Overlay: the following text stays in place and the text being converted is drawn over it.',
     },
   },
   'displaySettings.experimentalLocalIme.preeditDisplay.inline': {

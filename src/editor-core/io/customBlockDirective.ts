@@ -9,7 +9,7 @@
  *
  * 対応 directive:
  *   - align-center / align-end          → kind 'align'
- *   - indent-1 .. indent-6              → kind 'indent'
+ *   - indent-1 .. indent-20             → kind 'indent'（上限は `INDENT_MAX_LEVEL`）
  *   - style-<id> (semantic style block) → kind 'style'
  *
  * `style-<id>` は汎用 semantic style block。`<id>` は保存上の semantic id で、
@@ -50,6 +50,16 @@ export const BLANK_PAGE_TOKEN_PREFIX = 'blank-page'
 export const BLANK_PAGE_MIN_COUNT = 1
 export const BLANK_PAGE_MAX_COUNT = 20
 
+/**
+ * `:::indent-N` の N の範囲（BLOCK-INDENT-LEVELS1）。上限は白紙のページの枚数の上限と同じ 20。
+ * 記法 1 つごとの上限で、入れ子の合計は制限しない（padding は足し算になる）。
+ * `indent-0`・`indent-21` 以上・先頭 0 の `indent-01` などは記法として認識せず、通常の
+ * unknown directive fallback（文字のまま温存）になる。書き出し・コマンド・メニューも、
+ * 上限の数をここ 1 か所から読む。
+ */
+export const INDENT_MIN_LEVEL = 1
+export const INDENT_MAX_LEVEL = 20
+
 /** 組み込み semantic style id。CSS で軽く表示する最低限のセット。 */
 export const BUILTIN_STYLE_IDS = ['letter', 'muted', 'heading'] as const
 
@@ -59,7 +69,7 @@ export interface DirectiveDescriptor {
   kind: DirectiveKind
   /** align: 'center' | 'end' / indent: level digit string / style: style id */
   name: string
-  /** indent のみ 1..6。それ以外は null。 */
+  /** indent のみ 1..`INDENT_MAX_LEVEL`。それ以外は null。 */
   level: number | null
 }
 
@@ -82,7 +92,8 @@ const DIRECTIVE_CLOSE_REGEX = /^:::[ \t]*$/
 /** style id: `style-[a-z0-9][a-z0-9_-]{0,31}` の id 部分。 */
 const STYLE_ID_REGEX = /^[a-z0-9][a-z0-9_-]{0,31}$/
 
-const INDENT_TOKEN_REGEX = /^indent-([1-6])$/
+/** 先頭 0 を受け付けない `1..20`（`INDENT_MIN_LEVEL..INDENT_MAX_LEVEL`。unit が範囲との一致を固定している）。 */
+const INDENT_TOKEN_REGEX = /^indent-([1-9]|1[0-9]|20)$/
 
 /** 行が directive open ならその token を返す。違えば null。 */
 export function matchDirectiveOpenLine(line: string): string | null {
@@ -102,7 +113,7 @@ export function isBuiltinStyleId(id: string): boolean {
 
 /**
  * directive token を分類する。対応外 / 無効なら null。
- * 無効例: `style-` / `style-手紙` / `indent-0` / `indent-7` / `foobar`
+ * 無効例: `style-` / `style-手紙` / `indent-0` / `indent-21` / `indent-01` / `foobar`
  */
 export function classifyDirectiveToken(token: string): DirectiveDescriptor | null {
   if (token === 'align-center') return { kind: 'align', name: 'center', level: null }
@@ -123,6 +134,39 @@ export function classifyDirectiveToken(token: string): DirectiveDescriptor | nul
   }
 
   return null
+}
+
+/** indent の段数として有効か（整数で `INDENT_MIN_LEVEL..INDENT_MAX_LEVEL`）。 */
+export function isValidIndentLevel(level: unknown): level is number {
+  return typeof level === 'number' && Number.isInteger(level) && level >= INDENT_MIN_LEVEL && level <= INDENT_MAX_LEVEL
+}
+
+export type IndentStepDirection = 'increase' | 'decrease'
+
+/** 「字下げを 1 段増やす / 減らす」の、いまの状態から決まる使える・使えない（UI へ渡す）。 */
+export interface IndentStepAvailability {
+  /** 一番内側の装飾が字下げのときの段数。字下げでなければ null。 */
+  currentLevel: number | null
+  canIncrease: boolean
+  canDecrease: boolean
+}
+
+/**
+ * 一番内側の装飾の canonical token（`availability.blockDirectiveToken`、なければ null）から、
+ * 「1 段増やす / 減らす」の使える・使えないを決める。純粋な判定で、command の `planIndentStep` と同じ規則:
+ * - 装飾の外・align・style の中: 増やすは使える（装飾の外なら `indent-1` で包み、align・style なら `indent-1` に置き換える）。減らすは使えない。
+ * - 字下げ N 段の中: 増やすは N < 20、減らすは常に使える（1 段から減らすと装飾を外して中身を残す）。
+ */
+export function resolveIndentStepAvailability(token: string | null): IndentStepAvailability {
+  const descriptor = token === null ? null : classifyDirectiveToken(token)
+  if (descriptor && descriptor.kind === 'indent' && descriptor.level !== null) {
+    return {
+      currentLevel: descriptor.level,
+      canIncrease: descriptor.level < INDENT_MAX_LEVEL,
+      canDecrease: true,
+    }
+  }
+  return { currentLevel: null, canIncrease: true, canDecrease: false }
 }
 
 /** node attrs から正規 directive token を組み立てる。serialize / renderHTML 共通。 */
@@ -177,11 +221,20 @@ export function formatBlankPageToken(count: number): string {
     : `${BLANK_PAGE_TOKEN_PREFIX}-${count}`
 }
 
-export type DirectiveSegment =
-  | { type: 'plain'; lines: string[] }
-  | { type: 'directive'; token: string; descriptor: DirectiveDescriptor; inner: string[] }
-  | { type: 'page-break' }
-  | { type: 'blank-page'; count: number }
+/**
+ * MD-SOURCE-PRESERVE1: 各 segment が元の行配列のどの範囲（`startLine` から `endLine` の手前まで）かを持つ。
+ * segment は行を欠かさず順に並べるので、範囲は先頭から隙間なく並ぶ。plain の範囲は `lines.length` と一致し、
+ * directive / page-break / blank-page は開きの行から閉じの行まで（閉じを含む）。
+ */
+export type DirectiveSegmentRange = { startLine: number; endLine: number }
+
+export type DirectiveSegment = DirectiveSegmentRange &
+  (
+    | { type: 'plain'; lines: string[] }
+    | { type: 'directive'; token: string; descriptor: DirectiveDescriptor; inner: string[] }
+    | { type: 'page-break' }
+    | { type: 'blank-page'; count: number }
+  )
 
 /**
  * top-level の行配列を「通常 chunk」と「directive block」へ分割する。
@@ -212,10 +265,12 @@ export function splitDirectiveSegments(lines: string[]): DirectiveSegment[] {
   const segments: DirectiveSegment[] = []
   const codeMask = computeFencedCodeLineMask(lines)
   let plain: string[] = []
+  // plain は常に連続した行の並び（directive の判定で必ず flush してから別の segment を足す）。
+  let plainStart = 0
 
   const flushPlain = (): void => {
     if (plain.length > 0) {
-      segments.push({ type: 'plain', lines: plain })
+      segments.push({ type: 'plain', lines: plain, startLine: plainStart, endLine: plainStart + plain.length })
       plain = []
     }
   }
@@ -235,11 +290,12 @@ export function splitDirectiveSegments(lines: string[]): DirectiveSegment[] {
         if (isPageBreakToken) {
           if (inner.length === 0) {
             flushPlain()
-            segments.push({ type: 'page-break' })
+            segments.push({ type: 'page-break', startLine: i, endLine: closeIndex + 1 })
             i = closeIndex + 1
             continue
           }
           // body あり → 安全側: directive 化せず元の行をそのまま plain として温存する。
+          if (plain.length === 0) plainStart = i
           plain.push(lines[i], ...inner, lines[closeIndex])
           i = closeIndex + 1
           continue
@@ -249,12 +305,13 @@ export function splitDirectiveSegments(lines: string[]): DirectiveSegment[] {
           const count = inner.length === 0 ? matchBlankPageToken(token) : null
           if (count !== null) {
             flushPlain()
-            segments.push({ type: 'blank-page', count })
+            segments.push({ type: 'blank-page', count, startLine: i, endLine: closeIndex + 1 })
             i = closeIndex + 1
             continue
           }
           // 範囲外・非数値の N、または body あり → 安全側: directive 化せず
           // 元の行をそのまま plain として温存する (page-break の body fallback と同じ方針)。
+          if (plain.length === 0) plainStart = i
           plain.push(lines[i], ...inner, lines[closeIndex])
           i = closeIndex + 1
           continue
@@ -266,12 +323,15 @@ export function splitDirectiveSegments(lines: string[]): DirectiveSegment[] {
           token,
           descriptor: descriptor!,
           inner,
+          startLine: i,
+          endLine: closeIndex + 1,
         })
         i = closeIndex + 1
         continue
       }
     }
 
+    if (plain.length === 0) plainStart = i
     plain.push(lines[i])
     i++
   }

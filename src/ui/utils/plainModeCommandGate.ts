@@ -120,6 +120,10 @@ export function matchesPlainBlockedEditorShortcut({
   if ((shift && !alt && key === 'X') || (shift && !alt && key === 'C')) {
     return true
   }
+  // EDITOR-PARAGRAPH-REPARSE1: この段落の記法を反映（Cmd/Ctrl+Shift+M）は editor command 扱い。
+  if (shift && !alt && (code === 'KeyM' || key === 'M' || key === 'm')) {
+    return true
+  }
   if (alt && !shift && ['0', '1', '2', '3', '4', '5', '6'].includes(key)) {
     return true
   }

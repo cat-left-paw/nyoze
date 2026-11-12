@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { getInputPath, readInputPathDiagnostics, readInputStrategyCapability } from '../../editor-core/features/inputSurface/inputPathRuntime'
+import { getActiveRubyOverlayForE2e } from '../../editor-core/features/rubyOverlay'
 import { listLocalImeDocumentActionParticipantIdsForE2e } from '../../editor-core/features/localImeDocumentActionBarrier'
 import { hasPendingSpecialInlineBoundaryInput, snapshotSpecialInlineBoundaryCompositionPendingForE2e } from "../../editor-core/extensions/specialInlineBoundarySentinel";
 import {
@@ -150,6 +151,8 @@ type UseE2eBridgeOptions = {
   /** EDITOR-TAB-HISTORY1: capsule の診断と、戻すときの post-check の失敗の注入（試験専用）。 */
   readDocumentStateDiagnosticsForE2e?: () => import('../../editor-core/features/documentStateCapsule').DocumentStateDiagnostics | null;
   injectDocumentStateRestoreFailureForE2e?: (kind: 'post-check' | null) => void;
+  /** MD-SOURCE-PRESERVE1: 元の文字列で書いた子の数・境目の確かめ・全体を今どおりに倒した理由（試験専用の読み取り）。 */
+  readSourcePreservationDiagnosticsForE2e?: () => import('../../editor-core/features/sourcePreservationController').SourcePreservationDiagnostics | null;
 };
 
 export function useE2eBridge({
@@ -180,6 +183,7 @@ export function useE2eBridge({
   getEditorSessionStatusForE2e,
   readDocumentStateDiagnosticsForE2e,
   injectDocumentStateRestoreFailureForE2e,
+  readSourcePreservationDiagnosticsForE2e,
 }: UseE2eBridgeOptions) {
   useEffect(() => {
     const bridge = window.nyozeBridge?.e2e;
@@ -218,6 +222,11 @@ export function useE2eBridge({
         routeLocalImeEditMenuCommandForE2e?.(operation) ?? null,
       runEditorUndoRedo: (operation: 'undo' | 'redo') =>
         runEditorUndoRedoForE2e?.(operation) ?? false,
+      // EDITOR-RUBY-OVERLAY-P0: 試作の層の読み取り（試験専用）。flag OFFのときは null / []。
+      rubyOverlay: {
+        diagnostics: (reset?: boolean) => getActiveRubyOverlayForE2e()?.diagnostics(reset) ?? null,
+        entries: () => getActiveRubyOverlayForE2e()?.entries() ?? [],
+      },
       // PIS-S10-ENTRY1a: 入力の方式の読み取り（試験専用。製品のport・bridgeへは載せない）。
       inputPath: {
         capability: () => ({ ...readInputStrategyCapability() }),
@@ -428,6 +437,10 @@ export function useE2eBridge({
         },
         armRestoreTabFailure: () => armRestoreTabFailureForE2e(),
       },
+      // MD-SOURCE-PRESERVE1: 試験専用の診断（保存のたびの、元の文字列で書いた子の数など）。製品の判断に使わない。
+      sourcePreservation: {
+        snapshot: () => readSourcePreservationDiagnosticsForE2e?.() ?? null,
+      },
       // Slice 0: baseline / 将来 PoC 共通の IME composition latency probe。
       // 起動されるまで listener / PerformanceObserver / rAF / timer を作らない。
       imeLatencyProbe: {
@@ -508,5 +521,6 @@ export function useE2eBridge({
     getEditorSessionStatusForE2e,
     readDocumentStateDiagnosticsForE2e,
     injectDocumentStateRestoreFailureForE2e,
+    readSourcePreservationDiagnosticsForE2e,
   ]);
 }

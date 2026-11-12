@@ -114,12 +114,42 @@ export function resolveDirtyCloseIntent(input: {
   return "window-close";
 }
 
-/** dirty dialog の button index（文字列に依存させない）。 */
-export const DIRTY_CLOSE_DIALOG_BUTTON_INDEX = {
-  cancel: 0,
-  save: 1,
-  discard: 2,
-} as const;
+/**
+ * dirty dialog の「並びでの index」の表（文字列に依存させない）。
+ *
+ * `dialog.showMessageBox` が返す `response` は `buttons` 配列の index で、その意味は
+ * **platform ごとの並び**で決まる。判定は必ず `buildDirtyCloseDialogCopy()` が返す
+ * `buttonIndex` の index で行い、ラベルの文字列では判定しない。
+ *
+ * - macOS（`darwin`）: `[保存, 破棄, キャンセル]`。
+ *   APP-DIRTY-DIALOG-FOCUS1: フルキーボードアクセスが有効だと、NSAlert はフォーカスの枠を
+ *   **最後に足したボタン**へ最初から付け、Space 1 回でそのボタンを押す。以前の並び
+ *   `[キャンセル, 保存, 破棄]` では最後が「破棄」で、Space 1 回で未保存の内容を捨てていた。
+ *   `defaultId` / `cancelId` / `type` / `textWidth` / `noLink` では枠の位置は動かない
+ *   （実機 probe で確認）ので、キャンセルを最後に置く。
+ * - それ以外: `[キャンセル, 保存, 破棄]`（従来どおり。既定・Escape ともキャンセル）。
+ */
+export type DirtyCloseDialogButtonIndex = {
+  readonly cancel: number;
+  readonly save: number;
+  readonly discard: number;
+};
+
+/** macOS 以外の並び（従来の値）。 */
+export const DIRTY_CLOSE_DIALOG_BUTTON_INDEX_STANDARD: DirtyCloseDialogButtonIndex =
+  { cancel: 0, save: 1, discard: 2 };
+
+/** macOS の並び。キャンセルが最後（フォーカスの枠が付くボタン）。 */
+export const DIRTY_CLOSE_DIALOG_BUTTON_INDEX_DARWIN: DirtyCloseDialogButtonIndex =
+  { save: 0, discard: 1, cancel: 2 };
+
+export function resolveDirtyCloseDialogButtonIndex(
+  platform: NodeJS.Platform,
+): DirtyCloseDialogButtonIndex {
+  return platform === "darwin"
+    ? DIRTY_CLOSE_DIALOG_BUTTON_INDEX_DARWIN
+    : DIRTY_CLOSE_DIALOG_BUTTON_INDEX_STANDARD;
+}
 
 export type DirtyCloseDialogCopy = {
   readonly title: string;
@@ -128,22 +158,35 @@ export type DirtyCloseDialogCopy = {
   readonly buttons: readonly string[];
   readonly defaultId: number;
   readonly cancelId: number;
+  /** `response`（`buttons` の index）から意味を決める表。判定は必ずこれで行う。 */
+  readonly buttonIndex: DirtyCloseDialogButtonIndex;
 };
 
 /**
- * intent 別の dialog 文言。
+ * intent・platform 別の dialog 文言と並び。
  *
- * `title` は intent によらず同一に保つ（既存の E2E dialog 差し替え helper と
- * main 側 dialog の識別子を安定させるため）。button の意味は index が正本で、
- * 文字列一致で判定しない。
+ * `title` は intent / platform によらず同一に保つ（既存の E2E dialog 差し替え helper と
+ * main 側 dialog の識別子を安定させるため）。button の意味は `buttonIndex` の index が
+ * 正本で、文字列一致で判定しない。
+ *
+ * - `defaultId` / `cancelId`: どの platform でもキャンセル。保存を既定にしない（少し書き込んだ
+ *   だけで保存したくない場面があるため。作者の判断）。`defaultId === cancelId` だと Electron が
+ *   Escape の割り当てで Return を上書きするので、**macOS では既定の（青い）ボタンがなく、
+ *   Return は何も起きない**。Space は最後のボタン（キャンセル）、Escape もキャンセルになる。
  */
 export function buildDirtyCloseDialogCopy(
   intent: DirtyCloseIntent,
+  platform: NodeJS.Platform,
 ): DirtyCloseDialogCopy {
-  const buttons =
+  const buttonIndex = resolveDirtyCloseDialogButtonIndex(platform);
+  const labels =
     intent === "app-quit"
-      ? ["キャンセル", "保存して終了", "破棄して終了"]
-      : ["キャンセル", "保存して閉じる", "破棄して閉じる"];
+      ? { cancel: "キャンセル", save: "保存して終了", discard: "破棄して終了" }
+      : { cancel: "キャンセル", save: "保存して閉じる", discard: "破棄して閉じる" };
+  const buttons: string[] = [];
+  buttons[buttonIndex.cancel] = labels.cancel;
+  buttons[buttonIndex.save] = labels.save;
+  buttons[buttonIndex.discard] = labels.discard;
   return {
     title: "未保存の変更があります",
     message:
@@ -152,7 +195,8 @@ export function buildDirtyCloseDialogCopy(
         : "未保存の変更があります。ウインドウを閉じますか？",
     detail: "保存していない内容は失われます。",
     buttons,
-    defaultId: DIRTY_CLOSE_DIALOG_BUTTON_INDEX.cancel,
-    cancelId: DIRTY_CLOSE_DIALOG_BUTTON_INDEX.cancel,
+    defaultId: buttonIndex.cancel,
+    cancelId: buttonIndex.cancel,
+    buttonIndex,
   };
 }

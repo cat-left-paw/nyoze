@@ -595,17 +595,33 @@ interface Window {
      * PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値。mainが正本（`electron/inputStrategyGate.ts`）。
      *
      * `productStrategy`は製品の入口（「長文編集モード（実験的）」の設定）が選ぶ方式で、
-     * **有効化ではない**。実効の方式はsettings.jsonの`experimentalLocalImeEnabled`（既定false）と
+     * **有効化ではない**。製品の実効の方式はsettings.jsonの`classicInputEnabled`（trueだけ従来方式）と
      * rendererのpureな決定関数が決める。`forced`は非packagedの開発用の強制ON（設定へ保存しない）。
-     * 設定・session操作・診断は載せない。
+     * 起動時の互換設定だけを載せ、session操作・診断は載せない。
      */
     inputStrategy?: {
       readonly productStrategy: 'input-surface' | 'local-window' | 'none'
       readonly authorPilot: boolean
       readonly forced: boolean
+      /** mainの同期読み取りによる、起動時だけの互換設定。 */
+      readonly startupClassicInputEnabled?: boolean
+    }
+    /**
+     * EDITOR-RUBY-OVERLAY-P1: ルビの読みを画面の近くの分だけ別の層へ描く。
+     * mainが正本（`electron/rubyOverlayGate.ts`）。非 packaged の切る指定（exact "0"）以外で存在する。
+     */
+    rubyOverlay?: {
+      readonly enabled: true
+      /** 読みの要素は DOM に残し、display: none にする。 */
+      readonly rt: 'hidden'
     }
   }
   __NYOZE_E2E__?: {
+    /** EDITOR-RUBY-OVERLAY-P0: 試作の層の読み取り（NYOZE_E2E only）。 */
+    rubyOverlay?: {
+      diagnostics: (reset?: boolean) => import('../src/editor-core/features/rubyOverlay').RubyOverlayDiagnostics | null;
+      entries: () => { ruby: HTMLElement; reading: HTMLElement }[];
+    };
     snapshotSpecialInlineBoundaryCompositionPendingForE2e?: () => Record<string, string>;
     setSpecialInlineBoundaryDiagEnabled?: (on: boolean) => void;
     flushSpecialInlineBoundaryDiagLogs?: () => string[];
@@ -749,6 +765,10 @@ interface Window {
       snapshot: () => import('../src/editor-core/features/documentStateCapsule').DocumentStateDiagnostics | null
       injectRestoreFailure: (kind: 'post-check' | null) => void
       armRestoreTabFailure: () => boolean
+    }
+    /** MD-SOURCE-PRESERVE1: 元の文字列で書いた子の数・境目の確かめ・全体を今どおりに倒した理由（試験専用）。 */
+    sourcePreservation?: {
+      snapshot: () => import('../src/editor-core/features/sourcePreservationController').SourcePreservationDiagnostics | null
     }
     macosArrowScrollClampE2eEvaluate?: (payload: {
       gate: import('../src/editor-core/features/macosArrowScrollClamp').MacosArrowScrollClampGateInput

@@ -8,6 +8,7 @@ import { resolveSupportedEditorWritingMode, type SupportedEditorWritingMode } fr
 import { characterSelection } from './characterNavigation'
 import { blockCenter, copyRect, inlineStart, readCaretRect } from './caretGeometry'
 import { projectAllSelectionToText } from './allSelectionProjection'
+import { keepPositionOutsideInlineAtom } from './inlineAtomNavigation'
 import { createLineGeometry } from './lineGeometry'
 import { documentEdge, extendDirectionalEdge, navigationAnchor, nextGoal, rangeLineOrigin, retainLineGoal, stopAtAnchor, type NavigationAffinity, type NavigationOp, type NavigationReceipt } from './rules'
 import { revealCaret } from './scroll'
@@ -140,9 +141,17 @@ export function createNavigation(view: EditorView, deferReveal?: (reveal: () => 
         const origin = before.empty ? before.head : forward ? before.to : before.from
         const visualEdge = (direction: 'home' | 'end', block: { start: number; end: number }) => {
           const ruby = resolveRubyAwareVisualLineEdge(view, direction, block.start, block.end)
-          if (ruby !== null) return ruby
           const current = g.locate(origin, originAffinity)
-          return current ? g.position(current.line, 0, direction)?.pos ?? null : null
+          const geometric = () => current ? g.position(current.line, 0, direction)?.pos ?? null : null
+          if (ruby !== null) {
+            const outside = keepPositionOutsideInlineAtom(doc, ruby, direction === 'end')
+            // Rubyを起点にした端は、位置ごとの座標を走査するので、行にatomがあると、atomの手前・内側で止まる。
+            // その行にatomがあるときだけ、字・atomの前後から作った端のうち、より端に近い方を採る。
+            if (!current || !g.lineHasAtoms(current.line)) return outside
+            const edge = geometric()
+            return edge === null ? outside : direction === 'home' ? Math.min(outside, edge) : Math.max(outside, edge)
+          }
+          return geometric()
         }
         if (op.visualOnly) {
           const block = g.blockAt(origin), target = block && visualEdge(forward ? 'end' : 'home', block)

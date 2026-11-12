@@ -1,4 +1,4 @@
-import type { Node as PMNode, Mark } from '@tiptap/pm/model'
+import { Fragment, Mark, type Node as PMNode } from '@tiptap/pm/model'
 import type { LineBreakPolicy, MarkdownDocumentOptions } from '../types'
 import { supportsPreservedEmptyParagraphBoundary } from './emptyParagraphPreservation'
 import {
@@ -7,14 +7,30 @@ import {
   escapeMarkdownTitle,
   escapeMarkdownUrlDestination,
 } from './markdownEscaping'
+import { hasUnspelledBackslash } from './markdownBackslashEligibility'
+import { MarkdownSaveInlineWriter, SAVE_BRACKET_ESCAPES, markdownSaveAlt, markdownSaveDestination, markdownSaveTitle } from './markdownSaveEscaping'
 import { encodeAozoraInlineNode } from './clipboardSlicePlainText'
-import { parseMarkdown } from './parseMarkdown'
 import {
-  blockMayNeedSyntaxEscape,
-  escapeHeadingClosingSequence,
-  escapeStarAndUnderscore,
-  escapeSyntaxText,
-} from './markdownSyntaxEscaping'
+  analyzeInlineMarks,
+  formatCodeSpan,
+  hasInlineMarks,
+  planInlineMarks,
+  type InlineMarkItem,
+  type InlineMarkLayoutStyle,
+  type InlineMarkPlan,
+  type InlineMarkStripMode,
+  type InlineMarkTraits,
+  type PlannedSegment,
+} from './inlineMarkLayout'
+import { isReferenceDefinitionLineText, isSelfContainedObsidianLine, parseMarkdown } from './parseMarkdown'
+import {
+  classifyObsidianSeparator,
+  resolveObsidianSeparator,
+  serializeWithSource,
+  type SegmentKind,
+  type SourcePreservationInput,
+} from './sourcePreservation'
+import { decodeSourceSpelling, SOURCE_SPELLING_MARK_NAME, writeSourceSpelling } from './sourceSpelling'
 import { formatNoteAnchorComment } from './noteAnchor'
 import {
   formatBlankPageToken,
@@ -34,112 +50,41 @@ import {
  * - atom nodes (html_inline_atom, html_block_atom) emit attrs.raw verbatim.
  * - Known nodes/marks use standard Markdown syntax.
  * - Priority: lossless round-trip over canonical formatting.
- * - ESCAPE1: 本文の記号は、S0 を開き直して元の block と一致しないとき `\` でエスケープする
- *   （`serializeTopLevelBlock`。S1 が一致しなくても使う。見える文字の `\` が増えるときだけ S0）。
+ * - MD-ESCAPE-EXPLICIT1: 記号にエスケープを足さない。見える `\` は必要なときだけ `\\` と書く（MD-ESCAPE-BACKSLASH1）。ファイルにあった
+ *   `\*` や `&amp;` は `sourceSpelling` mark が覚えていて、その文字を元の綴りで書く（`formatInlineSegment`）。
+ * - INLINE-MARK1: 段落・見出しの装飾の入れ子と端の空白は `inlineMarkLayout.ts` が決める。
+ *   端の空白から太字・斜体・取り消し線を外した block（N1 の後）と、各候補を読み直した block を比べる。
  */
 
-// Mark nesting priority (lower = outermost in Markdown)
-const MARK_PRIORITY: Record<string, number> = {
-  link: 0,
-  bold: 1,
-  italic: 2,
-  strike: 3,
-  highlight: 4,
-  underline: 5,
-  code: 6,
-}
-
-function markPriority(mark: Mark): number {
-  return MARK_PRIORITY[mark.type.name] ?? 99
-}
-
-/**
- * ESCAPE2 追記1: S0 も S1 も元の block と一致しなかったときの選び方。
- * 試験が実行中の回数を読む。製品の保存結果には影響しない。
- */
-export interface SyntaxEscapeFallbackStats {
-  /** 読み直した S1 の見える `\` が元より多く、S0 を選んだ block。 */
-  safetyPlain: number
-  /** 一致しないまま S1 を選んだ block。 */
-  unmatchedEscaped: number
-}
-
-const syntaxEscapeFallbackStats: SyntaxEscapeFallbackStats = { safetyPlain: 0, unmatchedEscaped: 0 }
-
-export function resetSyntaxEscapeFallbackStats(): void {
-  syntaxEscapeFallbackStats.safetyPlain = 0
-  syntaxEscapeFallbackStats.unmatchedEscaped = 0
-}
-
-export function readSyntaxEscapeFallbackStats(): SyntaxEscapeFallbackStats {
-  return { safetyPlain: syntaxEscapeFallbackStats.safetyPlain, unmatchedEscaped: syntaxEscapeFallbackStats.unmatchedEscaped }
-}
-
-/** 本文として見える文字（text、Ruby の読み、画像の alt と title）に含まれる `\` の数。 */
-function visibleBackslashCount(node: PMNode): number {
-  let count = 0
-  const add = (value: unknown): void => {
-    if (typeof value !== 'string') return
-    for (let i = 0; i < value.length; i += 1) {
-      if (value.charCodeAt(i) === 92) count += 1
-    }
-  }
-  const visit = (current: PMNode): void => {
-    current.forEach((child) => {
-      if (child.isText) add(child.text)
-      if (child.type.name === 'aozoraRuby') add(child.attrs.ruby)
-      if (child.type.name === 'nyoze_image') {
-        add(child.attrs.alt)
-        add(child.attrs.title)
-      }
-      if (child.childCount > 0) visit(child)
-    })
-  }
-  visit(node)
-  return count
-}
-
-function sortMarks(marks: Mark[]): Mark[] {
-  return marks.sort((a, b) => markPriority(a) - markPriority(b))
-}
-
-function openDelim(mark: Mark): string {
-  switch (mark.type.name) {
+function openDelim(name: string): string {
+  switch (name) {
     case 'bold': return '**'
     case 'italic': return '*'
     case 'strike': return '~~'
     case 'highlight': return '=='
     case 'underline': return '||'
-    case 'code': return '`'
     case 'link': return '['
     default: return ''
   }
 }
 
-function closeDelim(mark: Mark): string {
-  switch (mark.type.name) {
+function closeDelim(name: string, link: Mark | null, protectBackslashes: boolean): string {
+  switch (name) {
     case 'bold': return '**'
     case 'italic': return '*'
     case 'strike': return '~~'
     case 'highlight': return '=='
     case 'underline': return '||'
-    case 'code': return '`'
     case 'link': {
-      const href = (mark.attrs.href as string) ?? ''
-      const title = mark.attrs.title as string | undefined
-      const safeHref = escapeMarkdownUrlDestination(href)
-      if (title) return `](${safeHref} "${escapeMarkdownTitle(title)}")`
+      if (link === null) return ']'
+      const href = (link.attrs.href as string) ?? ''
+      const title = link.attrs.title as string | undefined
+      const safeHref = protectBackslashes ? markdownSaveDestination(href, Boolean(title)) : escapeMarkdownUrlDestination(href)
+      if (title) return `](${safeHref} ${protectBackslashes ? markdownSaveTitle(title) : `"${escapeMarkdownTitle(title)}"`})`
       return `](${safeHref})`
     }
     default: return ''
   }
-}
-
-function hasLinkMark(marks: Mark[]): boolean {
-  for (const mark of marks) {
-    if (mark.type.name === 'link') return true
-  }
-  return false
 }
 
 /**
@@ -153,8 +98,23 @@ function hasLinkMark(marks: Mark[]): boolean {
  */
 function resolveInlineNodeMarks(node: PMNode): Mark[] {
   const nodeMarks = [...node.marks]
+  const commonChildMarks = commonTextChildMarks(node)
 
-  // Collect marks common to ALL text children
+  // Merge: node-level marks + child-common marks (deduplicated)
+  if (commonChildMarks.length === 0) return nodeMarks
+  if (nodeMarks.length === 0) return commonChildMarks
+
+  const merged = [...nodeMarks]
+  for (const cm of commonChildMarks) {
+    if (!merged.some((m) => m.eq(cm))) {
+      merged.push(cm)
+    }
+  }
+  return merged
+}
+
+/** Marks common to ALL text children of an inline node (none if any child is not text). */
+function commonTextChildMarks(node: PMNode): Mark[] {
   let childCommon: Mark[] | null = null
   if (node.childCount > 0) {
     node.forEach((child) => {
@@ -170,29 +130,105 @@ function resolveInlineNodeMarks(node: PMNode): Mark[] {
       }
     })
   }
-  const commonChildMarks = childCommon ?? []
+  return childCommon ?? []
+}
 
-  // Merge: node-level marks + child-common marks (deduplicated)
-  if (commonChildMarks.length === 0) return nodeMarks
-  if (nodeMarks.length === 0) return commonChildMarks
-
-  const merged = [...nodeMarks]
-  for (const cm of commonChildMarks) {
-    if (!merged.some((m) => m.eq(cm))) {
-      merged.push(cm)
-    }
-  }
-  return merged
+/**
+ * INLINE-MARK1: 読み直した block で期待する、ルビ・縦中横の mark の置き場。
+ * ルビ・縦中横を読み込むと、mark は node に付き、中の text には付かない。ツールバーで付けた mark は
+ * 中の text に付く（書き出しは node の mark と、中の text すべてに共通の mark を同じに扱う。
+ * `resolveInlineNodeMarks`）ので、中の text に共通の mark を node へ移した node を返す。
+ * 共通の mark が無ければ、同じ node をそのまま返す。N1 と同じ、開き直した形への正規化で、出力の文字列は変えない。
+ */
+function moveCommonChildMarksToNode(node: PMNode): PMNode {
+  const common = commonTextChildMarks(node)
+  if (common.length === 0) return node
+  const children: PMNode[] = []
+  node.forEach((child) => {
+    let marks = child.marks
+    for (const mark of common) marks = mark.removeFromSet(marks)
+    children.push(child.mark(marks))
+  })
+  return node.type.create(
+    node.attrs,
+    Fragment.fromArray(children),
+    common.reduce<readonly Mark[]>((set, mark) => mark.addToSet(set), node.marks),
+  )
 }
 
 export function serializeMarkdown(
   doc: PMNode,
   lineBreakPolicy: LineBreakPolicy = 'commonmark-strict',
   options?: MarkdownDocumentOptions,
+  sourcePreservation?: SourcePreservationInput,
 ): string {
+  // MD-SOURCE-PRESERVE1: 編集していないブロックは、読み込んだときの元の文字列のまま書く。入口を渡さない呼び出し
+  // （段落プレーン編集の入力欄・Local Window の recovery の書き出し・HTML の書き出しなど）は、今と同じ。
+  // 対応がとれない・設定が違う・境目の確かめが合わない・例外のときは null で、下の今どおりの書き出しへ倒す。
+  if (sourcePreservation && lineBreakPolicy === 'obsidian-paragraph') {
+    const preserved = serializePreservingSource(doc, options, sourcePreservation)
+    if (preserved !== null) return preserved
+  }
   const serializer = new MarkdownWriter(lineBreakPolicy, options)
   serializer.serializeDoc(doc)
   return serializer.getOutput()
+}
+
+/** 文書直下の子の、装飾の segment 上の種類（`splitDirectiveSegments` の結果と並べて比べる）。 */
+function classifyChildSegmentKind(child: PMNode): SegmentKind {
+  switch (child.type.name) {
+    case NYOZE_DIRECTIVE_NODE_NAME:
+      return {
+        type: 'directive',
+        token: formatDirectiveToken({
+          kind: child.attrs.kind,
+          name: child.attrs.name,
+          level: child.attrs.level,
+        } as DirectiveAttrs),
+      }
+    case NYOZE_PAGE_BREAK_NODE_NAME:
+      return { type: 'page-break' }
+    case NYOZE_BLANK_PAGE_NODE_NAME:
+      return { type: 'blank-page', count: (child.attrs.count as number) ?? 1 }
+    default:
+      return { type: 'plain' }
+  }
+}
+
+function serializePreservingSource(
+  doc: PMNode,
+  options: MarkdownDocumentOptions | undefined,
+  input: SourcePreservationInput,
+): string | null {
+  const children: PMNode[] = []
+  doc.forEach((child) => {
+    children.push(child)
+  })
+  return serializeWithSource({
+    children,
+    input,
+    settings: { enableRuby: input.enableRuby, preserveEmptyParagraphs: options?.preserveEmptyParagraphs === true },
+    ports: {
+      renderChild: (child) => new MarkdownWriter('obsidian-paragraph', options).renderTopLevelBlockText(child),
+      parseChildren: (text, settings) => {
+        try {
+          const parsed = parseMarkdown(doc.type.schema, text, 'obsidian-paragraph', {
+            enableRuby: settings.enableRuby,
+            preserveEmptyParagraphs: settings.preserveEmptyParagraphs,
+          })
+          const parsedChildren: PMNode[] = []
+          parsed.forEach((child) => {
+            parsedChildren.push(child)
+          })
+          return parsedChildren
+        } catch {
+          return null
+        }
+      },
+      classifyChild: classifyChildSegmentKind,
+      isSelfContainedLine: isSelfContainedObsidianLine,
+    },
+  })
 }
 
 /**
@@ -204,20 +240,170 @@ function startsWithNoteAnchor(node: PMNode): boolean {
   return node.type.name === 'paragraph' && node.firstChild?.type.name === 'noteAnchor'
 }
 
-/** 書き出し済みの `result` に続けて書く文字が、行頭（行頭の空白の後）に来るか。 */
-function isAtLineStart(result: string, startsAtLineStart: boolean): boolean {
-  const newline = result.lastIndexOf('\n')
-  if (newline === -1 && !startsAtLineStart) return false
-  const tail = newline === -1 ? result : result.slice(newline + 1)
-  return /^[ \t]*$/.test(tail)
+/**
+ * ルビ・縦中横の符号化した文字。text と、装飾を閉じて区切る inline node（画像・付箋・inline HTML・
+ * hardBreak）は符号化しないので null。1つの inline に1回だけ呼ぶ。
+ */
+function encodeInlineChild(child: PMNode): string | null {
+  if (child.isText || INLINE_SEPARATOR_TYPE_NAMES.has(child.type.name)) return null
+  return encodeAozoraInlineNode(child)
+}
+
+const INLINE_SEPARATOR_TYPE_NAMES: ReadonlySet<string> = new Set(['nyoze_image', 'noteAnchor', 'html_inline_atom', 'hardBreak'])
+
+/** INLINE-MARK1: 1回の書き出し（確かめ用の書き出しを含む）の、N1 の記録。入れ子の writer と共有する。 */
+interface InlineLayoutContext {
+  /** 読み直した形（N1 で端の空白から mark を外す・ルビ / 縦中横の mark を node へ移す）にした textblock → その textblock。 */
+  adjusted: Map<PMNode, PMNode>
+  /** N1 で端の空白から mark を外した textblock があったか（ルビ / 縦中横の mark を移しただけでは立てない）。 */
+  stripped: boolean
+}
+
+/** block の書き方（直下の block の確かめで決まる）。 */
+interface BlockMode {
+  stripMode: InlineMarkStripMode
+  layoutStyle: InlineMarkLayoutStyle
+}
+
+/** `chooseBlockMode` の結果。`exact` は、読み直して（N1 の後の）block と一致することを確かめた書き方。 */
+interface BlockChoice {
+  mode: BlockMode
+  exact: boolean
+}
+
+interface Candidate {
+  mode: BlockMode
+  block: RenderedBlock
+}
+
+/**
+ * 見える文字（空白を除く）と inline node（種類・属性）の並び。読み直して装飾が違っても、文字や node が
+ * 増えたり減ったりしていないかを比べる。block の種類も並べる。空白を除くのは、行末の空白のように、
+ * 装飾に関わらず Markdown が読み直しで落とす空白を、文字が壊れたことにしないため。
+ */
+function contentSignature(node: PMNode): string {
+  let signature = ''
+  node.descendants((child) => {
+    if (child.isText) signature += (child.text ?? '').replace(/[\t\n\f\r\p{Zs}]/gu, '')
+    else if (child.isInline) signature += `\u0001${child.type.name}${JSON.stringify(child.attrs)}\u0001`
+    else signature += `\u0002${child.type.name}\u0002`
+    return true
+  })
+  return signature
+}
+
+/**
+ * 確かめ用に書いた block。`node` は、読み直すとなる形（N1 で端の空白から mark を外し、ルビ・縦中横の
+ * 中の text の mark を node へ移した）の block。`stripped` は、N1 で mark を外したか。
+ */
+interface RenderedBlock {
+  text: string
+  node: PMNode
+  stripped: boolean
+}
+
+/** 記録された textblock の置き換えを、block の木へ当てる。置き換えが無ければ同じ node を返す。 */
+function applyInlineAdjustments(node: PMNode, adjusted: ReadonlyMap<PMNode, PMNode>): PMNode {
+  if (adjusted.size === 0) return node
+  const direct = adjusted.get(node)
+  if (direct !== undefined) return direct
+  if (node.isLeaf || node.isTextblock) return node
+  const children: PMNode[] = []
+  let changed = false
+  node.forEach((child) => {
+    const next = applyInlineAdjustments(child, adjusted)
+    if (next !== child) changed = true
+    children.push(next)
+  })
+  return changed ? node.copy(Fragment.fromArray(children)) : node
+}
+
+/**
+ * block を書いて読み直したときに期待する block の列（の候補）。ふつうは block 1つ。
+ * `obsidian-paragraph` の段落は、中の hardBreak が保存で改行になり、開き直すとその位置で段落が
+ * 分かれる（既存の正規化）ので、hardBreak の位置で分けた段落の列も候補にする。分けた段落が空に
+ * なる（hardBreak が続く・段落の先頭や末尾にある）ときは、分けた列は作れない（候補にしない）。
+ * 分けない block 1つも候補に残すのは、`|` で始まる行が続く段落が、開き直しても分かれずに
+ * hardBreak のまま戻るため（`MD-ROUNDTRIP-CHUNK1`）。
+ * `commonmark-strict`、見出し・引用・リストなどは、block 1つだけ。
+ */
+function expectedBlockCandidates(node: PMNode, policy: LineBreakPolicy): PMNode[][] {
+  if (policy !== 'obsidian-paragraph' || node.type.name !== 'paragraph') return [[node]]
+  let hasHardBreak = false
+  node.forEach((child) => {
+    if (child.type.name === 'hardBreak') hasHardBreak = true
+  })
+  if (!hasHardBreak) return [[node]]
+  const pieces: PMNode[] = []
+  let line: PMNode[] = []
+  let empty = false
+  const flushLine = (): void => {
+    if (line.length === 0) empty = true
+    else pieces.push(node.copy(Fragment.fromArray(line)))
+    line = []
+  }
+  node.forEach((child) => {
+    if (child.type.name === 'hardBreak') flushLine()
+    else line.push(child)
+  })
+  flushLine()
+  return empty ? [[node]] : [[node], pieces]
+}
+
+/** 新しい綴り `\\` を読むと付く表示に出ない印を、eq の前だけ外す。本文・保存するrawは変えない。 */
+function normalizeReadBackslashSpelling(node: PMNode): PMNode {
+  if (node.isText) {
+    const marks = node.marks.filter((mark) => mark.type.name !== SOURCE_SPELLING_MARK_NAME || decodeSourceSpelling(mark.attrs.raw) !== '\\')
+    return marks.length === node.marks.length ? node : node.mark(marks)
+  }
+  let changed = false
+  const children: PMNode[] = []
+  node.forEach((child) => {
+    const normalized = normalizeReadBackslashSpelling(child)
+    changed ||= normalized !== child
+    children.push(normalized)
+  })
+  return changed ? node.copy(Fragment.fromArray(children)) : node
+}
+
+/** 読み直した文書の block の列が、期待する列のどれかと1つずつ `eq` で一致するか。 */
+function docMatchesBlocks(doc: PMNode | null, candidates: readonly (readonly PMNode[])[]): boolean {
+  if (doc === null) return false
+  return candidates.some((expected) => {
+    if (doc.childCount !== expected.length) return false
+    for (let i = 0; i < expected.length; i += 1) {
+      if (!normalizeReadBackslashSpelling(doc.child(i)).eq(normalizeReadBackslashSpelling(expected[i]))) return false
+    }
+    return true
+  })
+}
+
+/** 読み直した文書の block の列が、期待する列のどれかと同じ数で、1つずつ `contentSignature` が一致するか。 */
+function docMatchesSignatures(doc: PMNode | null, candidates: readonly (readonly string[])[]): boolean {
+  if (doc === null) return false
+  return candidates.some((signatures) => {
+    if (doc.childCount !== signatures.length) return false
+    for (let i = 0; i < signatures.length; i += 1) {
+      if (contentSignature(doc.child(i)) !== signatures[i]) return false
+    }
+    return true
+  })
 }
 
 class MarkdownWriter {
   private output = ''
   private blockSeparatorNeeded = false
   private lastDocBlockType: string | null = null
-  /** ESCAPE1: 本文の記号に `\` を足す（S1）。直下の block の確かめで決まる。 */
-  private escapeSyntax = false
+  /** INLINE-MARK1: 端の空白から太字・斜体・取り消し線を外す範囲。直下の block の確かめで決まる。 */
+  private stripMode: InlineMarkStripMode = 'all'
+  /** INLINE-MARK1: 装飾の配置の style。直下の block の確かめで決まる。 */
+  private layoutStyle: InlineMarkLayoutStyle = 'keep-open'
+  /** INLINE-MARK1: 入れ子の writer と共有する、N1 の記録。 */
+  private layoutContext: InlineLayoutContext = { adjusted: new Map(), stripped: false }
+  private protectBackslashes = true
+  private decideBackslashes = true
+  /** 実際に出した綴りが旧方式と異なるか。入れ子のwriterと共有し、試行用writerとは共有しない。 */
+  private backslashContext = { changed: false }
 
   constructor(
     private readonly lineBreakPolicy: LineBreakPolicy,
@@ -266,61 +452,164 @@ class MarkdownWriter {
   }
 
   /**
-   * ESCAPE1（A4）/ ESCAPE2 追記1: 文書の直下（と directive の内側）の block を1つ書く。
-   *
-   * 1. いまと同じ形（`\` なし）の S0 を作る。記法になり得る文字が無ければ、そのまま使う。
-   * 2. S0 を同じ改行モードで読み直し、block が元の node と `eq` で一致すれば S0。
-   * 3. 一致しなければ S1（`\` を入れた形）。S1 が一致すれば S1。
-   * 4. S1 も一致しなければ S1。ただし、S1 を読み直した文書の見える文字（text、Ruby の
-   *    親文字と読み、TCY、画像の alt と title）に含まれる `\` の数が元の block より多い
-   *    ときは S0（`\` が文字として残る場所では足さない）。
-   *
-   * S0・S1 は block だけを書く使い捨ての writer で作り、確かめの後に本番の出力へ
-   * 選んだ形で書く（長い出力の文字列を切り出さない）。
+   * MD-SOURCE-PRESERVE1: 文書直下の block を1つ、空の出力・区切りなしで今の書き方で書いた文字列。
+   * `obsidian-paragraph` の block の書き方は前の出力に依らないので、列の中で書いた文字列と同じ。
    */
-  private serializeTopLevelBlock(child: PMNode): void {
-    if (
-      this.escapeSyntax ||
-      child.type.name === NYOZE_DIRECTIVE_NODE_NAME ||
-      !blockMayNeedSyntaxEscape(child)
-    ) {
-      this.serializeBlock(child, '')
-      return
-    }
-    const plain = this.renderStandalone(child, false)
-    const escaped = this.renderStandalone(child, true)
-    this.escapeSyntax = this.shouldUseEscapedSyntax(plain, escaped, child)
-    try {
-      this.serializeBlock(child, '')
-    } finally {
-      this.escapeSyntax = false
-    }
+  renderTopLevelBlockText(child: PMNode): string {
+    this.serializeTopLevelBlock(child)
+    return this.output
   }
 
   /**
-   * S0 が元の block と一致すれば false。一致せず S1 が一致すれば true。
-   * どちらも一致しなければ true。S1 を読み直した見える文字の `\` が元より多いときだけ false。
+   * INLINE-MARK1 / MD-ESCAPE-EXPLICIT1: 文書の直下（と directive の内側）の block を1つ書く。
+   *
+   * 記号には `\` を足さない。見える `\` は後続の出力で保護する（綴りのある文字は `sourceSpelling` mark が元の綴りで書く）。装飾（太字など）が
+   * 重なる block だけ、書き方の候補（端の全角スペースなどを外さずに書くか、続いている装飾を閉じない配置か
+   * 変更前の配置か）を読み直して選ぶ。候補の文字列が1つだけなら確かめずにそれを使い、2つ以上なら、保つものが
+   * 多い順（`chooseBlockMode`）に読み直して、最初に一致したものを使う。
+   *
+   * 候補は block だけを書く使い捨ての writer で作り、確かめの後に本番の出力へ
+   * 選んだ形で書く（長い出力の文字列を切り出さない）。
    */
-  private shouldUseEscapedSyntax(plain: string, escaped: string, node: PMNode): boolean {
-    if (escaped === plain) return false
-    if (this.roundTrips(plain, node)) return false
-    const escapedDoc = this.parseSerialized(escaped, node)
-    if (escapedDoc !== null && escapedDoc.childCount === 1 && escapedDoc.child(0).eq(node)) return true
-    const escapedBackslashes = escapedDoc === null ? 0 : visibleBackslashCount(escapedDoc)
-    if (escapedDoc !== null && escapedBackslashes > visibleBackslashCount(node)) {
-      syntaxEscapeFallbackStats.safetyPlain += 1
-      return false
+  private serializeTopLevelBlock(child: PMNode): void {
+    if (!this.decideBackslashes || !hasUnspelledBackslash(child)) {
+      const normalized = this.serializeTopLevelBlockLayout(child)
+      if (normalized !== child) this.layoutContext.adjusted.set(child, normalized)
+      return
     }
-    syntaxEscapeFallbackStats.unmatchedEscaped += 1
-    return true
+    const protectedBlock = this.renderBackslashCandidate(child, true)
+    let text = protectedBlock.text
+    // 旧方式と変わる綴りを実際に出したblockだけを読み直す。英字の前の本文の \ 等はここに入らない。
+    if (protectedBlock.changed) {
+      const original = this.renderBackslashCandidate(child, false)
+      if (text !== original.text) {
+        const expected = expectedBlockCandidates(protectedBlock.node, this.lineBreakPolicy)
+        if (!docMatchesBlocks(this.parseSerialized(text, child), expected) &&
+          docMatchesBlocks(this.parseSerialized(original.text, child), expected)) {
+          text = original.text
+        }
+      }
+    }
+    this.ensureBlockSeparator()
+    this.output += text
+    if (protectedBlock.node !== child) this.layoutContext.adjusted.set(child, protectedBlock.node)
+    this.layoutContext.stripped ||= protectedBlock.stripped
   }
 
-  /** block 1つだけを、空の出力・separator なしの writer で書く（確かめ用）。 */
-  private renderStandalone(node: PMNode, escapeSyntax: boolean): string {
+  /** 直下のblockの、N1と配置の選択を含む1つの候補。内部では綴りの選択を再帰させない。 */
+  private renderBackslashCandidate(node: PMNode, protect: boolean): RenderedBlock & { changed: boolean } {
     const writer = new MarkdownWriter(this.lineBreakPolicy, this.options)
-    writer.escapeSyntax = escapeSyntax
+    writer.protectBackslashes = protect
+    writer.decideBackslashes = false
+    const normalized = writer.serializeTopLevelBlockLayout(node)
+    return {
+      text: writer.output,
+      node: applyInlineAdjustments(normalized, writer.layoutContext.adjusted),
+      stripped: writer.layoutContext.stripped,
+      changed: writer.backslashContext.changed,
+    }
+  }
+
+  private serializeTopLevelBlockLayout(child: PMNode): PMNode {
+    if (child.type.name === NYOZE_DIRECTIVE_NODE_NAME) {
+      this.serializeBlock(child, '')
+      return applyInlineAdjustments(child, this.layoutContext.adjusted)
+    }
+    const traits = analyzeInlineMarks(child)
+    if (!traits.layeredMarks) {
+      this.serializeBlock(child, '')
+      return applyInlineAdjustments(child, this.layoutContext.adjusted)
+    }
+    let block = child
+    let choice = this.chooseBlockMode(block, traits)
+    // 端の空白から mark を外す書き方で一致を確かめたときは、外した後の block（読み直すとその形に戻る）を
+    // 改めて同じ手順で選び直して書く。2回目の保存（読み直した block）が同じ文字列になる。
+    for (let pass = 0; pass < 4 && choice.exact; pass += 1) {
+      const rendered = this.renderStandalone(block, choice.mode)
+      if (rendered.node === block) break
+      block = rendered.node
+      choice = this.chooseBlockMode(block, analyzeInlineMarks(block))
+    }
+    const mode = choice.mode
+    const previous = { strip: this.stripMode, style: this.layoutStyle }
+    this.stripMode = mode.stripMode
+    this.layoutStyle = mode.layoutStyle
+    try {
+      this.serializeBlock(block, '')
+    } finally {
+      this.stripMode = previous.strip
+      this.layoutStyle = previous.style
+    }
+    return applyInlineAdjustments(block, this.layoutContext.adjusted)
+  }
+
+  /**
+   * block の書き方を確かめて決める。候補は、次の組み合わせ（同じ文字列は先のものだけ）。
+   * - 端の空白から mark を外す範囲: 全角スペースなどは外さない → 外す（端に全角スペースなどがあるときだけ）
+   * - 装飾の配置: 続いている装飾を閉じない → 変更前の配置（装飾が重なるときだけ）
+   * 候補が1つで mark を外していなければ、確かめずにそれを使う。そうでなければ読み直して、
+   * 1. 元の block と一致する候補（mark を外さない候補 → 外した候補の順）、
+   * 2. 見える文字と inline node が保たれる候補（最後に変更前と同じ書き方も試す）、
+   * 3. どれもなければ、変更前と同じ書き方
+   * の順に使う。変更前に往復できた場面は、変更前と同じ文字列が 1. の候補に入るので壊れない。
+   */
+  private chooseBlockMode(child: PMNode, traits: InlineMarkTraits): BlockChoice {
+    const strips: InlineMarkStripMode[] = traits.softWhitespaceInMarkedText ? ['hard', 'all'] : ['all']
+    const styles: InlineMarkLayoutStyle[] = traits.styleMayDiffer ? ['keep-open', 'legacy'] : ['keep-open']
+    const candidates: Candidate[] = []
+    const seen = new Set<string>()
+    const addCandidate = (mode: BlockMode): void => {
+      const block = this.renderStandalone(child, mode)
+      if (seen.has(block.text)) return
+      seen.add(block.text)
+      candidates.push({ mode, block })
+    }
+    for (const stripMode of strips) {
+      for (const layoutStyle of styles) addCandidate({ stripMode, layoutStyle })
+    }
+    // N1 で mark を外していない候補を先にする（ルビ・縦中横の mark を node へ移しただけの候補は、外していない側）。
+    candidates.sort((a, b) => Number(!b.block.stripped) - Number(!a.block.stripped))
+    if (candidates.length === 1 && !candidates[0].block.stripped) return { mode: candidates[0].mode, exact: false }
+
+    const parsed = new Map<Candidate, PMNode | null>()
+    for (const candidate of candidates) {
+      const doc = this.parseSerialized(candidate.block.text, child)
+      parsed.set(candidate, doc)
+      if (docMatchesBlocks(doc, expectedBlockCandidates(candidate.block.node, this.lineBreakPolicy))) return { mode: candidate.mode, exact: true }
+    }
+
+    // 変更前と同じ書き方（配置は変更前、mark は外さない）。
+    const legacyMode: BlockMode = { stripMode: 'none', layoutStyle: 'legacy' }
+    const legacyBlock = this.renderStandalone(child, legacyMode)
+    const legacy: Candidate = { mode: legacyMode, block: legacyBlock }
+    if (!seen.has(legacyBlock.text)) {
+      seen.add(legacyBlock.text)
+      parsed.set(legacy, this.parseSerialized(legacyBlock.text, child))
+      candidates.push(legacy)
+    }
+    const signatures = expectedBlockCandidates(child, this.lineBreakPolicy).map((list) => list.map(contentSignature))
+    for (const candidate of candidates) {
+      if (docMatchesSignatures(parsed.get(candidate) ?? null, signatures)) return { mode: candidate.mode, exact: false }
+    }
+    return { mode: legacyMode, exact: false }
+  }
+
+  /**
+   * block 1つだけを、空の出力・separator なしの writer で書く（確かめ用）。
+   * 端の空白から mark を外した（N1 の後の）block も返す。
+   */
+  private renderStandalone(node: PMNode, mode: BlockMode): RenderedBlock {
+    const writer = new MarkdownWriter(this.lineBreakPolicy, this.options)
+    writer.stripMode = mode.stripMode
+    writer.layoutStyle = mode.layoutStyle
+    writer.protectBackslashes = this.protectBackslashes
+    writer.decideBackslashes = false
     writer.serializeBlock(node, '')
-    return writer.output
+    return {
+      text: writer.output,
+      node: applyInlineAdjustments(node, writer.layoutContext.adjusted),
+      stripped: writer.layoutContext.stripped,
+    }
   }
 
   /** 書いた文字列を読み直す。失敗したら null。 */
@@ -334,18 +623,17 @@ class MarkdownWriter {
     }
   }
 
-  /** 書いた文字列を読み直すと、block が元の node と一致するか。 */
-  private roundTrips(serialized: string, node: PMNode): boolean {
-    const parsed = this.parseSerialized(serialized, node)
-    return parsed !== null && parsed.childCount === 1 && parsed.child(0).eq(node)
-  }
-
-  /** 入れ子の writer（引用・リスト・directive）へ、いまの S0 / S1 の指定を引き継ぐ。 */
+  /** 入れ子の writer（引用・リスト・directive）へ、いまの N1 の指定を引き継ぐ。 */
   private nestedWriter(withOptions: boolean): MarkdownWriter {
     const writer = withOptions
       ? new MarkdownWriter(this.lineBreakPolicy, this.options)
       : new MarkdownWriter(this.lineBreakPolicy)
-    writer.escapeSyntax = this.escapeSyntax
+    writer.stripMode = this.stripMode
+    writer.layoutStyle = this.layoutStyle
+    writer.layoutContext = this.layoutContext
+    writer.protectBackslashes = this.protectBackslashes
+    writer.decideBackslashes = this.decideBackslashes
+    writer.backslashContext = this.backslashContext
     return writer
   }
 
@@ -356,23 +644,14 @@ class MarkdownWriter {
     // the next block on reparse), so force a blank line at that boundary.
     // An empty paragraph (the per-line blank-line marker, e.g. a trailing
     // newline) needs no extra separator — it already reads as a blank line.
-    const isEmptyParagraph = nextBlock.type.name === 'paragraph' && nextBlock.childCount === 0
-    if (this.lastDocBlockType === 'blockquote' && nextBlock.type.name !== 'blockquote' && !isEmptyParagraph) {
-      if (this.output.endsWith('\n\n')) {
-        // already separated
-      } else if (this.output.endsWith('\n')) {
-        this.output += '\n'
-      } else {
-        this.output += '\n\n'
-      }
-      return
-    }
     // A9: 直前が html block で出力が改行済み (raw の末尾改行) のときは、
     // 区切りの改行を足さない。足すと空行が1つ挿入されてしまう。
-    if (this.lastDocBlockType === 'html_block_atom' && this.output.endsWith('\n')) {
-      return
-    }
-    this.output += '\n'
+    // 区切りの種類の判定は `sourcePreservation.ts` と共有する（元の文字列で書く連続の境目も同じ規則）。
+    const isEmptyParagraph = nextBlock.type.name === 'paragraph' && nextBlock.childCount === 0
+    this.output += resolveObsidianSeparator(
+      classifyObsidianSeparator(this.lastDocBlockType, nextBlock.type.name, isEmptyParagraph),
+      (suffix) => this.output.endsWith(suffix),
+    )
   }
 
   private inlineLineBreakToken(): string {
@@ -445,18 +724,14 @@ class MarkdownWriter {
     switch (node.type.name) {
       case 'paragraph':
         this.ensureBlockSeparator()
-        this.output += prefix + this.serializeInlineContent(node)
+        this.output += prefix + this.serializeParagraphInline(node)
         break
 
       case 'heading': {
         this.ensureBlockSeparator()
         const level = (node.attrs.level as number) ?? 1
         const hashes = '#'.repeat(level)
-        // 見出しの文字は `# ` の後に続くので、行頭の記法の対象にならない。
-        // 末尾の閉じの `#` だけ、書き終えた文字列に対して S1 のときエスケープする。
-        let inline = this.serializeInlineContent(node, false)
-        if (this.escapeSyntax) inline = escapeHeadingClosingSequence(inline)
-        this.output += prefix + hashes + ' ' + inline
+        this.output += prefix + hashes + ' ' + this.serializeInlineContent(node)
         break
       }
 
@@ -695,134 +970,166 @@ class MarkdownWriter {
   }
 
   /**
-   * @param startsAtLineStart 内容の先頭が行頭（container の接頭辞の後）に来るか。
-   *   段落は true、見出しは `# ` の後なので false（ESCAPE1 の行頭の記法の判定に使う）。
+   * 段落・見出しの inline を書く。装飾の入れ子・順・端の空白は `planInlineMarks` が決める。
+   * 画像・付箋・inline HTML・hardBreak の前ではすべて閉じ、後で開き直す。
    */
-  private serializeInlineContent(node: PMNode, startsAtLineStart = true): string {
-    const children: PMNode[] = []
-    node.forEach((child) => children.push(child))
+  private serializeParagraphInline(node: PMNode): string {
+    const previousChange = this.backslashContext.changed
+    const protectedText = this.serializeInlineContent(node)
+    // 変わり得る段落だけ従来の綴りでも書く。定義行は ref_def が元のソースを文字として持つため、
+    // その綴りへの保護の追加は定義の形を壊す。判定は読み込み・装飾と同じ唯一の関数に委ねる。
+    if (!this.protectBackslashes || !protectedText.includes('\\') || !protectedText.trimStart().startsWith('[')) return protectedText
+    const originalSpelling = this.serializeInlineContent(node, false)
+    if (isReferenceDefinitionLineText(originalSpelling)) {
+      this.backslashContext.changed = previousChange
+      return originalSpelling
+    }
+    return protectedText
+  }
 
-    let result = ''
-    let activeMarks: Mark[] = []
+  private serializeInlineContent(node: PMNode, protectBackslashes = this.protectBackslashes): string {
+    // 装飾（mark）が1つもない段落・見出しは、配置の計算を通さず、変更前と同じ書き方で書く。
+    if (!hasInlineMarks(node)) return this.serializeUnmarkedInline(node, protectBackslashes)
+    const schema = node.type.schema
+    const result = new MarkdownSaveInlineWriter(protectBackslashes)
+    let groupItems: InlineMarkItem[] = []
+    let groupChildren: PMNode[] = []
+    // N1 の後の子の列（mark を外したものがあるときだけ、確かめ用の block に使う）。
+    const adjustedChildren: PMNode[] = []
+    let adjusted = false
 
-    for (const child of children) {
-      if (child.type.name === 'nyoze_image') {
-        // SEC-5: serialize image node back to Markdown image syntax
-        for (let i = activeMarks.length - 1; i >= 0; i--) {
-          result += closeDelim(activeMarks[i])
+    const flushGroup = (): void => {
+      if (groupItems.length === 0) return
+      const plan = planInlineMarks(groupItems, this.stripMode, this.layoutStyle)
+      this.emitInlinePlan(result, plan)
+      if (plan.stripped) {
+        adjusted = true
+        this.layoutContext.stripped = true
+        for (const segment of plan.segments) {
+          adjustedChildren.push(segment.node === null ? schema.text(segment.text, segment.marks) : moveCommonChildMarksToNode(segment.node))
         }
-        activeMarks = []
+      } else {
+        for (const groupChild of groupChildren) {
+          const normalized = groupChild.isText ? groupChild : moveCommonChildMarksToNode(groupChild)
+          if (normalized !== groupChild) adjusted = true
+          adjustedChildren.push(normalized)
+        }
+      }
+      groupItems = []
+      groupChildren = []
+    }
+
+    node.forEach((child) => {
+      const encoded = encodeInlineChild(child)
+      const separator = this.inlineSeparatorText(child, encoded, protectBackslashes)
+      if (separator !== null) {
+        flushGroup()
+        result.raw(separator, protectBackslashes && child.type.name === 'nyoze_image' ? this.inlineSeparatorText(child, encoded, false)! : separator)
+        adjustedChildren.push(child)
+        return
+      }
+      if (child.isText) {
+        groupItems.push({ text: child.text ?? '', node: null, size: child.nodeSize, marks: child.marks })
+      } else {
+        // ルビ・縦中横: 中身は青空文庫の符号化した文字で、mark は node とその子に共通のもの。
+        groupItems.push({
+          text: encoded ?? '',
+          node: child,
+          size: child.nodeSize,
+          marks: resolveInlineNodeMarks(child),
+        })
+      }
+      groupChildren.push(child)
+    })
+    flushGroup()
+
+    if (adjusted) this.layoutContext.adjusted.set(node, node.copy(Fragment.fromArray(adjustedChildren)))
+    const text = result.finish()
+    this.backslashContext.changed ||= result.changedBackslashes
+    return text
+  }
+
+  /**
+   * 装飾を閉じて区切る inline node（画像・付箋・inline HTML・hardBreak、符号化できない node）が
+   * 書く文字。装飾の対象（text・ルビ・縦中横）なら null。
+   */
+  private inlineSeparatorText(child: PMNode, encoded: string | null, protectBackslashes: boolean): string | null {
+    switch (child.type.name) {
+      case 'nyoze_image': {
+        // SEC-5: serialize image node back to Markdown image syntax
         const alt = (child.attrs.alt as string) ?? ''
         const src = (child.attrs.src as string) ?? ''
         const title = child.attrs.title as string | null
-        const safeAlt = escapeMarkdownBracketText(alt)
-        const safeSrc = escapeMarkdownUrlDestination(src)
-        if (title) {
-          result += `![${safeAlt}](${safeSrc} "${escapeMarkdownTitle(title)}")`
-        } else {
-          result += `![${safeAlt}](${safeSrc})`
-        }
-        continue
+        const safeAlt = protectBackslashes ? markdownSaveAlt(alt) : `![${escapeMarkdownBracketText(alt)}]`
+        const safeSrc = protectBackslashes ? markdownSaveDestination(src, Boolean(title)) : escapeMarkdownUrlDestination(src)
+        return title
+          ? `${safeAlt}(${safeSrc} ${protectBackslashes ? markdownSaveTitle(title) : `"${escapeMarkdownTitle(title)}"`})`
+          : `${safeAlt}(${safeSrc})`
       }
-
-      if (child.type.name === 'noteAnchor') {
+      case 'noteAnchor':
         // 付箋アンカーは必ず正規 comment 形式へ戻す (Markdown 保存で位置を保持)
-        for (let i = activeMarks.length - 1; i >= 0; i--) {
-          result += closeDelim(activeMarks[i])
-        }
-        activeMarks = []
-        result += formatNoteAnchorComment((child.attrs.id as string) ?? '')
-        continue
-      }
+        return formatNoteAnchorComment((child.attrs.id as string) ?? '')
+      case 'html_inline_atom':
+        return (child.attrs.raw as string) ?? ''
+      case 'hardBreak':
+        return this.inlineLineBreakToken()
+      default:
+        if (child.isText) return null
+        return encoded === null ? child.textContent : null
+    }
+  }
 
-      if (child.type.name === 'html_inline_atom') {
-        // Close all marks, emit atom raw, marks reopen for next node
-        for (let i = activeMarks.length - 1; i >= 0; i--) {
-          result += closeDelim(activeMarks[i])
-        }
-        activeMarks = []
-        result += (child.attrs.raw as string) ?? ''
-        continue
-      }
-
-      if (child.type.name === 'hardBreak') {
-        for (let i = activeMarks.length - 1; i >= 0; i--) {
-          result += closeDelim(activeMarks[i])
-        }
-        activeMarks = []
-        result += this.inlineLineBreakToken()
-        continue
-      }
-
-      if (!child.isText) {
-        const encoded = encodeAozoraInlineNode(child)
-
-        if (encoded === null) {
-          result += child.textContent
-          continue
-        }
-
-        const childMarks = sortMarks(resolveInlineNodeMarks(child))
-        let commonLen = 0
-        while (
-          commonLen < activeMarks.length &&
-          commonLen < childMarks.length &&
-          activeMarks[commonLen].eq(childMarks[commonLen])
-        ) {
-          commonLen++
-        }
-        for (let i = activeMarks.length - 1; i >= commonLen; i--) {
-          result += closeDelim(activeMarks[i])
-        }
-        for (let i = commonLen; i < childMarks.length; i++) {
-          result += openDelim(childMarks[i])
-        }
-        activeMarks = childMarks
-        result += encoded
-        continue
-      }
-
-      const childMarks = sortMarks([...child.marks])
-
-      // Find common prefix length between active and child marks
-      let commonLen = 0
-      while (
-        commonLen < activeMarks.length &&
-        commonLen < childMarks.length &&
-        activeMarks[commonLen].eq(childMarks[commonLen])
-      ) {
-        commonLen++
-      }
-
-      // Close marks no longer active (innermost first)
-      for (let i = activeMarks.length - 1; i >= commonLen; i--) {
-        result += closeDelim(activeMarks[i])
-      }
-
-      // Open new marks
-      for (let i = commonLen; i < childMarks.length; i++) {
-        result += openDelim(childMarks[i])
-      }
-
-      activeMarks = childMarks
-      const rawText = this.normalizeInlineText(child.text ?? '')
-      // code の mark の中は S1 でも足さない（バッククォートで包んだ文字そのもの）。
-      const syntaxEscape = this.escapeSyntax && !childMarks.some((mark) => mark.type.name === 'code')
-      if (hasLinkMark(childMarks)) {
-        const bracketEscaped = escapeMarkdownBracketText(rawText)
-        result += syntaxEscape ? escapeStarAndUnderscore(bracketEscaped) : bracketEscaped
-      } else if (syntaxEscape) {
-        result += escapeSyntaxText(rawText, isAtLineStart(result, startsAtLineStart))
+  /** 装飾（mark）が1つもない段落・見出しの inline。配置の計算を通さず、変更前と同じ書き方で書く。 */
+  private serializeUnmarkedInline(node: PMNode, protectBackslashes: boolean): string {
+    const result = new MarkdownSaveInlineWriter(protectBackslashes)
+    node.forEach((child) => {
+      const encoded = encodeInlineChild(child)
+      const separator = this.inlineSeparatorText(child, encoded, protectBackslashes)
+      if (separator !== null) {
+        result.raw(separator, protectBackslashes && child.type.name === 'nyoze_image' ? this.inlineSeparatorText(child, encoded, false)! : separator)
+      } else if (child.isText) {
+        result.text(this.normalizeInlineText(child.text ?? ''))
       } else {
-        result += rawText
+        // ルビ・縦中横にも、見える backslash の同じ規則を当てる。
+        result.text(encoded ?? '')
       }
-    }
+    })
+    const text = result.finish()
+    this.backslashContext.changed ||= result.changedBackslashes
+    return text
+  }
 
-    // Close remaining marks
-    for (let i = activeMarks.length - 1; i >= 0; i--) {
-      result += closeDelim(activeMarks[i])
+  /** 配置した装飾の区切りと文字を、順に書く。 */
+  private emitInlinePlan(result: MarkdownSaveInlineWriter, plan: InlineMarkPlan): void {
+    for (const event of plan.events) {
+      if (event.type === 'open') result.raw(openDelim(event.name))
+      else if (event.type === 'close') result.raw(closeDelim(event.name, event.link, result.protectBackslashes), closeDelim(event.name, event.link, false))
+      else this.formatInlineSegment(result, event.segment)
     }
+  }
 
-    return result
+  /** code と元の綴りは raw、見えている文字は text として区別して書く。 */
+  private formatInlineSegment(result: MarkdownSaveInlineWriter, segment: PlannedSegment): void {
+    if (segment.node !== null) {
+      if (segment.code) result.raw(formatCodeSpan(segment.text))
+      else result.text(segment.text)
+      return
+    }
+    if (segment.code) {
+      result.raw(formatCodeSpan(this.normalizeInlineText(segment.text)))
+      return
+    }
+    const writePlain = (chunk: string): string => {
+      const text = this.normalizeInlineText(chunk)
+      if (segment.link !== null && !result.protectBackslashes) result.raw(escapeMarkdownBracketText(text))
+      else result.text(text, segment.link !== null ? SAVE_BRACKET_ESCAPES : undefined, segment.link !== null)
+      return ''
+    }
+    const spelling = segment.marks.find((mark) => mark.type.name === SOURCE_SPELLING_MARK_NAME)
+    if (spelling === undefined) writePlain(segment.text)
+    else writeSourceSpelling(segment.text, spelling.attrs.raw, writePlain, (raw) => {
+      result.raw(raw)
+      return ''
+    })
   }
 }

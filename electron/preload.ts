@@ -5,6 +5,7 @@ import {
   normalizeInputStrategyCapability,
   type InputStrategyCapability,
 } from './inputStrategyGate'
+import { RUBY_OVERLAY_CHANNEL } from './rubyOverlayGate'
 import type { UiLanguageMode } from '../src/settings/types'
 import type { NyozeNotesStore } from '../src/project/noteStore'
 import type { ProvisionalNoteCleanupRequest } from '../src/project/provisionalNoteCleanup'
@@ -140,9 +141,8 @@ const localImePilotBridge = resolveLocalImePilotAvailable()
  * PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値。
  *
  * preloadはsandbox実行で`app.isPackaged`もplatformの区分も判定できないため、
- * **mainの同期IPCだけを正本**にする。rendererへ渡すのは形を確かめた3つの値だけで、
- * session操作・本文・path・診断・任意payloadは載せない。既定OFFの設定はsettings.json側が
- * 正本なので、この値だけで機能がONになることはない（開発用の強制ONを除く）。
+ * **mainの同期IPCだけを正本**にする。rendererへ渡すのは形を確かめたcapabilityと起動時の互換設定だけで、
+ * session操作・本文・path・診断・任意payloadは載せない。起動時の互換設定はmainがsettings.jsonを同期で読み、renderer生成前に確定する。
  * 強制ONは、mainの値に加えて、このprocessのenvも確かめる（mainは効かない指定のenvを落とす）。
  */
 function resolveInputStrategy(): InputStrategyCapability {
@@ -156,6 +156,19 @@ function resolveInputStrategy(): InputStrategyCapability {
   }
 }
 const inputStrategy = Object.freeze({ ...resolveInputStrategy() })
+
+/**
+ * EDITOR-RUBY-OVERLAY-P1: 製品の既定の表示。mainの同期IPCだけを正本にする（preloadはapp.isPackagedを判定できない）。
+ * 無効のときは何も露出しない（`nyozeBridge.rubyOverlay`は`undefined`）。
+ */
+const rubyOverlayBridge = (() => {
+  try {
+    const mode = ipcRenderer.sendSync(RUBY_OVERLAY_CHANNEL)
+    return mode === 'hidden' ? Object.freeze({ enabled: true as const, rt: 'hidden' as const }) : undefined
+  } catch {
+    return undefined
+  }
+})()
 
 const e2eBridge = resolveMainE2eEnabled()
   ? {
@@ -763,4 +776,6 @@ contextBridge.exposeInMainWorld('nyozeBridge', {
   localImePilot: localImePilotBridge,
   // PIS-S10-ENTRY1a: 入力の方式のread-onlyな固定値（mainが正本）。
   inputStrategy,
+  // EDITOR-RUBY-OVERLAY-P1: 製品の既定の表示。非packagedの切る指定のときは存在しない。
+  rubyOverlay: rubyOverlayBridge,
 })

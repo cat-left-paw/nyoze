@@ -2,6 +2,7 @@ import type { Fragment, Mark, Node as PMNode } from '@tiptap/pm/model'
 import { encodeAozoraInlineNode } from '../io/clipboardSlicePlainText'
 import {
   formatDirectiveToken,
+  isValidIndentLevel,
   NYOZE_BLANK_PAGE_NODE_NAME,
   NYOZE_DIRECTIVE_NODE_NAME,
   NYOZE_PAGE_BREAK_NODE_NAME,
@@ -14,6 +15,7 @@ import {
   type ResolvedExternalExportOptions,
 } from './externalExportOptions'
 import type { BookExportBookInfo, BookExportChapterInfo } from './bookExportMetadata'
+import { SOURCE_SPELLING_MARK_NAME } from '../io/sourceSpelling'
 
 export type AozoraTextExportWarningCode =
   | 'unsupported-node'
@@ -183,6 +185,8 @@ function resolveInlineNodeMarks(node: PMNode): Mark[] {
 function emitUnsupportedMarks(ctx: ExportContext, marks: Mark[]): void {
   for (const mark of marks) {
     if (SUPPORTED_MARK_NAMES.has(mark.type.name)) continue
+    // MD-ESCAPE-EXPLICIT1: 元の綴りを覚える mark は書き出しの対象外（本文の文字は `*` のまま。警告も出さない）。
+    if (mark.type.name === SOURCE_SPELLING_MARK_NAME) continue
     pushWarning(ctx, {
       code: 'unsupported-mark',
       message: `Unsupported mark "${mark.type.name}" was stripped during Aozora text export`,
@@ -390,7 +394,8 @@ function serializeDirectiveBlock(ctx: ExportContext, node: PMNode, level: number
 
   if (attrs.kind === 'indent') {
     const directiveLevel = attrs.level ?? Number(attrs.name) ?? 1
-    if (directiveLevel >= 1 && directiveLevel <= 6) {
+    // 段数の範囲は記法の正本（`INDENT_MIN_LEVEL..INDENT_MAX_LEVEL`）と同じ（BLOCK-INDENT-LEVELS1）。
+    if (isValidIndentLevel(directiveLevel)) {
       // AozoraEpub3 互換: 字下げは現在の字下げからの相対値ではなく、行端からの
       // 絶対字下げ量として出す。blockquote / 他の indent とネストしている場合は
       // 現在の ambient level に加算する（開始・終了注記自体は子の leaf 側で

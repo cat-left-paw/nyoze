@@ -5,6 +5,8 @@ import type { FileExplorerRole } from "../../project/fileExplorerRoles";
 import { ProjectRoleIcon } from "./projectRoleIcons";
 import { useLocalImeDraftDirtyTabId } from "../hooks/useLocalImeDraftDirty";
 import { resolveLocalImeEffectiveTabDirty } from "../../editor-core/features/localImeDraftDirtyState";
+import { useEditorTabDrag } from "../hooks/useEditorTabDrag";
+import { resolveDropEdge, type TabReorderRequest } from "../utils/tabReorder";
 
 export type EditorTabStripProps = {
   paragraphPlainDraftDirtyTabId?: string | null;
@@ -18,6 +20,8 @@ export type EditorTabStripProps = {
   onSetActiveTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onAddTab: () => void;
+  /** tab の drag による並べ替え（共通の tab setter を通す。EDITOR-TAB-REORDER1）。 */
+  onReorderTab: (request: TabReorderRequest) => void;
   tabLimitReached: boolean;
   /**
    * タブ列右端（右ペインが開いていればそのすぐ左側）に固定表示する、非装飾系の
@@ -36,6 +40,7 @@ export function EditorTabStrip({
   onSetActiveTab,
   onCloseTab,
   onAddTab,
+  onReorderTab,
   tabLimitReached,
   editorTabActionsSlot,
 }: EditorTabStripProps) {
@@ -44,10 +49,11 @@ export function EditorTabStrip({
    * `tab.dirty`（canonical host dirty）は書き換えず、表示時に OR するだけ。
    */
   const draftDirtyTabId = useLocalImeDraftDirtyTabId(activeTabId);
+  const drag = useEditorTabDrag(onReorderTab);
   return (
     <div className="editor-tab-strip">
-      <div className="editor-tab-list">
-        {tabs.map((tab) => {
+      <div className="editor-tab-list" ref={drag.listRef}>
+        {tabs.map((tab, index) => {
           const tabRole = tab.filePath
             ? tabRoles?.get(normalizeForCompare(tab.filePath))
             : undefined;
@@ -60,6 +66,10 @@ export function EditorTabStrip({
             <button
               key={tab.id}
               className={`editor-tab${tab.id === activeTabId ? " active" : ""}`}
+              data-tab-id={tab.id}
+              data-dragging={drag.view.draggingTabId === tab.id ? "true" : undefined}
+              data-drop-edge={resolveDropEdge(index, tabs.length, drag.view.target) ?? undefined}
+              onPointerDown={(e) => drag.onTabPointerDown(e, tab.id)}
               onClick={() => onSetActiveTab(tab.id)}
               type="button"
             >

@@ -1,10 +1,18 @@
+import { SOURCE_SPELLING_MARK_NAME } from '../../io/sourceSpelling'
+
 /** Mark names are the visual subset of the Host schema. No PM DOM mutation. */
 export const SURFACE_MARK_NAMES = ['bold', 'italic', 'strike', 'underline', 'highlight', 'code', 'link'] as const
 type SurfaceMark = (typeof SURFACE_MARK_NAMES)[number]
 
+/**
+ * MD-ESCAPE-EXPLICIT1: `sourceSpelling`（ファイルの `\*` `&amp;` の元の綴りを覚える mark）は見た目を持たないので、
+ * 入力面の書式の判定では無視する（同じ綴りの文字の run の間にカーソルがあると、次に打つ文字の mark に入る。
+ * 未対応の mark として扱うと、入力面の書式の読み直しを飛ばしてしまう）。
+ */
 export function classifySurfaceMarks(names: readonly string[]): SurfaceMark[] | null {
-  if (names.some(name => !SURFACE_MARK_NAMES.includes(name as SurfaceMark))) return null
-  return [...new Set(names as SurfaceMark[])].sort()
+  const visual = names.filter(name => name !== SOURCE_SPELLING_MARK_NAME)
+  if (visual.some(name => !SURFACE_MARK_NAMES.includes(name as SurfaceMark))) return null
+  return [...new Set(visual as SurfaceMark[])].sort()
 }
 
 export function sameSurfaceMarks(a: readonly string[], b: readonly string[]): boolean {

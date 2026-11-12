@@ -11,6 +11,19 @@ export function shouldRestoreContextMenuFocus(owner: ContextMenuFocusOwner): boo
   return owner === 'body' || owner === 'host' || owner === 'surface' || owner === 'menu'
 }
 
+export type EditorFocusRestoreTarget = 'surface' | 'host' | 'none'
+
+/**
+ * PIS-SETTINGS-FOCUS-RETURN1: modal を閉じて、開く前の focus（入力面）へ戻すときの戻し先。
+ * modal を開いている間に入力の方式が従来の入力（Host）へ変わった場合、入力面は使えないので Host の本文へ戻す。
+ * どちらにも戻せないとき（Source Mode・段落プレーン編集・read-only・変換中など）は `none`（呼び出し側が従来どおりに扱う）。
+ */
+export function resolveEditorFocusRestoreTarget(input: { surfaceEligible: boolean; hostEligible: boolean; composing: boolean }): EditorFocusRestoreTarget {
+  if (input.surfaceEligible) return 'surface'
+  if (input.hostEligible && !input.composing) return 'host'
+  return 'none'
+}
+
 /** 許可は同期focus呼び出しの間だけ存在する。状態名から許可を推測しない。 */
 export function createHostFocusPermissions(record: SurfaceRecord) {
   let pending: HostFocusPermission | null = null

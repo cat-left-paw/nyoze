@@ -1,4 +1,5 @@
 import type { EditorView } from '@tiptap/pm/view'
+import { serializeClipboardSliceToPlainText } from '../io/clipboardSlicePlainText'
 import { stripNoteAnchorsFromSlice } from './clipboardNoteAnchorStrip'
 import { markNyozeClipboardDom } from './clipboardInternalMark'
 import { canRestoreSliceFromHtml } from './clipboardNodeCodec'
@@ -17,7 +18,8 @@ export function withInputSurfaceCutContext<T>(view: EditorView, context: Surface
 
 /**
  * Mirrors ProseMirror's default copy/cut clipboard write, and adds `text/markdown`
- * with the same Aozora-aware payload as `text/plain` (from `clipboardTextSerializer`).
+ * with the same Aozora-aware payload as `text/plain` (from `clipboardTextSerializer`), except that
+ * characters with a `sourceSpelling` mark are written in their source spelling (`\*`, `&amp;`).
  * 書く slice からは noteAnchor を取り除き（HTML も文字も）、同一 ID の付箋 anchor が
  * paste で複製されないようにする。
  * CLIPBOARD-INTERNAL-PASTE1: HTML の `data-pm-slice` の要素に Nyoze の印を付ける。貼り付けは
@@ -48,7 +50,8 @@ export function handleEditorClipboardCopyOrCut(view: EditorView, event: Event): 
   data.clearData()
   data.setData('text/html', dom.innerHTML)
   data.setData('text/plain', text)
-  data.setData('text/markdown', text)
+  // MD-ESCAPE-EXPLICIT1: `text/plain` は文字（`*`）、`text/markdown` は元の綴り（`\*`）。
+  data.setData('text/markdown', serializeClipboardSliceToPlainText(writeSlice, { rawSpelling: true }))
 
   if (event.type === 'cut') {
     if (!touchesNoteAnchor) {

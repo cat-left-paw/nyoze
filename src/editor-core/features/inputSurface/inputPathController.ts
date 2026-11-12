@@ -153,7 +153,11 @@ export function connectLazyInputSurface<T extends SwitchableSurface & { destroy(
 }): { destroy(): void } {
   let surface: T | null = null
   const ensure = () => {
-    if (!surface) { surface = options.create(); options.onChange(surface) }
+    if (!surface) {
+      surface = options.create()
+      if (surface) noteInputPathDiagnostic({ kind: 'surface-created' })
+      options.onChange(surface)
+    }
     return surface
   }
   if (isInputSurfacePathActive()) {

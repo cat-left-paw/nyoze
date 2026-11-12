@@ -3,6 +3,7 @@ import type { PreeditHighlight } from './preeditHighlight'
 import { LOCAL_IME_LOCAL_WINDOW_TYPOGRAPHY_PROPERTIES } from '../localImeLocalWindowTypographyParity'
 import { classifySurfaceMarks, domSurfaceMarks, sameSurfaceMarks, surfaceMarkStyle } from './surfaceMarks'
 import { isOpaqueColor, isTransparentColor, resolveOpaqueBackdrop } from './surfaceBackdrop'
+import { RETAINED_TEXT_COLOR_VARIABLE, resolveRetainedTextColorForSurface } from './retainedDisplay'
 
 // Typography selectors and theme variables depend on this small ancestor chain,
 // never on the manuscript's text. Ancestor/viewport changes invalidate this snapshot;
@@ -28,6 +29,9 @@ export function createSurfaceTypography(options: {
   let background = '#fff', markBackground: string | undefined
   let previousBlock: HTMLElement | null | undefined
   let previousSignature: string | undefined
+  // 最初の下地を読むまで（書式が対応外で読めない場合を含む）も、保持の色の変数が未定義にならないようにする
+  // （未定義だと、固定のCSSの規則が無効になり、色が継承色になる）。
+  element.style.setProperty(RETAINED_TEXT_COLOR_VARIABLE, resolveRetainedTextColorForSurface(background, markBackground))
   return (force = false) => {
     const owner = options.currentOwner(), block = owner.insertionTextblock()
     const caret = owner.caretElement(), desired = classifySurfaceMarks(owner.nextMarkNames())
@@ -66,6 +70,8 @@ export function createSurfaceTypography(options: {
     previousBlock = block
     previousSignature = signature
     preedit.configure(background, markBackground)
+    // PIS-RETAINED-TEXT-COLOR1: 保持文字の色。下地を求めた同じ時点で、入力面自身の変数へ書く（1打ごとには計算しない）。
+    element.style.setProperty(RETAINED_TEXT_COLOR_VARIABLE, resolveRetainedTextColorForSurface(background, markBackground, style.color))
     visual()
   }
 }

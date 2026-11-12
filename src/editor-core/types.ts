@@ -1,6 +1,6 @@
 import type { SpecialInlineAdjacentPmInspection } from './features/specialInlineBoundaryDiagnostics'
 import type { NoteColorId } from '../project/noteColor'
-import type { DirectiveDescriptor } from './io/customBlockDirective'
+import type { DirectiveDescriptor, IndentStepDirection } from './io/customBlockDirective'
 import type { AozoraTextExportResult, AozoraTextExportOptions } from './export/aozoraTextExport'
 import type { LeMEMarkdownExportResult, LeMEMarkdownExportOptions } from './export/lemeMarkdownExport'
 import type { DendenMarkdownExportResult, DendenMarkdownExportOptions } from './export/dendenMarkdownExport'
@@ -150,6 +150,8 @@ export type CommandAvailability = {
   canBlockDirective: boolean
   /** 現在 selection が属する directive の正規 token (例: 'align-center')。なければ null。 */
   blockDirectiveToken: string | null
+  /** EDITOR-PARAGRAPH-REPARSE1: 選択が 1 つの段落・見出しの中にあり、「この段落の記法を反映」を実行できる場面か（構造だけの判定。結果は見ない）。 */
+  canReparseParagraph: boolean
   /** 現在 selection が改ページ marker (`nyozePageBreak`) を NodeSelection として選択しているか */
   canDeletePageBreak: boolean
   noteAnchorContextId: string | null
@@ -229,6 +231,19 @@ export interface EditorCoreHandle {
 
   /** Remove the enclosing custom block directive wrapper, keeping its content. */
   removeCustomBlockDirective(): boolean
+
+  /**
+   * Step the innermost indent decoration by one level (BLOCK-INDENT-LEVELS1). 'increase' wraps outside a
+   * decoration with `indent-1`, replaces align / style with `indent-1`, and adds one level inside an indent
+   * (unavailable at 20); 'decrease' removes one level and removes the wrapper from level 1 (unavailable
+   * outside an indent). One transaction; returns true if the document changed.
+   */
+  stepCustomBlockIndent(direction: IndentStepDirection): boolean
+  /**
+   * EDITOR-PARAGRAPH-REPARSE1: 選択のある段落・見出しの記法を、ファイルの読み込みと同じ規則で読み直して表示に反映する（明示のコマンド）。
+   * 'applied' = 置き換えた / 'nothing' = 反映するものがない（transaction は出さない）/ 'unavailable' = 使えない場面（変換中・Paragraph Plain・Source Mode など）。
+   */
+  reparseCurrentParagraph(): 'applied' | 'nothing' | 'unavailable'
 
   /** Canonical token of the directive enclosing the current selection, or null. */
   getCustomBlockDirectiveToken(): string | null
@@ -411,6 +426,22 @@ export interface EditorCoreHandle {
     onDetachedByEdit?: ((ids: readonly string[]) => void) | null,
   ): void
 
+  /**
+   * EDITOR-INPUT-RULE-INLINE-NODE1: code の入力規則（`` ` ``）が、中身の inline node（ルビ・付箋など）で
+   * 変換しなかったときの通知（表示と連打の抑制は受け手が持つ）。
+   */
+  setInlineMarkInputRuleNoticeHandler(
+    handler: ((reason: import('./features/inlineMarkInputRules').InlineMarkInputRuleNoticeReason) => void) | null,
+  ): void
+
+  /**
+   * PIS-INPUT-BLOCK-WARN1: 長文編集モードで、確定先の位置だけで入力が拒否されると打つ前に分かったときの通知
+   * （縦中横の中・付箋のマーカーを含む範囲・段落を置けないblockのatomの直後）。表示と連打の抑制は受け手が持つ。
+   */
+  setInputRestrictionNoticeHandler(
+    handler: ((notice: import('./features/inputSurface/inputRestrictionNotice').InputRestrictionNotice) => void) | null,
+  ): void
+
   /** Get the current link href at cursor, or undefined */
   getLinkHref(): string | undefined
 
@@ -471,6 +502,8 @@ export interface EditorCoreHandle {
   restoreDocumentState(key: string, expectedMarkdown: string, filePath: string | null): boolean
   discardDocumentState(key: string): void
   readDocumentStateDiagnosticsForE2e(): import('./features/documentStateCapsule').DocumentStateDiagnostics
+  /** MD-SOURCE-PRESERVE1: 元の文字列で書いた子の数・境目の確かめ・全体を今どおりに倒した理由（試験専用。製品の判断に使わない）。 */
+  readSourcePreservationDiagnosticsForE2e(): import('./features/sourcePreservationController').SourcePreservationDiagnostics
   injectDocumentStateRestoreFailureForE2e(kind: 'post-check' | null): void
 
   /** Subscribe to log events; returns unsubscribe function */

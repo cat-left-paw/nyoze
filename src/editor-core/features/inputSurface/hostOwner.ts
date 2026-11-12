@@ -14,9 +14,9 @@ import { AllSelection } from '@tiptap/pm/state'
 import { resolveSurfacePaste } from './clipboardPolicy'
 import { revealCaret } from './navigation/scroll'
 import { normalizeRubyInsertionRange } from './rubyInsertionPosition'
+import { COMMIT_TARGET_RESTRICTION_REASON, resolveBlockAtomTarget, resolveCommitTargetRestriction } from './commitTargetRestriction'
 import type { CompositionPresentation } from './compositionPresentation'
 import { resolveHostPreeditContext } from './preeditContext'
-import { isProtectedTcySelection } from '../tcyFormatting'
 import { notifyNoteAnchorProtection } from '../noteAnchorProtectionNotice'
 import { resolveSelectionMirror, sameMirrorRange, type SelectionMirror } from './selectionMirror'
 
@@ -52,6 +52,11 @@ export function createHostOwner(view: EditorView, getIdentity: () => string, rec
     proveSnapshot(snapshot) {
       return !view.isDestroyed && view.editable && judgeInsertion(snapshot, { identity: getIdentity(), docRef: view.state.doc }, '') === 'ready'
     },
+    // BLOCK-WARN1: `commitText`の拒否と同じ関数。証明済みのsnapshot（同じidentity・同じDoc）でだけ判定する。
+    resolveCommitTargetRestriction(snapshot) {
+      if (view.isDestroyed || !view.editable || judgeInsertion(snapshot, { identity: getIdentity(), docRef: view.state.doc }, '') !== 'ready') return null
+      return resolveCommitTargetRestriction(view.state, snapshot)
+    },
     commitText(snapshot: OwnerInsertionSnapshot, text: string, unchangedOriginal?: SelectionMirror | null) {
       const verdict = judgeInsertion(snapshot, { identity: getIdentity(), docRef: view.state.doc }, text)
       if (verdict !== 'ready') return verdict
@@ -62,23 +67,19 @@ export function createHostOwner(view: EditorView, getIdentity: () => string, rec
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, snapshot.to)).setMeta('addToHistory', false))
           return view.state.doc === snapshot.docRef && view.state.selection.empty && view.state.selection.head === snapshot.to ? 'committed' : 'dispatch-rejected'
         }
-        // GAP-SAFETY1: Hostのbeforeinputと同じ述語。TCYの中・TCYを選択中の入力は確定しない。
-        const current = view.state.selection
-        const target = current.from === snapshot.from && current.to === snapshot.to ? view.state
-          : view.state.apply(view.state.tr.setSelection(TextSelection.create(view.state.doc, snapshot.from, snapshot.to)))
-        if (isProtectedTcySelection(target)) {
-          record('owner-commit-blocked', { reason: 'tcy-protected', from: snapshot.from, to: snapshot.to })
+        // BLOCK-WARN1: 確定先の位置だけで拒否される場面（TCY・付箋のマーカーを含む範囲・段落を置けないblockのatomの直後）は、
+        // 入力面の事前の判定（beforeinput / compositionstart）と同じ1つの関数で判定する。
+        const restriction = resolveCommitTargetRestriction(view.state, snapshot)
+        if (restriction) {
+          record('owner-commit-blocked', { reason: COMMIT_TARGET_RESTRICTION_REASON[restriction], from: snapshot.from, to: snapshot.to })
           return 'protected-target'
         }
+        const current = view.state.selection
         // B15: blockのatom（leafのblock node）を選択中の確定は、nodeを消さず、直後の新しい段落へ入れる。
-        if (current instanceof NodeSelection && current.from === snapshot.from && current.to === snapshot.to
-          && current.node.isBlock && current.node.isLeaf) {
-          const after = current.to, $after = view.state.doc.resolve(after), index = $after.index()
-          const type = $after.parent.contentMatchAt(index).defaultType
-          if (!type?.isTextblock || type.spec.code || !$after.parent.canReplaceWith(index, index, type)) {
-            record('owner-commit-blocked', { reason: 'no-paragraph-after-block-atom', from: snapshot.from, to: snapshot.to })
-            return 'dispatch-rejected'
-          }
+        const blockAtom = resolveBlockAtomTarget(view.state, snapshot)
+        if (blockAtom.kind === 'blocked') return 'dispatch-rejected'
+        if (blockAtom.kind === 'ready') {
+          const { after, type } = blockAtom
           const tr = view.state.tr.insert(after, type.create(null, view.state.schema.text(text)))
           // B033: Hostの`deflt`と同じく、確定は見える範囲への移動を求める（実行は`caretReveal.ts`）。
           view.dispatch(tr.setSelection(TextSelection.create(tr.doc, after + 1 + text.length)).scrollIntoView())
